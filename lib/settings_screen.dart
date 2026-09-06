@@ -1,3 +1,5 @@
+import 'theme/spartan_theme.dart';
+
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -20,32 +22,26 @@ class SettingsScreen extends StatefulWidget {
   });
 
   @override
-  State<SettingsScreen> createState() =>
-      _SettingsScreenState();
+  State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
-class _SettingsScreenState
-    extends State<SettingsScreen> {
+class _SettingsScreenState extends State<SettingsScreen> {
   String? _avatarPath;
 
   bool _isUploadingAvatar = false;
 
   String? _backgroundPath;
+  bool _lightWallpaperEnabled = false;
 
   double _backgroundOpacity = 0.35;
 
-  int _selectedTextColor =
-      0xFFFFFFFF;
+  int _selectedTextColor = 0xFFFFFFFF;
 
-  String _selectedMode =
-      'random';
+  String _selectedMode = 'random';
 
-  final List<String> _customStatuses =
-      [];
+  final List<String> _customStatuses = [];
 
-  final TextEditingController
-      _newStatusController =
-      TextEditingController();
+  final TextEditingController _newStatusController = TextEditingController();
 
   @override
   void initState() {
@@ -70,10 +66,7 @@ class _SettingsScreenState
   // ========================================
 
   Future<void> _loadAvatar() async {
-    final avatar =
-        StorageService.getAvatar(
-      widget.username,
-    );
+    final avatar = StorageService.getAvatar(widget.username);
 
     if (!mounted) {
       return;
@@ -86,56 +79,36 @@ class _SettingsScreenState
 
   Future<void> _pickAvatar() async {
     try {
-      final picker =
-          ImagePicker();
+      final picker = ImagePicker();
 
-      final XFile? image =
-          await picker.pickImage(
-        source:
-            ImageSource.gallery,
-      );
+      final XFile? image = await picker.pickImage(source: ImageSource.gallery);
 
       if (image == null) {
         return;
       }
 
       setState(() {
-        _isUploadingAvatar =
-            true;
+        _isUploadingAvatar = true;
       });
 
-      StorageService.saveAvatar(
-        widget.username,
-        image.path,
-      );
+      StorageService.saveAvatar(widget.username, image.path);
 
-      await SocketService.instance
-          .setAvatarFromPath(
-        image.path,
-      );
+      await SocketService.instance.setAvatarFromPath(image.path);
 
       if (!mounted) {
         return;
       }
 
       setState(() {
-        _avatarPath =
-            image.path;
+        _avatarPath = image.path;
 
-        _isUploadingAvatar =
-            false;
+        _isUploadingAvatar = false;
       });
 
-      ScaffoldMessenger.of(context)
-          .showSnackBar(
+      ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text(
-            'Аватарка обновлена',
-          ),
-          backgroundColor:
-              Color(
-            0xFFD4AF37,
-          ),
+          content: Text('Аватарка обновлена'),
+          backgroundColor: SpartanPalette.blue,
         ),
       );
     } catch (e) {
@@ -144,32 +117,20 @@ class _SettingsScreenState
       }
 
       setState(() {
-        _isUploadingAvatar =
-            false;
+        _isUploadingAvatar = false;
       });
 
-      ScaffoldMessenger.of(context)
-          .showSnackBar(
-        SnackBar(
-          content: Text(
-            'Ошибка: $e',
-          ),
-          backgroundColor:
-              Colors.red,
-        ),
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Ошибка: $e'), backgroundColor: Colors.red),
       );
     }
   }
 
   Future<void> _deleteAvatar() async {
     try {
-      StorageService.saveAvatar(
-        widget.username,
-        '',
-      );
+      StorageService.saveAvatar(widget.username, '');
 
-      await SocketService.instance
-          .deleteAvatar();
+      await SocketService.instance.deleteAvatar();
 
       if (!mounted) {
         return;
@@ -179,14 +140,10 @@ class _SettingsScreenState
         _avatarPath = null;
       });
 
-      ScaffoldMessenger.of(context)
-          .showSnackBar(
+      ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text(
-            'Аватарка удалена',
-          ),
-          backgroundColor:
-              Colors.red,
+          content: Text('Аватарка удалена'),
+          backgroundColor: Colors.red,
         ),
       );
     } catch (e) {
@@ -194,14 +151,10 @@ class _SettingsScreenState
         return;
       }
 
-      ScaffoldMessenger.of(context)
-          .showSnackBar(
+      ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            'Ошибка удаления: $e',
-          ),
-          backgroundColor:
-              Colors.red,
+          content: Text('Ошибка удаления: $e'),
+          backgroundColor: Colors.red,
         ),
       );
     }
@@ -212,8 +165,8 @@ class _SettingsScreenState
   // ========================================
 
   Future<void> _loadBackground() async {
-    final bg =
-        await StorageService.getBackground();
+    final bg = await StorageService.getBackground();
+    final enabled = await StorageService.isLightWallpaperEnabled();
 
     if (!mounted) {
       return;
@@ -221,82 +174,58 @@ class _SettingsScreenState
 
     String? validBackground;
 
-    if (bg != null &&
-        bg.isNotEmpty) {
-      final file =
-          File(bg);
+    if (bg != null && bg.isNotEmpty) {
+      final file = File(bg);
 
       if (file.existsSync()) {
-        validBackground =
-            bg;
+        validBackground = bg;
       }
     }
 
     setState(() {
-      _backgroundPath =
-          validBackground;
+      _backgroundPath = validBackground;
+      _lightWallpaperEnabled = enabled;
     });
   }
 
-  Future<void>
-      _loadBackgroundOpacity() async {
-    final opacity =
-        await StorageService
-            .getBackgroundOpacity();
+  Future<void> _loadBackgroundOpacity() async {
+    final opacity = await StorageService.getBackgroundOpacity();
 
     if (!mounted) {
       return;
     }
 
     setState(() {
-      _backgroundOpacity =
-          opacity;
+      _backgroundOpacity = opacity;
     });
   }
 
-  Future<String>
-      _copyBackgroundToAppStorage(
-    String sourcePath,
-  ) async {
-    final sourceFile =
-        File(sourcePath);
+  Future<String> _copyBackgroundToAppStorage(String sourcePath) async {
+    final sourceFile = File(sourcePath);
 
-    final directory =
-        await getApplicationDocumentsDirectory();
+    final directory = await getApplicationDocumentsDirectory();
 
-    final mediaDirectory =
-        Directory(
+    final mediaDirectory = Directory(
       '${directory.path}${Platform.pathSeparator}spartan_media',
     );
 
     if (!await mediaDirectory.exists()) {
-      await mediaDirectory.create(
-        recursive: true,
-      );
+      await mediaDirectory.create(recursive: true);
     }
 
-    String extension =
-        '';
+    String extension = '';
 
-    final fileName =
-        sourceFile.uri.pathSegments.isNotEmpty
-            ? sourceFile.uri.pathSegments.last
-            : '';
+    final fileName = sourceFile.uri.pathSegments.isNotEmpty
+        ? sourceFile.uri.pathSegments.last
+        : '';
 
-    final dotIndex =
-        fileName.lastIndexOf('.');
+    final dotIndex = fileName.lastIndexOf('.');
 
-    if (dotIndex >= 0 &&
-        dotIndex <
-            fileName.length - 1) {
-      extension =
-          fileName.substring(
-        dotIndex,
-      );
+    if (dotIndex >= 0 && dotIndex < fileName.length - 1) {
+      extension = fileName.substring(dotIndex);
     }
 
-    if (extension.isEmpty ||
-        extension.length > 6) {
+    if (extension.isEmpty || extension.length > 6) {
       extension = '.jpg';
     }
 
@@ -308,19 +237,15 @@ class _SettingsScreenState
     // Удаляем старые варианты нашего
     // пользовательского фона.
     if (await mediaDirectory.exists()) {
-      final files =
-          mediaDirectory.listSync();
+      final files = mediaDirectory.listSync();
 
       for (final entity in files) {
         if (entity is File) {
-          final name =
-              entity.uri.pathSegments.isNotEmpty
-                  ? entity.uri.pathSegments.last
-                  : '';
+          final name = entity.uri.pathSegments.isNotEmpty
+              ? entity.uri.pathSegments.last
+              : '';
 
-          if (name.startsWith(
-            'chat_background.',
-          )) {
+          if (name.startsWith('chat_background.')) {
             try {
               await entity.delete();
             } catch (_) {}
@@ -329,23 +254,17 @@ class _SettingsScreenState
       }
     }
 
-    final copiedFile =
-        await sourceFile.copy(
-      destinationPath,
-    );
+    final copiedFile = await sourceFile.copy(destinationPath);
 
     return copiedFile.path;
   }
 
   Future<void> _pickBackground() async {
     try {
-      final picker =
-          ImagePicker();
+      final picker = ImagePicker();
 
-      final XFile? image =
-          await picker.pickImage(
-        source:
-            ImageSource.gallery,
+      final XFile? image = await picker.pickImage(
+        source: ImageSource.gallery,
         imageQuality: 90,
         maxWidth: 2000,
         maxHeight: 2000,
@@ -355,35 +274,22 @@ class _SettingsScreenState
         return;
       }
 
-      final persistentPath =
-          await _copyBackgroundToAppStorage(
-        image.path,
-      );
+      final persistentPath = await _copyBackgroundToAppStorage(image.path);
 
-      await StorageService
-          .saveBackground(
-        persistentPath,
-      );
+      await StorageService.saveBackground(persistentPath);
 
       if (!mounted) {
         return;
       }
 
       setState(() {
-        _backgroundPath =
-            persistentPath;
+        _backgroundPath = persistentPath;
       });
 
-      ScaffoldMessenger.of(context)
-          .showSnackBar(
+      ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text(
-            'Фон обновлён',
-          ),
-          backgroundColor:
-              Color(
-            0xFFD4AF37,
-          ),
+          content: Text('Фон обновлён'),
+          backgroundColor: SpartanPalette.blue,
         ),
       );
     } catch (e) {
@@ -391,33 +297,23 @@ class _SettingsScreenState
         return;
       }
 
-      ScaffoldMessenger.of(context)
-          .showSnackBar(
+      ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(
-            'Ошибка выбора фона: $e',
-          ),
-          backgroundColor:
-              Colors.red,
+          content: Text('Ошибка выбора фона: $e'),
+          backgroundColor: Colors.red,
         ),
       );
     }
   }
 
   Future<void> _removeBackground() async {
-    final oldBackground =
-        _backgroundPath;
+    final oldBackground = _backgroundPath;
 
-    await StorageService
-        .removeBackground();
+    await StorageService.removeBackground();
 
-    if (oldBackground != null &&
-        oldBackground.isNotEmpty) {
+    if (oldBackground != null && oldBackground.isNotEmpty) {
       try {
-        final file =
-            File(
-          oldBackground,
-        );
+        final file = File(oldBackground);
 
         if (file.existsSync()) {
           await file.delete();
@@ -430,32 +326,19 @@ class _SettingsScreenState
     }
 
     setState(() {
-      _backgroundPath =
-          null;
+      _backgroundPath = null;
     });
 
-    ScaffoldMessenger.of(context)
-        .showSnackBar(
+    ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
-        content: Text(
-          'Включён стандартный фон',
-        ),
-        backgroundColor:
-            Color(
-          0xFFD4AF37,
-        ),
+        content: Text('Включён стандартный фон'),
+        backgroundColor: SpartanPalette.blue,
       ),
     );
   }
 
-  Future<void>
-      _saveBackgroundOpacity(
-    double value,
-  ) async {
-    await StorageService
-        .saveBackgroundOpacity(
-      value,
-    );
+  Future<void> _saveBackgroundOpacity(double value) async {
+    await StorageService.saveBackgroundOpacity(value);
   }
 
   // ========================================
@@ -463,81 +346,44 @@ class _SettingsScreenState
   // ========================================
 
   Future<void> _loadTextColor() async {
-    final color =
-        await StorageService.getTextColor();
+    final color = await StorageService.getTextColor();
 
     if (!mounted) {
       return;
     }
 
     setState(() {
-      _selectedTextColor =
-          color;
+      _selectedTextColor = color;
     });
   }
 
   void _showTextColorPicker() {
     showDialog(
       context: context,
-      builder:
-          (dialogContext) =>
-              AlertDialog(
-        backgroundColor:
-            const Color(
-          0xFF1A1A1A,
-        ),
-        title:
-            const Text(
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: SpartanPalette.surface,
+        title: const Text(
           'Выберите цвет текста',
-          style: TextStyle(
-            color:
-                Colors.white,
-          ),
+          style: TextStyle(color: SpartanPalette.ink),
         ),
-        content:
-            SizedBox(
-          width:
-              double.infinity,
+        content: SizedBox(
+          width: double.infinity,
           child: Wrap(
             spacing: 8,
             runSpacing: 8,
             children: [
-              _colorTile(
-                Colors.white,
-              ),
-              _colorTile(
-                Colors.grey,
-              ),
-              _colorTile(
-                Colors.black,
-              ),
-              _colorTile(
-                Colors.red,
-              ),
-              _colorTile(
-                Colors.green,
-              ),
-              _colorTile(
-                Colors.blue,
-              ),
-              _colorTile(
-                Colors.yellow,
-              ),
-              _colorTile(
-                Colors.orange,
-              ),
-              _colorTile(
-                Colors.purple,
-              ),
-              _colorTile(
-                Colors.pink,
-              ),
-              _colorTile(
-                Colors.teal,
-              ),
-              _colorTile(
-                Colors.cyan,
-              ),
+              _colorTile(Colors.white),
+              _colorTile(Colors.grey),
+              _colorTile(Colors.black),
+              _colorTile(Colors.red),
+              _colorTile(Colors.green),
+              _colorTile(Colors.blue),
+              _colorTile(Colors.yellow),
+              _colorTile(Colors.orange),
+              _colorTile(Colors.purple),
+              _colorTile(Colors.pink),
+              _colorTile(Colors.teal),
+              _colorTile(Colors.cyan),
             ],
           ),
         ),
@@ -545,62 +391,38 @@ class _SettingsScreenState
     );
   }
 
-  Widget _colorTile(
-    Color color,
-  ) {
-    final colorValue =
-        color.toARGB32();
+  Widget _colorTile(Color color) {
+    final colorValue = color.toARGB32();
 
-    final isSelected =
-        _selectedTextColor ==
-            colorValue;
+    final isSelected = _selectedTextColor == colorValue;
 
     return GestureDetector(
       onTap: () async {
-        await StorageService
-            .saveTextColor(
-          colorValue,
-        );
+        await StorageService.saveTextColor(colorValue);
 
         if (!mounted) {
           return;
         }
 
         setState(() {
-          _selectedTextColor =
-              colorValue;
+          _selectedTextColor = colorValue;
         });
 
-        Navigator.pop(
-          context,
-        );
+        Navigator.pop(context);
       },
       child: Container(
         width: 40,
         height: 40,
-        decoration:
-            BoxDecoration(
+        decoration: BoxDecoration(
           color: color,
-          shape:
-              BoxShape.circle,
-          border:
-              Border.all(
-            color: isSelected
-                ? const Color(
-                    0xFFD4AF37,
-                  )
-                : Colors
-                    .transparent,
+          shape: BoxShape.circle,
+          border: Border.all(
+            color: isSelected ? SpartanPalette.ink : Colors.transparent,
             width: 3,
           ),
         ),
         child: isSelected
-            ? const Icon(
-                Icons.check,
-                color:
-                    Colors.black,
-                size: 20,
-              )
+            ? const Icon(Icons.check, color: SpartanPalette.ink, size: 20)
             : null,
       ),
     );
@@ -611,46 +433,27 @@ class _SettingsScreenState
   // ========================================
 
   Widget _buildAvatar() {
-    if (_avatarPath != null &&
-        _avatarPath!.isNotEmpty) {
-      final file =
-          File(
-        _avatarPath!,
-      );
+    if (_avatarPath != null && _avatarPath!.isNotEmpty) {
+      final file = File(_avatarPath!);
 
       if (file.existsSync()) {
         return CircleAvatar(
           radius: 48,
-          backgroundColor:
-              const Color(
-            0xFFD4AF37,
-          ),
-          backgroundImage:
-              FileImage(
-            file,
-          ),
+          backgroundColor: SpartanPalette.blue,
+          backgroundImage: FileImage(file),
         );
       }
     }
 
     return CircleAvatar(
       radius: 48,
-      backgroundColor:
-          const Color(
-        0xFFD4AF37,
-      ),
+      backgroundColor: SpartanPalette.blue,
       child: Text(
-        widget.username.isNotEmpty
-            ? widget.username[0]
-                .toUpperCase()
-            : '?',
-        style:
-            const TextStyle(
-          color:
-              Colors.black,
+        widget.username.isNotEmpty ? widget.username[0].toUpperCase() : '?',
+        style: const TextStyle(
+          color: SpartanPalette.ink,
           fontSize: 32,
-          fontWeight:
-              FontWeight.bold,
+          fontWeight: FontWeight.bold,
         ),
       ),
     );
@@ -660,31 +463,18 @@ class _SettingsScreenState
   // СЕКЦИИ
   // ========================================
 
-  Widget _buildSection(
-    String title,
-    List<Widget> children,
-  ) {
+  Widget _buildSection(String title, List<Widget> children) {
     return Column(
-      crossAxisAlignment:
-          CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding:
-              const EdgeInsets.symmetric(
-            horizontal: 16,
-            vertical: 12,
-          ),
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           child: Text(
             title,
-            style:
-                const TextStyle(
-              color:
-                  Color(
-                0xFFD4AF37,
-              ),
+            style: const TextStyle(
+              color: SpartanPalette.ink,
               fontSize: 14,
-              fontWeight:
-                  FontWeight.bold,
+              fontWeight: FontWeight.bold,
             ),
           ),
         ),
@@ -698,38 +488,17 @@ class _SettingsScreenState
     required String title,
     required String subtitle,
     required VoidCallback onTap,
-    Color iconColor =
-        const Color(
-      0xFFD4AF37,
-    ),
-    Color titleColor =
-        Colors.white,
+    Color iconColor = SpartanPalette.ink,
+    Color titleColor = SpartanPalette.ink,
   }) {
     return ListTile(
-      leading: Icon(
-        icon,
-        color:
-            iconColor,
-      ),
-      title: Text(
-        title,
-        style:
-            TextStyle(
-          color:
-              titleColor,
-        ),
-      ),
+      leading: Icon(icon, color: iconColor),
+      title: Text(title, style: TextStyle(color: titleColor)),
       subtitle: Text(
         subtitle,
-        style:
-            const TextStyle(
-          color:
-              Colors.white54,
-          fontSize: 12,
-        ),
+        style: const TextStyle(color: SpartanPalette.secondary, fontSize: 12),
       ),
-      onTap:
-          onTap,
+      onTap: onTap,
     );
   }
 
@@ -738,72 +507,33 @@ class _SettingsScreenState
   // ========================================
 
   Widget _buildBackgroundPreview() {
-    final backgroundPath =
-        _backgroundPath;
+    final backgroundPath = _backgroundPath;
 
-    if (backgroundPath == null ||
-        backgroundPath.isEmpty) {
+    if (backgroundPath == null || backgroundPath.isEmpty) {
       return Container(
         height: 90,
-        width:
-            double.infinity,
-        decoration:
-            BoxDecoration(
-          borderRadius:
-              BorderRadius.circular(
-            12,
-          ),
-          border:
-              Border.all(
-            color:
-                const Color(
-              0x55D4AF37,
-            ),
-          ),
-          gradient:
-              const LinearGradient(
-            begin:
-                Alignment.topLeft,
-            end:
-                Alignment.bottomRight,
-            colors: [
-              Color(
-                0xFF171717,
-              ),
-              Color(
-                0xFF080808,
-              ),
-            ],
+        width: double.infinity,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Color(0x55171B20)),
+          gradient: const LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [SpartanPalette.surface, SpartanPalette.canvas],
           ),
         ),
-        child:
-            const Center(
+        child: const Center(
           child: Column(
-            mainAxisSize:
-                MainAxisSize.min,
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                Icons.local_fire_department,
-                color:
-                    Color(
-                  0xFFD4AF37,
-                ),
-              ),
-              SizedBox(
-                height: 5,
-              ),
+              Icon(Icons.local_fire_department, color: SpartanPalette.ink),
+              SizedBox(height: 5),
               Text(
-                'Стандартный SPARTA / FENIX',
-                style:
-                    TextStyle(
-                  color:
-                      Color(
-                    0xFFD4AF37,
-                  ),
-                  fontSize:
-                      12,
-                  fontWeight:
-                      FontWeight.bold,
+                'Сине-золотая тема',
+                style: TextStyle(
+                  color: SpartanPalette.ink,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
                 ),
               ),
             ],
@@ -812,46 +542,30 @@ class _SettingsScreenState
       );
     }
 
-    final file =
-        File(
-      backgroundPath,
-    );
+    final file = File(backgroundPath);
 
     if (!file.existsSync()) {
       return const SizedBox.shrink();
     }
 
     return ClipRRect(
-      borderRadius:
-          BorderRadius.circular(
-        12,
-      ),
+      borderRadius: BorderRadius.circular(12),
       child: Stack(
         children: [
           SizedBox(
             height: 110,
-            width:
-                double.infinity,
+            width: double.infinity,
             child: ColoredBox(
-              color:
-                  const Color(
-                0xFF0A0A0A,
-              ),
+              color: SpartanPalette.canvas,
               child: Opacity(
-                opacity:
-                    _backgroundOpacity,
-                child:
-                    Image.file(
+                opacity: _backgroundOpacity,
+                child: Image.file(
                   file,
-                  width:
-                      double.infinity,
+                  width: double.infinity,
                   height: 110,
-                  fit:
-                      BoxFit.cover,
-                  alignment:
-                      Alignment.center,
-                  gaplessPlayback:
-                      true,
+                  fit: BoxFit.cover,
+                  alignment: Alignment.center,
+                  gaplessPlayback: true,
                 ),
               ),
             ),
@@ -860,35 +574,15 @@ class _SettingsScreenState
           Positioned(
             left: 10,
             bottom: 8,
-            child:
-                Container(
-              padding:
-                  const EdgeInsets.symmetric(
-                horizontal: 8,
-                vertical: 4,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: SpartanPalette.surface.withValues(alpha: 0.65),
+                borderRadius: BorderRadius.circular(8),
               ),
-              decoration:
-                  BoxDecoration(
-                color:
-                    Colors.black.withValues(
-                  alpha:
-                      0.65,
-                ),
-                borderRadius:
-                    BorderRadius.circular(
-                  8,
-                ),
-              ),
-              child:
-                  const Text(
+              child: const Text(
                 'Предпросмотр',
-                style:
-                    TextStyle(
-                  color:
-                      Colors.white,
-                  fontSize:
-                      11,
-                ),
+                style: TextStyle(color: SpartanPalette.ink, fontSize: 11),
               ),
             ),
           ),
@@ -898,133 +592,68 @@ class _SettingsScreenState
   }
 
   Widget _buildBackgroundOpacityControl() {
-    final percent =
-        (_backgroundOpacity *
-                100)
-            .round();
+    final percent = (_backgroundOpacity * 100).round();
 
     return Padding(
-      padding:
-          const EdgeInsets.fromLTRB(
-        16,
-        6,
-        16,
-        12,
-      ),
+      padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
       child: Container(
-        padding:
-            const EdgeInsets.fromLTRB(
-          14,
-          12,
-          14,
-          10,
-        ),
-        decoration:
-            BoxDecoration(
-          color:
-              const Color(
-            0xFF151515,
-          ),
-          borderRadius:
-              BorderRadius.circular(
-            14,
-          ),
-          border:
-              Border.all(
-            color:
-                const Color(
-              0x333D4AF37,
-            ),
-          ),
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
+        decoration: BoxDecoration(
+          color: SpartanPalette.surface,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: Color(0x33171B20)),
         ),
         child: Column(
-          crossAxisAlignment:
-              CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Row(
               children: [
-                const Icon(
-                  Icons.opacity,
-                  color:
-                      Color(
-                    0xFFD4AF37,
-                  ),
-                  size: 21,
-                ),
+                const Icon(Icons.opacity, color: SpartanPalette.ink, size: 21),
 
-                const SizedBox(
-                  width: 10,
-                ),
+                const SizedBox(width: 10),
 
                 const Expanded(
                   child: Text(
                     'Видимость фона',
-                    style:
-                        TextStyle(
-                      color:
-                          Colors.white,
-                      fontSize:
-                          15,
-                      fontWeight:
-                          FontWeight.w500,
+                    style: TextStyle(
+                      color: SpartanPalette.ink,
+                      fontSize: 15,
+                      fontWeight: FontWeight.w500,
                     ),
                   ),
                 ),
 
                 Text(
                   '$percent%',
-                  style:
-                      const TextStyle(
-                    color:
-                        Color(
-                      0xFFD4AF37,
-                    ),
-                    fontWeight:
-                        FontWeight.bold,
+                  style: const TextStyle(
+                    color: SpartanPalette.ink,
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
               ],
             ),
 
             Slider(
-              value:
-                  _backgroundOpacity,
+              value: _backgroundOpacity,
               min: 0.0,
               max: 1.0,
               divisions: 20,
-              activeColor:
-                  const Color(
-                0xFFD4AF37,
-              ),
-              inactiveColor:
-                  const Color(
-                0xFF333333,
-              ),
-              label:
-                  '$percent%',
-              onChanged:
-                  (value) {
+              activeColor: SpartanPalette.blue,
+              inactiveColor: SpartanPalette.surface,
+              label: '$percent%',
+              onChanged: (value) {
                 setState(() {
-                  _backgroundOpacity =
-                      value;
+                  _backgroundOpacity = value;
                 });
               },
-              onChangeEnd:
-                  (value) {
-                _saveBackgroundOpacity(
-                  value,
-                );
+              onChangeEnd: (value) {
+                _saveBackgroundOpacity(value);
               },
             ),
 
             const Text(
               '0% — фон почти не виден, 100% — максимальная видимость.',
-              style:
-                  TextStyle(
-                color:
-                    Colors.white54,
-                fontSize: 11,
-              ),
+              style: TextStyle(color: SpartanPalette.secondary, fontSize: 11),
             ),
           ],
         ),
@@ -1041,40 +670,17 @@ class _SettingsScreenState
     required String value,
     required String icon,
   }) {
-    final isSelected =
-        _selectedMode ==
-            value;
+    final isSelected = _selectedMode == value;
 
     return ListTile(
-      leading: Text(
-        icon,
-        style:
-            const TextStyle(
-          fontSize: 24,
-        ),
-      ),
-      title: Text(
-        title,
-        style:
-            const TextStyle(
-          color:
-              Colors.white,
-        ),
-      ),
-      trailing:
-          isSelected
-              ? const Icon(
-                  Icons.check_circle,
-                  color:
-                      Color(
-                    0xFFD4AF37,
-                  ),
-                )
-              : null,
+      leading: Text(icon, style: const TextStyle(fontSize: 24)),
+      title: Text(title, style: const TextStyle(color: SpartanPalette.ink)),
+      trailing: isSelected
+          ? const Icon(Icons.check_circle, color: SpartanPalette.ink)
+          : null,
       onTap: () {
         setState(() {
-          _selectedMode =
-              value;
+          _selectedMode = value;
         });
       },
     );
@@ -1086,29 +692,22 @@ class _SettingsScreenState
   }
 
   void _addCustomStatus() {
-    final text =
-        _newStatusController.text.trim();
+    final text = _newStatusController.text.trim();
 
     if (text.isEmpty) {
       return;
     }
 
     setState(() {
-      _customStatuses.add(
-        text,
-      );
+      _customStatuses.add(text);
 
       _newStatusController.clear();
     });
   }
 
-  void _removeCustomStatus(
-    int index,
-  ) {
+  void _removeCustomStatus(int index) {
     setState(() {
-      _customStatuses.removeAt(
-        index,
-      );
+      _customStatuses.removeAt(index);
     });
   }
 
@@ -1119,66 +718,33 @@ class _SettingsScreenState
   void _showDeleteAccountDialog() {
     showDialog(
       context: context,
-      builder:
-          (dialogContext) =>
-              AlertDialog(
-        backgroundColor:
-            const Color(
-          0xFF1A1A1A,
-        ),
-        title:
-            const Text(
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: SpartanPalette.surface,
+        title: const Text(
           'Удалить аккаунт?',
-          style:
-              TextStyle(
-            color:
-                Colors.white,
-          ),
+          style: TextStyle(color: SpartanPalette.ink),
         ),
-        content:
-            const Text(
+        content: const Text(
           'Это действие необратимо. '
           'Все данные будут удалены.',
-          style:
-              TextStyle(
-            color:
-                Colors.white70,
-          ),
+          style: TextStyle(color: SpartanPalette.secondary),
         ),
         actions: [
           TextButton(
-            onPressed: () =>
-                Navigator.pop(
-              dialogContext,
-            ),
-            child:
-                const Text(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text(
               'Отмена',
-              style:
-                  TextStyle(
-                color:
-                    Colors.white54,
-              ),
+              style: TextStyle(color: SpartanPalette.secondary),
             ),
           ),
 
           TextButton(
             onPressed: () {
-              Navigator.pop(
-                dialogContext,
-              );
+              Navigator.pop(dialogContext);
 
               widget.onDeleteAccount();
             },
-            child:
-                const Text(
-              'Удалить',
-              style:
-                  TextStyle(
-                color:
-                    Colors.red,
-              ),
-            ),
+            child: const Text('Удалить', style: TextStyle(color: Colors.red)),
           ),
         ],
       ),
@@ -1190,100 +756,56 @@ class _SettingsScreenState
   // ========================================
 
   @override
-  Widget build(
-    BuildContext context,
-  ) {
+  Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor:
-          const Color(
-        0xFF0A0A0A,
-      ),
+      backgroundColor: SpartanPalette.canvas,
 
       appBar: AppBar(
-        backgroundColor:
-            const Color(
-          0xFF1A1A1A,
-        ),
-        title:
-            const Text(
+        backgroundColor: SpartanPalette.canvas,
+        title: const Text(
           'НАСТРОЙКИ',
-          style:
-              TextStyle(
-            color:
-                Color(
-              0xFFD4AF37,
-            ),
-            fontWeight:
-                FontWeight.bold,
+          style: TextStyle(
+            color: SpartanPalette.ink,
+            fontWeight: FontWeight.bold,
           ),
         ),
-        iconTheme:
-            const IconThemeData(
-          color:
-              Color(
-            0xFFD4AF37,
-          ),
-        ),
+        iconTheme: const IconThemeData(color: SpartanPalette.ink),
       ),
 
       body: Container(
-        decoration:
-            const BoxDecoration(
-          gradient:
-              LinearGradient(
-            begin:
-                Alignment.topCenter,
-            end:
-                Alignment.bottomCenter,
-            colors: [
-              Color(
-                0xFF0A0A0A,
-              ),
-              Color(
-                0xFF1A0A0A,
-              ),
-            ],
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [SpartanPalette.canvas, SpartanPalette.surface],
           ),
         ),
 
         child: ListView(
           children: [
-            const SizedBox(
-              height: 24,
-            ),
+            const SizedBox(height: 24),
 
             Center(
-              child:
-                  GestureDetector(
-                onTap:
-                    _pickAvatar,
+              child: GestureDetector(
+                onTap: _pickAvatar,
                 child: Stack(
-                  clipBehavior:
-                      Clip.none,
+                  clipBehavior: Clip.none,
                   children: [
                     _buildAvatar(),
 
                     Positioned(
                       right: -2,
                       bottom: -2,
-                      child:
-                          Container(
+                      child: Container(
                         width: 32,
                         height: 32,
-                        decoration:
-                            const BoxDecoration(
-                          color:
-                              Color(
-                            0xFFD4AF37,
-                          ),
-                          shape:
-                              BoxShape.circle,
+                        decoration: const BoxDecoration(
+                          color: SpartanPalette.blue,
+                          shape: BoxShape.circle,
                         ),
-                        child:
-                            const Icon(
+                        child: const Icon(
                           Icons.camera_alt,
-                          color:
-                              Colors.black,
+                          color: SpartanPalette.ink,
                           size: 18,
                         ),
                       ),
@@ -1295,424 +817,245 @@ class _SettingsScreenState
 
             if (_isUploadingAvatar)
               const Padding(
-                padding:
-                    EdgeInsets.only(
-                  top: 8,
-                ),
-                child:
-                    Center(
+                padding: EdgeInsets.only(top: 8),
+                child: Center(
                   child: Text(
                     'Загрузка аватарки...',
-                    style:
-                        TextStyle(
-                      color:
-                          Color(
-                        0xFFD4AF37,
-                      ),
-                      fontSize: 12,
-                    ),
+                    style: TextStyle(color: SpartanPalette.ink, fontSize: 12),
                   ),
                 ),
               ),
 
-            const SizedBox(
-              height: 12,
-            ),
+            const SizedBox(height: 12),
 
             Center(
               child: Text(
                 widget.username,
-                style:
-                    const TextStyle(
-                  color:
-                      Colors.white,
+                style: const TextStyle(
+                  color: SpartanPalette.ink,
                   fontSize: 20,
-                  fontWeight:
-                      FontWeight.bold,
+                  fontWeight: FontWeight.bold,
                 ),
               ),
             ),
 
-            const SizedBox(
-              height: 4,
-            ),
+            const SizedBox(height: 4),
 
             const Center(
               child: Text(
                 'Нажмите на фото, чтобы изменить',
-                style:
-                    TextStyle(
-                  color:
-                      Colors.white54,
-                  fontSize: 12,
-                ),
+                style: TextStyle(color: SpartanPalette.secondary, fontSize: 12),
               ),
             ),
 
-            if (_avatarPath != null &&
-                _avatarPath!.isNotEmpty)
+            if (_avatarPath != null && _avatarPath!.isNotEmpty)
               Center(
-                child:
-                    TextButton.icon(
-                  onPressed:
-                      _deleteAvatar,
-                  icon:
-                      const Icon(
-                    Icons.delete_outline,
-                    color:
-                        Colors.red,
-                  ),
-                  label:
-                      const Text(
+                child: TextButton.icon(
+                  onPressed: _deleteAvatar,
+                  icon: const Icon(Icons.delete_outline, color: Colors.red),
+                  label: const Text(
                     'Удалить аватарку',
-                    style:
-                        TextStyle(
-                      color:
-                          Colors.red,
-                    ),
+                    style: TextStyle(color: Colors.red),
                   ),
                 ),
               ),
 
-            const SizedBox(
-              height: 12,
-            ),
+            const SizedBox(height: 12),
 
             // =================================
             // ВНЕШНИЙ ВИД
             // =================================
+            _buildSection('ВНЕШНИЙ ВИД', [
+              const ListTile(
+                leading: Icon(Icons.light_mode_outlined),
+                title: Text('SPARTAN · BLUE GOLD'),
+                subtitle: Text(
+                  'Глубокий синий фон и спокойные золотые акценты',
+                ),
+              ),
+              SwitchListTile.adaptive(
+                title: const Text('Показывать фото на фоне чата'),
+                subtitle: const Text(
+                  'Выключено — спокойный синий фон. Сохранённое фото не удаляется.',
+                ),
+                value: _lightWallpaperEnabled,
+                onChanged: (value) async {
+                  await StorageService.setLightWallpaperEnabled(value);
+                  if (mounted) setState(() => _lightWallpaperEnabled = value);
+                },
+              ),
+              _buildSectionTile(
+                icon: Icons.wallpaper,
+                title: 'Фон переписки',
+                subtitle: _backgroundPath == null
+                    ? 'Сине-золотая тема'
+                    : 'Фото из галереи',
+                onTap: _pickBackground,
+              ),
 
-            _buildSection(
-              'ВНЕШНИЙ ВИД',
-              [
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 8,
+                ),
+                child: _buildBackgroundPreview(),
+              ),
+
+              _buildBackgroundOpacityControl(),
+
+              if (_backgroundPath != null)
                 _buildSectionTile(
-                  icon:
-                      Icons.wallpaper,
-                  title:
-                      'Фон переписки',
-                  subtitle:
-                      _backgroundPath ==
-                              null
-                          ? 'Стандартный SPARTA / FENIX'
-                          : 'Фото из галереи',
-                  onTap:
-                      _pickBackground,
+                  icon: Icons.restart_alt,
+                  title: 'Стандартный фон',
+                  subtitle: 'Вернуть синий фон',
+                  onTap: _removeBackground,
+                  iconColor: SpartanPalette.ink,
+                  titleColor: SpartanPalette.ink,
                 ),
 
-                Padding(
-                  padding:
-                      const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 8,
-                  ),
-                  child:
-                      _buildBackgroundPreview(),
-                ),
-
-                _buildBackgroundOpacityControl(),
-
-                if (_backgroundPath != null)
-                  _buildSectionTile(
-                    icon:
-                        Icons.restart_alt,
-                    title:
-                        'Стандартный фон',
-                    subtitle:
-                        'Вернуть SPARTA / FENIX',
-                    onTap:
-                        _removeBackground,
-                    iconColor:
-                        const Color(
-                      0xFFD4AF37,
-                    ),
-                    titleColor:
-                        const Color(
-                      0xFFD4AF37,
-                    ),
-                  ),
-
-                _buildSectionTile(
-                  icon:
-                      Icons.format_color_text,
-                  title:
-                      'Цвет текста',
-                  subtitle:
-                      'Выберите цвет сообщений',
-                  onTap:
-                      _showTextColorPicker,
-                ),
-              ],
-            ),
+              _buildSectionTile(
+                icon: Icons.format_color_text,
+                title: 'Цвет текста',
+                subtitle: 'Выберите цвет сообщений',
+                onTap: _showTextColorPicker,
+              ),
+            ]),
 
             // =================================
             // СТАТУСЫ
             // =================================
-
-            _buildSection(
-              'СТАТУСЫ',
-              [
-                _buildModeTile(
-                  title:
-                      'Случайные статусы',
-                  value:
-                      'random',
-                  icon:
-                      '🎲',
-                ),
-                _buildModeTile(
-                  title:
-                      'Статусы по дням',
-                  value:
-                      'day',
-                  icon:
-                      '📅',
-                ),
-                _buildModeTile(
-                  title:
-                      'Свои статусы',
-                  value:
-                      'custom',
-                  icon:
-                      '✏️',
-                ),
-              ],
-            ),
-
-            if (_selectedMode ==
-                'custom')
-              _buildSection(
-                'МОИ СТАТУСЫ',
-                [
-                  ..._customStatuses
-                      .asMap()
-                      .entries
-                      .map(
-                    (entry) {
-                      return ListTile(
-                        leading:
-                            const Icon(
-                          Icons.format_quote,
-                          color:
-                              Color(
-                            0xFFD4AF37,
-                          ),
-                        ),
-                        title: Text(
-                          entry.value,
-                          style:
-                              const TextStyle(
-                            color:
-                                Colors.white,
-                          ),
-                        ),
-                        trailing:
-                            IconButton(
-                          icon:
-                              const Icon(
-                            Icons.close,
-                            color:
-                                Colors.red,
-                          ),
-                          onPressed: () =>
-                              _removeCustomStatus(
-                            entry.key,
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-
-                  Padding(
-                    padding:
-                        const EdgeInsets.all(
-                      16,
-                    ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child:
-                              TextField(
-                            controller:
-                                _newStatusController,
-                            style:
-                                const TextStyle(
-                              color:
-                                  Colors.white,
-                            ),
-                            decoration:
-                                InputDecoration(
-                              hintText:
-                                  'Новый статус...',
-                              hintStyle:
-                                  const TextStyle(
-                                color:
-                                    Colors.white54,
-                              ),
-                              enabledBorder:
-                                  OutlineInputBorder(
-                                borderRadius:
-                                    BorderRadius.circular(
-                                  30,
-                                ),
-                                borderSide:
-                                    const BorderSide(
-                                  color:
-                                      Color(
-                                    0xFF2A2A2A,
-                                  ),
-                                ),
-                              ),
-                              focusedBorder:
-                                  OutlineInputBorder(
-                                borderRadius:
-                                    BorderRadius.circular(
-                                  30,
-                                ),
-                                borderSide:
-                                    const BorderSide(
-                                  color:
-                                      Color(
-                                    0xFFD4AF37,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            onSubmitted:
-                                (_) =>
-                                    _addCustomStatus(),
-                          ),
-                        ),
-
-                        const SizedBox(
-                          width: 8,
-                        ),
-
-                        Container(
-                          decoration:
-                              const BoxDecoration(
-                            shape:
-                                BoxShape.circle,
-                            gradient:
-                                LinearGradient(
-                              colors: [
-                                Color(
-                                  0xFFD4AF37,
-                                ),
-                                Color(
-                                  0xFF8B6914,
-                                ),
-                              ],
-                            ),
-                          ),
-                          child:
-                              IconButton(
-                            icon:
-                                const Icon(
-                              Icons.add,
-                              color:
-                                  Colors.black,
-                            ),
-                            onPressed:
-                                _addCustomStatus,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
+            _buildSection('СТАТУСЫ', [
+              _buildModeTile(
+                title: 'Случайные статусы',
+                value: 'random',
+                icon: '🎲',
               ),
-
-            const Divider(
-              color:
-                  Color(
-                0xFFD4AF37,
+              _buildModeTile(
+                title: 'Статусы по дням',
+                value: 'day',
+                icon: '📅',
               ),
-              height: 30,
-            ),
+              _buildModeTile(
+                title: 'Свои статусы',
+                value: 'custom',
+                icon: '✏️',
+              ),
+            ]),
+
+            if (_selectedMode == 'custom')
+              _buildSection('МОИ СТАТУСЫ', [
+                ..._customStatuses.asMap().entries.map((entry) {
+                  return ListTile(
+                    leading: const Icon(
+                      Icons.format_quote,
+                      color: SpartanPalette.ink,
+                    ),
+                    title: Text(
+                      entry.value,
+                      style: const TextStyle(color: SpartanPalette.ink),
+                    ),
+                    trailing: IconButton(
+                      icon: const Icon(Icons.close, color: Colors.red),
+                      onPressed: () => _removeCustomStatus(entry.key),
+                    ),
+                  );
+                }),
+
+                Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: _newStatusController,
+                          style: const TextStyle(color: SpartanPalette.ink),
+                          decoration: InputDecoration(
+                            hintText: 'Новый статус...',
+                            hintStyle: const TextStyle(
+                              color: SpartanPalette.secondary,
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(30),
+                              borderSide: const BorderSide(
+                                color: SpartanPalette.surface,
+                              ),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(30),
+                              borderSide: const BorderSide(
+                                color: SpartanPalette.ink,
+                              ),
+                            ),
+                          ),
+                          onSubmitted: (_) => _addCustomStatus(),
+                        ),
+                      ),
+
+                      const SizedBox(width: 8),
+
+                      Container(
+                        decoration: const BoxDecoration(
+                          shape: BoxShape.circle,
+                          gradient: LinearGradient(
+                            colors: [
+                              SpartanPalette.blue,
+                              SpartanPalette.blueDeep,
+                            ],
+                          ),
+                        ),
+                        child: IconButton(
+                          icon: const Icon(
+                            Icons.add,
+                            color: SpartanPalette.ink,
+                          ),
+                          onPressed: _addCustomStatus,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ]),
+
+            const Divider(color: SpartanPalette.ink, height: 30),
 
             // =================================
             // АККАУНТ
             // =================================
-
-            _buildSection(
-              'АККАУНТ',
-              [
-                ListTile(
-                  leading:
-                      const Icon(
-                    Icons.person,
-                    color:
-                        Color(
-                      0xFFD4AF37,
-                    ),
-                  ),
-                  title: Text(
-                    widget.username,
-                    style:
-                        const TextStyle(
-                      color:
-                          Colors.white,
-                      fontWeight:
-                          FontWeight.bold,
-                    ),
-                  ),
-                  subtitle:
-                      const Text(
-                    'Текущий аккаунт',
-                    style:
-                        TextStyle(
-                      color:
-                          Colors.white54,
-                    ),
+            _buildSection('АККАУНТ', [
+              ListTile(
+                leading: const Icon(Icons.person, color: SpartanPalette.ink),
+                title: Text(
+                  widget.username,
+                  style: const TextStyle(
+                    color: SpartanPalette.ink,
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
-
-                ListTile(
-                  leading:
-                      const Icon(
-                    Icons.exit_to_app,
-                    color:
-                        Colors.red,
-                  ),
-                  title:
-                      const Text(
-                    'Выйти',
-                    style:
-                        TextStyle(
-                      color:
-                          Colors.red,
-                    ),
-                  ),
-                  onTap: () {
-                    widget.onLogout();
-                  },
+                subtitle: const Text(
+                  'Текущий аккаунт',
+                  style: TextStyle(color: SpartanPalette.secondary),
                 ),
+              ),
 
-                ListTile(
-                  leading:
-                      const Icon(
-                    Icons.delete_forever,
-                    color:
-                        Colors.red,
-                  ),
-                  title:
-                      const Text(
-                    'Удалить аккаунт',
-                    style:
-                        TextStyle(
-                      color:
-                          Colors.red,
-                    ),
-                  ),
-                  onTap:
-                      _showDeleteAccountDialog,
+              ListTile(
+                leading: const Icon(Icons.exit_to_app, color: Colors.red),
+                title: const Text('Выйти', style: TextStyle(color: Colors.red)),
+                onTap: () {
+                  widget.onLogout();
+                },
+              ),
+
+              ListTile(
+                leading: const Icon(Icons.delete_forever, color: Colors.red),
+                title: const Text(
+                  'Удалить аккаунт',
+                  style: TextStyle(color: Colors.red),
                 ),
-              ],
-            ),
+                onTap: _showDeleteAccountDialog,
+              ),
+            ]),
 
-            const SizedBox(
-              height: 30,
-            ),
+            const SizedBox(height: 30),
           ],
         ),
       ),

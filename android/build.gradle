@@ -6,8 +6,18 @@ allprojects {
 }
 
 rootProject.buildDir = '../build'
+
+def localNdkPath = rootProject.file('../.ndk_local_28.2.13676358').absolutePath
+
 subprojects {
     project.buildDir = "${rootProject.buildDir}/${project.name}"
+
+    project.plugins.withId('com.android.library') {
+        project.android {
+            ndkVersion '28.2.13676358'
+            ndkPath localNdkPath
+        }
+    }
 }
 subprojects {
     project.evaluationDependsOn(':app')

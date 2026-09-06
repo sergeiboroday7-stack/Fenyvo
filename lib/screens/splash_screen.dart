@@ -1,3 +1,4 @@
+import '../theme/spartan_theme.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -243,7 +244,7 @@ class _SplashScreenState
   ) {
     return Scaffold(
       backgroundColor:
-          const Color(0xFF0A0A0A),
+          SpartanPalette.canvas,
 
       body: Center(
         child: Column(
@@ -254,7 +255,7 @@ class _SplashScreenState
               Icons.shield,
               size: 80,
               color:
-                  Color(0xFFD4AF37),
+                  SpartanPalette.ink,
             ),
 
             const SizedBox(
@@ -265,7 +266,7 @@ class _SplashScreenState
               'SPARTAN CHAT',
               style: TextStyle(
                 color:
-                    Color(0xFFD4AF37),
+                    SpartanPalette.ink,
                 fontSize: 28,
                 fontWeight:
                     FontWeight.bold,
@@ -279,7 +280,7 @@ class _SplashScreenState
             if (_isLoading)
               const CircularProgressIndicator(
                 color:
-                    Color(0xFFD4AF37),
+                    SpartanPalette.ink,
               ),
 
             const SizedBox(
@@ -297,7 +298,7 @@ class _SplashScreenState
                     TextAlign.center,
                 style: const TextStyle(
                   color:
-                      Colors.white54,
+                      SpartanPalette.secondary,
                   fontSize: 14,
                 ),
               ),

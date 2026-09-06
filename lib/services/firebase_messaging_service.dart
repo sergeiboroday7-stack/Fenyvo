@@ -3,6 +3,10 @@ import 'dart:io';
 
 import 'package:firebase_messaging/firebase_messaging.dart';
 
+import 'notification_service.dart';
+import 'system_call_service.dart';
+import 'socket_service.dart';
+
 class FirebaseMessagingService {
   FirebaseMessagingService._();
 
@@ -67,13 +71,7 @@ class FirebaseMessagingService {
 
       if (_token != null &&
           _token!.isNotEmpty) {
-        print(
-          '🔥 FCM TOKEN:',
-        );
-
-        print(
-          _token,
-        );
+        print('🔥 FCM token получен');
       } else {
         print(
           '⚠️ FCM token не получен',
@@ -216,13 +214,8 @@ class FirebaseMessagingService {
         _token =
             newToken;
 
-        print(
-          '🔄 FCM TOKEN ОБНОВЛЁН:',
-        );
-
-        print(
-          newToken,
-        );
+        print('🔄 FCM token обновлён');
+        SocketService.instance.registerCurrentFcmToken();
       },
       onError: (Object error) {
         print(
@@ -238,6 +231,10 @@ class FirebaseMessagingService {
       (
         RemoteMessage message,
       ) {
+        if (message.data['type'] == 'call_invite' || message.data['type'] == 'call_cancel') {
+          unawaited(SystemCallService.instance.foregroundPush(message.data));
+          return;
+        }
         print(
           '📩 FCM сообщение получено '
           'при открытом приложении',
@@ -262,6 +259,70 @@ class FirebaseMessagingService {
             '${notification.body}',
           );
         }
+
+        final sender =
+            message.data['sender']
+                    ?.toString()
+                    .trim() ??
+                '';
+
+        if (sender.isEmpty) {
+          return;
+        }
+
+        final type =
+            message.data['type']
+                    ?.toString()
+                    .trim() ??
+                'message';
+
+        if (type == 'reaction') {
+          unawaited(
+            NotificationService.instance
+                .showReactionNotification(
+              from: sender,
+            ),
+          );
+
+          return;
+        }
+
+        final messageType =
+            message.data['messageType']
+                    ?.toString()
+                    .trim() ??
+                'text';
+
+        final voiceDurationMs =
+            int.tryParse(
+          message.data['voiceDurationMs']
+                  ?.toString() ??
+              '',
+        );
+
+        final fileName =
+            message.data['fileName']
+                    ?.toString()
+                    .trim();
+
+        final body =
+            notification?.body?.trim().isNotEmpty == true
+                ? notification!.body!.trim()
+                : message.data['preview']
+                        ?.toString()
+                        .trim() ??
+                    'Новое сообщение';
+
+        unawaited(
+          NotificationService.instance
+              .showMessageNotification(
+            from: sender,
+            message: body,
+            messageType: messageType,
+            voiceDurationMs: voiceDurationMs,
+            fileName: fileName,
+          ),
+        );
       },
     );
   }

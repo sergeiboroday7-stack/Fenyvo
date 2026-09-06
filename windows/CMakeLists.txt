@@ -39,7 +39,7 @@ add_definitions(-DUNICODE -D_UNICODE)
 # of modifying this function.
 function(APPLY_STANDARD_SETTINGS TARGET)
   target_compile_features(${TARGET} PUBLIC cxx_std_17)
-  target_compile_options(${TARGET} PRIVATE /W4 /WX /wd"4100")
+  target_compile_options(${TARGET} PRIVATE /W4 /WX /wd4100)
   target_compile_options(${TARGET} PRIVATE /EHsc)
   target_compile_definitions(${TARGET} PRIVATE "_HAS_EXCEPTIONS=0")
   target_compile_definitions(${TARGET} PRIVATE "$<$<CONFIG:Debug>:_DEBUG>")
@@ -56,6 +56,20 @@ add_subdirectory("runner")
 # Generated plugin build rules, which manage building the plugins and adding
 # them to the application.
 include(flutter/generated_plugins.cmake)
+
+# NuGet .targets files are imported only by the Visual Studio generator.
+# Ninja needs the equivalent WIL include directory and must not link the XML.
+if(CMAKE_GENERATOR MATCHES "Ninja")
+  foreach(WIL_PLUGIN audioplayers_windows_plugin video_player_win_plugin)
+    if(TARGET ${WIL_PLUGIN})
+      target_include_directories(${WIL_PLUGIN} PRIVATE
+        "${CMAKE_BINARY_DIR}/packages/Microsoft.Windows.ImplementationLibrary/include")
+      get_target_property(WIL_PLUGIN_LINKS ${WIL_PLUGIN} LINK_LIBRARIES)
+      list(FILTER WIL_PLUGIN_LINKS EXCLUDE REGEX "\\.targets$")
+      set_property(TARGET ${WIL_PLUGIN} PROPERTY LINK_LIBRARIES "${WIL_PLUGIN_LINKS}")
+    endif()
+  endforeach()
+endif()
 
 
 # === Installation ===

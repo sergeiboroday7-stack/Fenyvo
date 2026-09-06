@@ -1,3 +1,5 @@
+import '../theme/spartan_theme.dart';
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -10,33 +12,22 @@ const String serverIp = '192.168.0.117';
 const String serverPort = '8080';
 
 class AuthScreen extends StatefulWidget {
-  const AuthScreen({
-    super.key,
-  });
+  const AuthScreen({super.key});
 
   @override
-  State<AuthScreen> createState() =>
-      _AuthScreenState();
+  State<AuthScreen> createState() => _AuthScreenState();
 }
 
 class _AuthScreenState extends State<AuthScreen> {
-  final TextEditingController
-      _usernameController =
-      TextEditingController();
+  final TextEditingController _usernameController = TextEditingController();
 
-  final TextEditingController
-      _passwordController =
-      TextEditingController();
+  final TextEditingController _passwordController = TextEditingController();
 
-  final TextEditingController
-      _ipController =
-      TextEditingController(
+  final TextEditingController _ipController = TextEditingController(
     text: serverIp,
   );
 
-  final TextEditingController
-      _portController =
-      TextEditingController(
+  final TextEditingController _portController = TextEditingController(
     text: serverPort,
   );
 
@@ -54,9 +45,7 @@ class _AuthScreenState extends State<AuthScreen> {
   void initState() {
     super.initState();
 
-    SocketService.instance.addMessageHandler(
-      _handleMessage,
-    );
+    SocketService.instance.addMessageHandler(_handleMessage);
 
     _loadSavedUser();
   }
@@ -65,9 +54,7 @@ class _AuthScreenState extends State<AuthScreen> {
   void dispose() {
     _loginTimeout?.cancel();
 
-    SocketService.instance.removeMessageHandler(
-      _handleMessage,
-    );
+    SocketService.instance.removeMessageHandler(_handleMessage);
 
     _usernameController.dispose();
     _passwordController.dispose();
@@ -82,36 +69,28 @@ class _AuthScreenState extends State<AuthScreen> {
   // ========================================
 
   Future<void> _loadSavedUser() async {
-    final prefs =
-        await SharedPreferences.getInstance();
+    final prefs = await SharedPreferences.getInstance();
 
     if (!mounted) {
       return;
     }
 
-    final username =
-        prefs.getString('username') ?? '';
+    final username = prefs.getString('username') ?? '';
 
-    final password =
-        prefs.getString('password') ?? '';
+    final password = prefs.getString('password') ?? '';
 
-    final ip =
-        prefs.getString('ip') ?? serverIp;
+    final ip = prefs.getString('ip') ?? serverIp;
 
-    final port =
-        prefs.getString('port') ?? serverPort;
+    final port = prefs.getString('port') ?? serverPort;
 
-    final loggedIn =
-        prefs.getBool('logged_in') ?? false;
+    final loggedIn = prefs.getBool('logged_in') ?? false;
 
     _usernameController.text = username;
     _passwordController.text = password;
     _ipController.text = ip;
     _portController.text = port;
 
-    if (loggedIn &&
-        username.isNotEmpty &&
-        password.isNotEmpty) {
+    if (loggedIn && username.isNotEmpty && password.isNotEmpty) {
       setState(() {
         _isAutoLogin = true;
         _isLoading = true;
@@ -126,35 +105,23 @@ class _AuthScreenState extends State<AuthScreen> {
   // СООБЩЕНИЯ ОТ СЕРВЕРА
   // ========================================
 
-  void _handleMessage(
-    Map<String, dynamic> message,
-  ) {
-    if (!mounted ||
-        _isNavigating) {
+  void _handleMessage(Map<String, dynamic> message) {
+    if (!mounted || _isNavigating) {
       return;
     }
 
-    final type =
-        message['type']?.toString() ?? '';
+    final type = message['type']?.toString() ?? '';
 
-    final rawData =
-        message['data'];
+    final rawData = message['data'];
 
-    final data =
-        rawData is Map
-            ? Map<String, dynamic>.from(
-                rawData,
-              )
-            : <String, dynamic>{};
+    final data = rawData is Map
+        ? Map<String, dynamic>.from(rawData)
+        : <String, dynamic>{};
 
-    print(
-      '📩 AuthScreen получил: $type',
-    );
+    print('📩 AuthScreen получил: $type');
 
     if (type == 'connected') {
-      print(
-        '🟢 Сервер подтвердил подключение',
-      );
+      print('🟢 Сервер подтвердил подключение');
 
       return;
     }
@@ -204,9 +171,7 @@ class _AuthScreenState extends State<AuthScreen> {
         type == 'disconnected') {
       _loginTimeout?.cancel();
 
-      final reason =
-          data['reason']?.toString() ??
-              _getErrorText(type);
+      final reason = data['reason']?.toString() ?? _getErrorText(type);
 
       setState(() {
         _isLoading = false;
@@ -218,9 +183,7 @@ class _AuthScreenState extends State<AuthScreen> {
     }
   }
 
-  String _getErrorText(
-    String type,
-  ) {
+  String _getErrorText(String type) {
     switch (type) {
       case 'login_error':
         return 'Не удалось выполнить вход';
@@ -243,68 +206,40 @@ class _AuthScreenState extends State<AuthScreen> {
   void _startLoginTimeout() {
     _loginTimeout?.cancel();
 
-    _loginTimeout = Timer(
-      const Duration(
-        seconds: 10,
-      ),
-      () {
-        if (!mounted ||
-            _isNavigating) {
-          return;
-        }
+    _loginTimeout = Timer(const Duration(seconds: 10), () {
+      if (!mounted || _isNavigating) {
+        return;
+      }
 
-        setState(() {
-          _isLoading = false;
-          _isAutoLogin = false;
-          _error =
-              'Сервер не ответил. Проверьте подключение.';
-        });
-      },
-    );
+      setState(() {
+        _isLoading = false;
+        _isAutoLogin = false;
+        _error = 'Сервер не ответил. Проверьте подключение.';
+      });
+    });
   }
 
   // ========================================
   // СОХРАНЕНИЕ И ПЕРЕХОД
   // ========================================
 
-  Future<void>
-      _saveUserAndOpenChat() async {
+  Future<void> _saveUserAndOpenChat() async {
     try {
-      final prefs =
-          await SharedPreferences.getInstance();
+      final prefs = await SharedPreferences.getInstance();
 
-      await prefs.setString(
-        'username',
-        _usernameController.text.trim(),
-      );
+      await prefs.setString('username', _usernameController.text.trim());
 
-      await prefs.setString(
-        'password',
-        _passwordController.text,
-      );
+      await prefs.setString('password', _passwordController.text);
 
-      await prefs.setString(
-        'ip',
-        _ipController.text.trim(),
-      );
+      await prefs.setString('ip', _ipController.text.trim());
 
-      await prefs.setString(
-        'port',
-        _portController.text.trim(),
-      );
+      await prefs.setString('port', _portController.text.trim());
 
-      await prefs.setBool(
-        'logged_in',
-        true,
-      );
+      await prefs.setBool('logged_in', true);
 
-      print(
-        '💾 Пользователь сохранён',
-      );
+      print('💾 Пользователь сохранён');
     } catch (e) {
-      print(
-        '⚠️ Ошибка сохранения пользователя: $e',
-      );
+      print('⚠️ Ошибка сохранения пользователя: $e');
     }
 
     if (!mounted) {
@@ -313,10 +248,7 @@ class _AuthScreenState extends State<AuthScreen> {
 
     Navigator.pushReplacement(
       context,
-      MaterialPageRoute(
-        builder: (_) =>
-            const ChatListScreen(),
-      ),
+      MaterialPageRoute(builder: (_) => const ChatListScreen()),
     );
   }
 
@@ -325,75 +257,50 @@ class _AuthScreenState extends State<AuthScreen> {
   // ========================================
 
   Future<void> _connectAndLogin() async {
-    final username =
-        _usernameController.text.trim();
+    final username = _usernameController.text.trim();
 
-    final password =
-        _passwordController.text;
+    final password = _passwordController.text;
 
-    final ip =
-        _ipController.text.trim();
+    final ip = _ipController.text.trim();
 
-    final port =
-        _portController.text.trim();
+    final port = _portController.text.trim();
 
-    if (username.isEmpty ||
-        password.isEmpty) {
-      _stopLoadingWithError(
-        'Введите логин и пароль',
-      );
+    if (username.isEmpty || password.isEmpty) {
+      _stopLoadingWithError('Введите логин и пароль');
 
       return;
     }
 
-    if (ip.isEmpty ||
-        port.isEmpty) {
-      _stopLoadingWithError(
-        'Введите IP и порт сервера',
-      );
+    if (ip.isEmpty || port.isEmpty) {
+      _stopLoadingWithError('Введите IP и порт сервера');
 
       return;
     }
 
-    final url =
-        'ws://$ip:$port';
+    final url = 'ws://$ip:$port';
 
     try {
-      print(
-        '🔌 Подключение к: $url',
-      );
+      print('🔌 Подключение к: $url');
 
-      final connected =
-          await SocketService.instance.connect(
-        url,
-      );
+      final connected = await SocketService.instance.connect(url);
 
       if (!mounted) {
         return;
       }
 
       if (!connected) {
-        _stopLoadingWithError(
-          'Не удалось подключиться к серверу',
-        );
+        _stopLoadingWithError('Не удалось подключиться к серверу');
 
         return;
       }
 
-      print(
-        '🔐 Отправляем логин: $username',
-      );
+      print('🔐 Отправляем логин: $username');
 
       _startLoginTimeout();
 
-      SocketService.instance.login(
-        username,
-        password,
-      );
+      SocketService.instance.login(username, password);
     } catch (e) {
-      print(
-        '❌ Ошибка подключения: $e',
-      );
+      print('❌ Ошибка подключения: $e');
 
       _loginTimeout?.cancel();
 
@@ -401,15 +308,11 @@ class _AuthScreenState extends State<AuthScreen> {
         return;
       }
 
-      _stopLoadingWithError(
-        'Не удалось подключиться к серверу',
-      );
+      _stopLoadingWithError('Не удалось подключиться к серверу');
     }
   }
 
-  void _stopLoadingWithError(
-    String error,
-  ) {
+  void _stopLoadingWithError(String error) {
     if (!mounted) {
       return;
     }
@@ -444,22 +347,17 @@ class _AuthScreenState extends State<AuthScreen> {
       return;
     }
 
-    final username =
-        _usernameController.text.trim();
+    final username = _usernameController.text.trim();
 
-    final password =
-        _passwordController.text;
+    final password = _passwordController.text;
 
-    final ip =
-        _ipController.text.trim();
+    final ip = _ipController.text.trim();
 
-    final port =
-        _portController.text.trim();
+    final port = _portController.text.trim();
 
     if (username.length < 3) {
       setState(() {
-        _error =
-            'Логин должен содержать минимум 3 символа';
+        _error = 'Логин должен содержать минимум 3 символа';
       });
 
       return;
@@ -467,18 +365,15 @@ class _AuthScreenState extends State<AuthScreen> {
 
     if (password.length < 4) {
       setState(() {
-        _error =
-            'Пароль должен содержать минимум 4 символа';
+        _error = 'Пароль должен содержать минимум 4 символа';
       });
 
       return;
     }
 
-    if (ip.isEmpty ||
-        port.isEmpty) {
+    if (ip.isEmpty || port.isEmpty) {
       setState(() {
-        _error =
-            'Введите IP и порт сервера';
+        _error = 'Введите IP и порт сервера';
       });
 
       return;
@@ -490,47 +385,32 @@ class _AuthScreenState extends State<AuthScreen> {
       _error = '';
     });
 
-    final url =
-        'ws://$ip:$port';
+    final url = 'ws://$ip:$port';
 
     try {
-      print(
-        '🆕 Подключение для регистрации: $url',
-      );
+      print('🆕 Подключение для регистрации: $url');
 
-      final connected =
-          await SocketService.instance.connect(
-        url,
-      );
+      final connected = await SocketService.instance.connect(url);
 
       if (!mounted) {
         return;
       }
 
       if (!connected) {
-        _stopLoadingWithError(
-          'Не удалось подключиться к серверу',
-        );
+        _stopLoadingWithError('Не удалось подключиться к серверу');
 
         return;
       }
 
       _startLoginTimeout();
 
-      SocketService.instance.register(
-        username,
-        password,
-      );
+      SocketService.instance.register(username, password);
     } catch (e) {
-      print(
-        '❌ Ошибка регистрации: $e',
-      );
+      print('❌ Ошибка регистрации: $e');
 
       _loginTimeout?.cancel();
 
-      _stopLoadingWithError(
-        'Не удалось подключиться к серверу',
-      );
+      _stopLoadingWithError('Не удалось подключиться к серверу');
     }
   }
 
@@ -544,71 +424,25 @@ class _AuthScreenState extends State<AuthScreen> {
   }) {
     return InputDecoration(
       hintText: hint,
-      hintStyle:
-          const TextStyle(
-        color:
-            Colors.white54,
-      ),
-      prefixIcon: Icon(
-        icon,
-        color:
-            const Color(
-          0xFFD4AF37,
-        ),
-      ),
+      hintStyle: const TextStyle(color: SpartanPalette.secondary),
+      prefixIcon: Icon(icon, color: SpartanPalette.ink),
       filled: true,
-      fillColor:
-          Colors.black.withValues(
-        alpha: 0.62,
-      ),
-      enabledBorder:
-          OutlineInputBorder(
-        borderRadius:
-            BorderRadius.circular(
-          14,
-        ),
-        borderSide:
-            BorderSide(
-          color:
-              const Color(
-            0xFFD4AF37,
-          ).withValues(
-            alpha: 0.35,
-          ),
+      fillColor: SpartanPalette.surface.withValues(alpha: 0.62),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: BorderSide(
+          color: SpartanPalette.ink.withValues(alpha: 0.35),
         ),
       ),
-      focusedBorder:
-          OutlineInputBorder(
-        borderRadius:
-            BorderRadius.circular(
-          14,
-        ),
-        borderSide:
-            const BorderSide(
-          color:
-              Color(
-            0xFFD4AF37,
-          ),
-          width: 1.5,
-        ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: const BorderSide(color: SpartanPalette.ink, width: 1.5),
       ),
-      disabledBorder:
-          OutlineInputBorder(
-        borderRadius:
-            BorderRadius.circular(
-          14,
-        ),
-        borderSide:
-            const BorderSide(
-          color:
-              Colors.white12,
-        ),
+      disabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(14),
+        borderSide: const BorderSide(color: SpartanPalette.line),
       ),
-      contentPadding:
-          const EdgeInsets.symmetric(
-        horizontal: 16,
-        vertical: 16,
-      ),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
     );
   }
 
@@ -617,71 +451,35 @@ class _AuthScreenState extends State<AuthScreen> {
   // ========================================
 
   @override
-  Widget build(
-    BuildContext context,
-  ) {
+  Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor:
-          Colors.black,
-      resizeToAvoidBottomInset:
-          true,
+      backgroundColor: SpartanPalette.canvas,
+      resizeToAvoidBottomInset: true,
 
       body: Stack(
-        fit:
-            StackFit.expand,
+        fit: StackFit.expand,
         children: [
           // ==================================
           // ФОН SPARTA / FENIX
           // ==================================
 
-          Image.asset(
-            'assets/images/spartan_chat_bg.png',
-            fit:
-                BoxFit.cover,
-            alignment:
-                Alignment.center,
-            filterQuality:
-                FilterQuality.high,
-          ),
+          const ColoredBox(color: SpartanPalette.canvas),
 
           // ==================================
           // ЗАТЕМНЕНИЕ ДЛЯ ЧИТАЕМОСТИ
           // ==================================
-
           Container(
-            decoration:
-                BoxDecoration(
-              gradient:
-                  LinearGradient(
-                begin:
-                    Alignment.topCenter,
-                end:
-                    Alignment.bottomCenter,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
                 colors: [
-                  Colors.black.withValues(
-                    alpha:
-                        0.20,
-                  ),
-                  Colors.black.withValues(
-                    alpha:
-                        0.48,
-                  ),
-                  Colors.black.withValues(
-                    alpha:
-                        0.76,
-                  ),
-                  Colors.black.withValues(
-                    alpha:
-                        0.92,
-                  ),
+                  SpartanPalette.canvas.withValues(alpha: 0.20),
+                  SpartanPalette.canvas.withValues(alpha: 0.48),
+                  SpartanPalette.canvas.withValues(alpha: 0.76),
+                  SpartanPalette.canvas.withValues(alpha: 0.92),
                 ],
-                stops:
-                    const [
-                  0.0,
-                  0.38,
-                  0.72,
-                  1.0,
-                ],
+                stops: const [0.0, 0.38, 0.72, 1.0],
               ),
             ),
           ),
@@ -689,337 +487,162 @@ class _AuthScreenState extends State<AuthScreen> {
           // ==================================
           // СОДЕРЖИМОЕ
           // ==================================
-
           SafeArea(
-            child:
-                SingleChildScrollView(
-              keyboardDismissBehavior:
-                  ScrollViewKeyboardDismissBehavior
-                      .onDrag,
-              padding:
-                  const EdgeInsets.fromLTRB(
-                20,
-                24,
-                20,
-                30,
-              ),
-              child:
-                  ConstrainedBox(
-                constraints:
-                    BoxConstraints(
+            child: SingleChildScrollView(
+              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
+              padding: const EdgeInsets.fromLTRB(20, 24, 20, 30),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
                   minHeight:
-                      MediaQuery.of(
-                            context,
-                          ).size.height -
-                          MediaQuery.of(
-                            context,
-                          ).padding.top -
-                          MediaQuery.of(
-                            context,
-                          ).padding.bottom -
-                          54,
+                      MediaQuery.of(context).size.height -
+                      MediaQuery.of(context).padding.top -
+                      MediaQuery.of(context).padding.bottom -
+                      54,
                 ),
-                child:
-                    IntrinsicHeight(
-                  child:
-                      Column(
+                child: IntrinsicHeight(
+                  child: Column(
                     children: [
                       // ========================
                       // ЛОГОТИП
                       // ========================
 
-                      const SizedBox(
-                        height: 20,
+                      const SizedBox(height: 20),
+
+                      Image.asset(
+                        'assets/images/spartan_brand.png',
+                        width: 80,
+                        height: 80,
+                        semanticLabel: 'SPARTAN',
                       ),
 
-                      Container(
-                        width: 74,
-                        height: 74,
-                        decoration:
-                            BoxDecoration(
-                          shape:
-                              BoxShape.circle,
-                          color:
-                              Colors.black.withValues(
-                            alpha:
-                                0.55,
-                          ),
-                          border:
-                              Border.all(
-                            color:
-                                const Color(
-                              0xFFD4AF37,
-                            ),
-                            width:
-                                1.5,
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color:
-                                  const Color(
-                                0xFFD4AF37,
-                              ).withValues(
-                                alpha:
-                                    0.25,
-                              ),
-                              blurRadius:
-                                  24,
-                            ),
-                          ],
-                        ),
-                        child:
-                            const Icon(
-                          Icons.shield,
-                          size: 42,
-                          color:
-                              Color(
-                            0xFFD4AF37,
-                          ),
-                        ),
-                      ),
-
-                      const SizedBox(
-                        height: 14,
-                      ),
+                      const SizedBox(height: 14),
 
                       const Text(
                         'SPARTAN CHAT',
-                        textAlign:
-                            TextAlign.center,
-                        style:
-                            TextStyle(
-                          color:
-                              Color(
-                            0xFFD4AF37,
-                          ),
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: SpartanPalette.ink,
                           fontSize: 28,
-                          fontWeight:
-                              FontWeight.w900,
-                          letterSpacing:
-                              2.0,
-                          shadows: [
-                            Shadow(
-                              color:
-                                  Colors.black,
-                              blurRadius:
-                                  10,
-                            ),
-                          ],
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 2.0,
                         ),
                       ),
 
-                      const SizedBox(
-                        height: 5,
-                      ),
+                      const SizedBox(height: 5),
 
                       Text(
                         _isRegisterMode
                             ? 'СОЗДАНИЕ АККАУНТА'
                             : 'ДОБРО ПОЖАЛОВАТЬ',
-                        textAlign:
-                            TextAlign.center,
-                        style:
-                            const TextStyle(
-                          color:
-                              Colors.white70,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: SpartanPalette.secondary,
                           fontSize: 12,
-                          fontWeight:
-                              FontWeight.w600,
-                          letterSpacing:
-                              1.4,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 1.4,
                         ),
                       ),
 
-                      const SizedBox(
-                        height: 28,
-                      ),
+                      const SizedBox(height: 28),
 
                       // ========================
                       // ПАНЕЛЬ ВХОДА
                       // ========================
-
                       Container(
-                        width:
-                            double.infinity,
-                        padding:
-                            const EdgeInsets.all(
-                          18,
-                        ),
-                        decoration:
-                            BoxDecoration(
-                          color:
-                              Colors.black.withValues(
-                            alpha:
-                                0.58,
-                          ),
-                          borderRadius:
-                              BorderRadius.circular(
-                            22,
-                          ),
-                          border:
-                              Border.all(
-                            color:
-                                const Color(
-                              0xFFD4AF37,
-                            ).withValues(
-                              alpha:
-                                  0.30,
-                            ),
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(18),
+                        decoration: BoxDecoration(
+                          color: SpartanPalette.surface.withValues(alpha: 0.58),
+                          borderRadius: BorderRadius.circular(22),
+                          border: Border.all(
+                            color: SpartanPalette.ink.withValues(alpha: 0.30),
                           ),
                           boxShadow: [
                             BoxShadow(
-                              color:
-                                  Colors.black.withValues(
-                                alpha:
-                                    0.55,
-                              ),
-                              blurRadius:
-                                  24,
-                              offset:
-                                  const Offset(
-                                0,
-                                10,
-                              ),
+                              color: Colors.black.withValues(alpha: 0.06),
+                              blurRadius: 24,
+                              offset: const Offset(0, 10),
                             ),
                           ],
                         ),
-                        child:
-                            Column(
+                        child: Column(
                           children: [
                             Text(
-                              _isRegisterMode
-                                  ? 'Регистрация'
-                                  : 'Вход',
-                              style:
-                                  const TextStyle(
-                                color:
-                                    Colors.white,
-                                fontSize:
-                                    22,
-                                fontWeight:
-                                    FontWeight.bold,
+                              _isRegisterMode ? 'Регистрация' : 'Вход',
+                              style: const TextStyle(
+                                color: SpartanPalette.ink,
+                                fontSize: 22,
+                                fontWeight: FontWeight.bold,
                               ),
                             ),
 
-                            const SizedBox(
-                              height: 20,
-                            ),
+                            const SizedBox(height: 20),
 
                             TextField(
-                              controller:
-                                  _usernameController,
-                              enabled:
-                                  !_isLoading,
-                              style:
-                                  const TextStyle(
-                                color:
-                                    Colors.white,
-                              ),
-                              textInputAction:
-                                  TextInputAction.next,
-                              decoration:
-                                  _inputDecoration(
-                                hint:
-                                    'Username',
-                                icon:
-                                    Icons.person_outline,
+                              controller: _usernameController,
+                              enabled: !_isLoading,
+                              style: const TextStyle(color: SpartanPalette.ink),
+                              textInputAction: TextInputAction.next,
+                              decoration: _inputDecoration(
+                                hint: 'Username',
+                                icon: Icons.person_outline,
                               ),
                             ),
 
-                            const SizedBox(
-                              height: 13,
-                            ),
+                            const SizedBox(height: 13),
 
                             TextField(
-                              controller:
-                                  _passwordController,
-                              enabled:
-                                  !_isLoading,
-                              style:
-                                  const TextStyle(
-                                color:
-                                    Colors.white,
-                              ),
-                              obscureText:
-                                  true,
-                              textInputAction:
-                                  TextInputAction.next,
-                              decoration:
-                                  _inputDecoration(
-                                hint:
-                                    'Password',
-                                icon:
-                                    Icons.lock_outline,
+                              controller: _passwordController,
+                              enabled: !_isLoading,
+                              style: const TextStyle(color: SpartanPalette.ink),
+                              obscureText: true,
+                              textInputAction: TextInputAction.next,
+                              decoration: _inputDecoration(
+                                hint: 'Password',
+                                icon: Icons.lock_outline,
                               ),
                             ),
 
-                            const SizedBox(
-                              height: 13,
-                            ),
+                            const SizedBox(height: 13),
 
                             Row(
                               children: [
                                 Expanded(
                                   flex: 3,
-                                  child:
-                                      TextField(
-                                    controller:
-                                        _ipController,
-                                    enabled:
-                                        !_isLoading,
-                                    style:
-                                        const TextStyle(
-                                      color:
-                                          Colors.white,
-                                      fontSize:
-                                          14,
+                                  child: TextField(
+                                    controller: _ipController,
+                                    enabled: !_isLoading,
+                                    style: const TextStyle(
+                                      color: SpartanPalette.ink,
+                                      fontSize: 14,
                                     ),
-                                    keyboardType:
-                                        TextInputType.number,
-                                    textInputAction:
-                                        TextInputAction.next,
-                                    decoration:
-                                        _inputDecoration(
-                                      hint:
-                                          'IP сервера',
-                                      icon:
-                                          Icons.dns_outlined,
+                                    keyboardType: TextInputType.number,
+                                    textInputAction: TextInputAction.next,
+                                    decoration: _inputDecoration(
+                                      hint: 'IP сервера',
+                                      icon: Icons.dns_outlined,
                                     ),
                                   ),
                                 ),
 
-                                const SizedBox(
-                                  width: 10,
-                                ),
+                                const SizedBox(width: 10),
 
                                 Expanded(
                                   flex: 2,
-                                  child:
-                                      TextField(
-                                    controller:
-                                        _portController,
-                                    enabled:
-                                        !_isLoading,
-                                    style:
-                                        const TextStyle(
-                                      color:
-                                          Colors.white,
-                                      fontSize:
-                                          14,
+                                  child: TextField(
+                                    controller: _portController,
+                                    enabled: !_isLoading,
+                                    style: const TextStyle(
+                                      color: SpartanPalette.ink,
+                                      fontSize: 14,
                                     ),
-                                    keyboardType:
-                                        TextInputType.number,
-                                    textInputAction:
-                                        TextInputAction.done,
-                                    decoration:
-                                        _inputDecoration(
-                                      hint:
-                                          'Порт',
-                                      icon:
-                                          Icons.settings_ethernet,
+                                    keyboardType: TextInputType.number,
+                                    textInputAction: TextInputAction.done,
+                                    decoration: _inputDecoration(
+                                      hint: 'Порт',
+                                      icon: Icons.settings_ethernet,
                                     ),
-                                    onSubmitted:
-                                        (_) {
+                                    onSubmitted: (_) {
                                       if (!_isLoading) {
                                         if (_isRegisterMode) {
                                           _register();
@@ -1033,53 +656,26 @@ class _AuthScreenState extends State<AuthScreen> {
                               ],
                             ),
 
-                            const SizedBox(
-                              height: 18,
-                            ),
+                            const SizedBox(height: 18),
 
                             if (_error.isNotEmpty)
                               Container(
-                                width:
-                                    double.infinity,
-                                margin:
-                                    const EdgeInsets.only(
-                                  bottom: 14,
-                                ),
-                                padding:
-                                    const EdgeInsets.all(
-                                  10,
-                                ),
-                                decoration:
-                                    BoxDecoration(
-                                  color:
-                                      Colors.red.withValues(
-                                    alpha:
-                                        0.14,
-                                  ),
-                                  borderRadius:
-                                      BorderRadius.circular(
-                                    10,
-                                  ),
-                                  border:
-                                      Border.all(
-                                    color:
-                                        Colors.red.withValues(
-                                      alpha:
-                                          0.45,
-                                    ),
+                                width: double.infinity,
+                                margin: const EdgeInsets.only(bottom: 14),
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: Colors.red.withValues(alpha: 0.14),
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(
+                                    color: Colors.red.withValues(alpha: 0.45),
                                   ),
                                 ),
-                                child:
-                                    Text(
+                                child: Text(
                                   _error,
-                                  textAlign:
-                                      TextAlign.center,
-                                  style:
-                                      const TextStyle(
-                                    color:
-                                        Colors.redAccent,
-                                    fontSize:
-                                        13,
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                    color: Colors.redAccent,
+                                    fontSize: 13,
                                   ),
                                 ),
                               ),
@@ -1088,26 +684,19 @@ class _AuthScreenState extends State<AuthScreen> {
                               Column(
                                 children: [
                                   const CircularProgressIndicator(
-                                    color:
-                                        Color(
-                                      0xFFD4AF37,
-                                    ),
+                                    color: SpartanPalette.ink,
                                   ),
 
-                                  const SizedBox(
-                                    height: 15,
-                                  ),
+                                  const SizedBox(height: 15),
 
                                   Text(
                                     _isAutoLogin
                                         ? 'Автоматический вход...'
                                         : _isRegisterMode
-                                            ? 'Регистрация...'
-                                            : 'Подключение...',
-                                    style:
-                                        const TextStyle(
-                                      color:
-                                          Colors.white70,
+                                        ? 'Регистрация...'
+                                        : 'Подключение...',
+                                    style: const TextStyle(
+                                      color: SpartanPalette.secondary,
                                     ),
                                   ),
                                 ],
@@ -1116,80 +705,53 @@ class _AuthScreenState extends State<AuthScreen> {
                               Column(
                                 children: [
                                   SizedBox(
-                                    width:
-                                        double.infinity,
-                                    height:
-                                        54,
-                                    child:
-                                        ElevatedButton(
-                                      onPressed:
-                                          _isRegisterMode
-                                              ? _register
-                                              : _login,
-                                      style:
-                                          ElevatedButton.styleFrom(
-                                        backgroundColor:
-                                            const Color(
-                                          0xFFD4AF37,
-                                        ),
-                                        foregroundColor:
-                                            Colors.black,
-                                        elevation:
-                                            8,
-                                        shadowColor:
-                                            Colors.black,
-                                        shape:
-                                            RoundedRectangleBorder(
-                                          borderRadius:
-                                              BorderRadius.circular(
+                                    width: double.infinity,
+                                    height: 54,
+                                    child: ElevatedButton(
+                                      onPressed: _isRegisterMode
+                                          ? _register
+                                          : _login,
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: SpartanPalette.blue,
+                                        foregroundColor: SpartanPalette.ink,
+                                        elevation: 0,
+                                        shadowColor: Colors.transparent,
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(
                                             14,
                                           ),
                                         ),
                                       ),
-                                      child:
-                                          Text(
+                                      child: Text(
                                         _isRegisterMode
                                             ? 'ЗАРЕГИСТРИРОВАТЬСЯ'
                                             : 'ВОЙТИ',
-                                        style:
-                                            const TextStyle(
-                                          fontWeight:
-                                              FontWeight.w900,
-                                          letterSpacing:
-                                              0.8,
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.w900,
+                                          letterSpacing: 0.8,
                                         ),
                                       ),
                                     ),
                                   ),
 
-                                  const SizedBox(
-                                    height: 8,
-                                  ),
+                                  const SizedBox(height: 8),
 
                                   TextButton(
                                     onPressed: () {
                                       setState(() {
-                                        _isRegisterMode =
-                                            !_isRegisterMode;
+                                        _isRegisterMode = !_isRegisterMode;
 
                                         _error = '';
                                       });
                                     },
-                                    child:
-                                        Text(
+                                    child: Text(
                                       _isRegisterMode
                                           ? 'Уже есть аккаунт? Войти'
                                           : 'Нет аккаунта? Регистрация',
-                                      textAlign:
-                                          TextAlign.center,
-                                      style:
-                                          const TextStyle(
-                                        color:
-                                            Color(
-                                          0xFFD4AF37,
-                                        ),
-                                        fontWeight:
-                                            FontWeight.w600,
+                                      textAlign: TextAlign.center,
+                                      style: const TextStyle(
+                                        color: SpartanPalette.ink,
+                                        fontWeight: FontWeight.w600,
                                       ),
                                     ),
                                   ),
@@ -1201,35 +763,22 @@ class _AuthScreenState extends State<AuthScreen> {
 
                       const Spacer(),
 
-                      const SizedBox(
-                        height: 20,
-                      ),
+                      const SizedBox(height: 20),
 
                       Text(
                         _isRegisterMode
                             ? 'SPARTA • FENIX • REGISTRATION'
                             : 'SPARTA • FENIX • SECURE CHAT',
-                        textAlign:
-                            TextAlign.center,
-                        style:
-                            TextStyle(
-                          color:
-                              Colors.white.withValues(
-                            alpha:
-                                0.40,
-                          ),
-                          fontSize:
-                              10,
-                          fontWeight:
-                              FontWeight.w600,
-                          letterSpacing:
-                              1.2,
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: SpartanPalette.ink.withValues(alpha: 0.40),
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          letterSpacing: 1.2,
                         ),
                       ),
 
-                      const SizedBox(
-                        height: 6,
-                      ),
+                      const SizedBox(height: 6),
                     ],
                   ),
                 ),

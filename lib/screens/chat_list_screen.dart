@@ -1,4 +1,13 @@
+import '../theme/spartan_theme.dart';
+
 import 'dart:async';
+
+import '../services/system_call_service.dart';
+import '../services/call_service.dart';
+import '../services/call_history_service.dart';
+import '../widgets/spartan_brand.dart';
+import 'saved_messages_screen.dart';
+
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -11,23 +20,28 @@ import '../services/storage_service.dart';
 import '../settings_screen.dart';
 import 'auth_screen.dart';
 import 'chat_screen.dart';
+import 'group_chat_screen.dart';
+import 'group_create_screen.dart';
 
 class ChatListScreen extends StatefulWidget {
-  const ChatListScreen({
-    super.key,
-  });
+  const ChatListScreen({super.key});
 
   @override
-  State<ChatListScreen> createState() =>
-      _ChatListScreenState();
+  State<ChatListScreen> createState() => _ChatListScreenState();
 }
 
-class _ChatListScreenState
-    extends State<ChatListScreen> {
+class _ChatListScreenState extends State<ChatListScreen> {
   List<String> _chats = [];
   List<String> _onlineUsers = [];
+  // SPARTAN_STAGE24_GROUPS
+  List<Map<String, dynamic>> _groups = <Map<String, dynamic>>[];
 
   bool _isLoading = true;
+  final _search = TextEditingController();
+  int _filter = 0;
+  int _section = 0;
+  bool _desktopSaved = false;
+  Map<String, dynamic>? _selectedDesktopGroup;
 
   String? _selectedDesktopUser;
 
@@ -55,54 +69,45 @@ class _ChatListScreenState
   void initState() {
     super.initState();
 
-    SocketService.instance.addMessageHandler(
-      _handleMessage,
-    );
+    SocketService.instance.addMessageHandler(_handleMessage);
 
     SocketService.instance.getOfflineMessages();
+    SocketService.instance.getGroups();
 
-    _notificationTapSubscription =
-        NotificationService.instance.notificationTapStream.listen(
-      _handleNotificationPayload,
-    );
+    _notificationTapSubscription = NotificationService
+        .instance
+        .notificationTapStream
+        .listen(_handleNotificationPayload);
 
-    _firebaseNotificationTapSubscription =
-        FirebaseMessagingService.instance.notificationTapStream.listen(
-      _handleNotificationPayload,
-    );
+    _firebaseNotificationTapSubscription = FirebaseMessagingService
+        .instance
+        .notificationTapStream
+        .listen(_handleNotificationPayload);
 
-    WidgetsBinding.instance.addPostFrameCallback(
-      (_) {
-        final localPayload =
-            NotificationService.instance.takeInitialPayload();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      SocketService.instance.requestPendingCall();
+      unawaited(SystemCallService.instance.restorePending());
+      unawaited(SystemCallService.instance.requestPermissions(context));
+      final localPayload = NotificationService.instance.takeInitialPayload();
 
-        final firebasePayload =
-            FirebaseMessagingService.instance.takeInitialPayload();
+      final firebasePayload = FirebaseMessagingService.instance
+          .takeInitialPayload();
 
-        final payload =
-            firebasePayload ??
-            localPayload;
+      final payload = firebasePayload ?? localPayload;
 
-        if (payload != null) {
-          _handleNotificationPayload(
-            payload,
-          );
-        }
-      },
-    );
+      if (payload != null) {
+        _handleNotificationPayload(payload);
+      }
+    });
 
-    _loadChats(
-      requestAvatars: true,
-    );
+    _loadChats(requestAvatars: true);
 
     _loadOnlineUsers();
   }
 
   @override
   void dispose() {
-    SocketService.instance.removeMessageHandler(
-      _handleMessage,
-    );
+    SocketService.instance.removeMessageHandler(_handleMessage);
 
     _notificationTapSubscription?.cancel();
     _notificationTapSubscription = null;
@@ -117,6 +122,7 @@ class _ChatListScreenState
     _typingTimers.clear();
     _typingUsers.clear();
 
+    _search.dispose();
     _avatarCache.clear();
     _avatarBase64Cache.clear();
 
@@ -127,14 +133,10 @@ class _ChatListScreenState
   // ЗАГРУЗКА ЧАТОВ
   // ========================================
 
-  void _loadChats({
-    bool requestAvatars = false,
-  }) {
-    final currentUser =
-        SocketService.instance.currentUser;
+  void _loadChats({bool requestAvatars = false}) {
+    final currentUser = SocketService.instance.currentUser;
 
-    if (currentUser == null ||
-        currentUser.isEmpty) {
+    if (currentUser == null || currentUser.isEmpty) {
       if (!mounted) {
         return;
       }
@@ -147,24 +149,15 @@ class _ChatListScreenState
       return;
     }
 
-    final storedChats =
-        StorageService.getChatUsers(
-      currentUser,
-    );
+    final storedChats = StorageService.getChatUsers(currentUser);
 
     final combined = <String>{};
 
-    combined.addAll(
-      storedChats,
-    );
+    combined.addAll(storedChats);
 
-    combined.addAll(
-      _onlineUsers,
-    );
+    combined.addAll(_onlineUsers);
 
-    combined.remove(
-      currentUser,
-    );
+    combined.remove(currentUser);
 
     final chats = combined.toList();
 
@@ -173,14 +166,16 @@ class _ChatListScreenState
     }
 
     setState(() {
-      _chats = chats;
+      final groupEntries = _groups
+          .map((group) => "group::${group['id']?.toString() ?? ''}")
+          .where((value) => value != 'group::')
+          .toList();
+      _chats = <String>[...groupEntries, ...chats];
       _isLoading = false;
     });
 
     if (requestAvatars) {
-      _requestMissingAvatars(
-        chats,
-      );
+      _requestMissingAvatars(chats);
     }
   }
 
@@ -189,37 +184,23 @@ class _ChatListScreenState
   // ========================================
 
   Future<void> _refreshChats() async {
-    _loadChats(
-      requestAvatars: true,
-    );
+    _loadChats(requestAvatars: true);
 
     _loadOnlineUsers();
 
-    await Future<void>.delayed(
-      const Duration(
-        milliseconds: 350,
-      ),
-    );
+    await Future<void>.delayed(const Duration(milliseconds: 350));
   }
 
   // ========================================
   // ЗАПРОС НЕДОСТАЮЩИХ АВАТАРОК
   // ========================================
 
-  void _requestMissingAvatars(
-    List<String> users,
-  ) {
+  void _requestMissingAvatars(List<String> users) {
     for (final user in users) {
-      final avatar =
-          StorageService.getAvatar(
-        user,
-      );
+      final avatar = StorageService.getAvatar(user);
 
-      if (avatar == null ||
-          avatar.isEmpty) {
-        SocketService.instance.requestAvatar(
-          user,
-        );
+      if (avatar == null || avatar.isEmpty) {
+        SocketService.instance.requestAvatar(user);
       }
     }
   }
@@ -236,10 +217,7 @@ class _ChatListScreenState
   // ПЕЧАТАЕТ
   // ========================================
 
-  void _setUserTyping(
-    String user,
-    bool isTyping,
-  ) {
+  void _setUserTyping(String user, bool isTyping) {
     if (user.isEmpty) {
       return;
     }
@@ -253,41 +231,27 @@ class _ChatListScreenState
 
     if (isTyping) {
       setState(() {
-        _typingUsers.add(
-          user,
-        );
+        _typingUsers.add(user);
       });
 
-      _typingTimers[user] =
-          Timer(
-        const Duration(
-          seconds: 4,
-        ),
-        () {
-          if (!mounted) {
-            return;
-          }
+      _typingTimers[user] = Timer(const Duration(seconds: 4), () {
+        if (!mounted) {
+          return;
+        }
 
-          setState(() {
-            _typingUsers.remove(
-              user,
-            );
-          });
+        setState(() {
+          _typingUsers.remove(user);
+        });
 
-          _typingTimers.remove(
-            user,
-          );
-        },
-      );
+        _typingTimers.remove(user);
+      });
 
       return;
     }
 
     if (_typingUsers.contains(user)) {
       setState(() {
-        _typingUsers.remove(
-          user,
-        );
+        _typingUsers.remove(user);
       });
     }
   }
@@ -296,70 +260,99 @@ class _ChatListScreenState
   // ОБРАБОТКА СООБЩЕНИЙ СЕРВЕРА
   // ========================================
 
-  void _handleMessage(
-    Map<String, dynamic> msg,
-  ) {
-    final type =
-        msg['type']?.toString() ?? '';
+  void _handleMessage(Map<String, dynamic> msg) {
+    final type = msg['type']?.toString() ?? '';
 
-    final rawData =
-        msg['data'];
+    final rawData = msg['data'];
 
-    final data =
-        rawData is Map
-            ? Map<String, dynamic>.from(
-                rawData,
-              )
-            : <String, dynamic>{};
+    final data = rawData is Map
+        ? Map<String, dynamic>.from(rawData)
+        : <String, dynamic>{};
 
+    // SPARTAN_STAGE24_GROUPS
+    if (type == 'groups') {
+      final rawGroups = data['groups'];
+      if (rawGroups is! List) {
+        return;
+      }
+
+      _groups = rawGroups
+          .whereType<Map>()
+          .map((group) => Map<String, dynamic>.from(group))
+          .where((group) => (group['id']?.toString() ?? '').isNotEmpty)
+          .toList();
+
+      _loadChats();
+      return;
+    }
+
+    if (type == 'group_created') {
+      final rawGroup = data['group'];
+      if (rawGroup is! Map) {
+        return;
+      }
+
+      final group = Map<String, dynamic>.from(rawGroup);
+      final groupId = group['id']?.toString() ?? '';
+      if (groupId.isEmpty) {
+        return;
+      }
+
+      _groups.removeWhere((item) => item['id']?.toString() == groupId);
+      _groups.insert(0, group);
+
+      _loadChats();
+      return;
+    }
+    // SPARTAN_STAGE24_1_ADD_MEMBERS
+    if (type == 'group_updated') {
+      final rawGroup = data['group'];
+      if (rawGroup is! Map) {
+        return;
+      }
+
+      final group = Map<String, dynamic>.from(rawGroup);
+      final groupId = group['id']?.toString() ?? '';
+      if (groupId.isEmpty) {
+        return;
+      }
+
+      _groups.removeWhere((item) => item['id']?.toString() == groupId);
+      _groups.insert(0, group);
+
+      _loadChats();
+      return;
+    }
     if (type == 'users') {
-      final rawUsers =
-          data['users'];
+      final rawUsers = data['users'];
 
       if (rawUsers is! List) {
         return;
       }
 
-      final currentUser =
-          SocketService.instance.currentUser ??
-              '';
+      final currentUser = SocketService.instance.currentUser ?? '';
 
-      final users =
-          rawUsers
-              .map(
-                (user) =>
-                    user.toString(),
-              )
-              .where(
-                (user) =>
-                    user.isNotEmpty &&
-                    user != currentUser,
-              )
-              .toList();
+      final users = rawUsers
+          .map((user) => user.toString())
+          .where((user) => user.isNotEmpty && user != currentUser)
+          .toList();
 
       _onlineUsers = users;
 
       _loadChats();
 
-      _requestMissingAvatars(
-        users,
-      );
+      _requestMissingAvatars(users);
 
       return;
     }
 
     if (type == 'avatar_data') {
-      final username =
-          data['username']?.toString() ?? '';
+      final username = data['username']?.toString() ?? '';
 
       if (username.isNotEmpty) {
-        _avatarCache.remove(
-          username,
-        );
+        _avatarCache.remove(username);
 
-        _avatarBase64Cache.remove(
-          username,
-        );
+        _avatarBase64Cache.remove(username);
       }
 
       if (mounted) {
@@ -370,17 +363,12 @@ class _ChatListScreenState
     }
 
     if (type == 'avatar_updated') {
-      final username =
-          data['username']?.toString() ?? '';
+      final username = data['username']?.toString() ?? '';
 
       if (username.isNotEmpty) {
-        _avatarCache.remove(
-          username,
-        );
+        _avatarCache.remove(username);
 
-        _avatarBase64Cache.remove(
-          username,
-        );
+        _avatarBase64Cache.remove(username);
       }
 
       return;
@@ -391,24 +379,13 @@ class _ChatListScreenState
     // ========================================
 
     if (type == 'typing') {
-      final currentUser =
-          SocketService.instance.currentUser ??
-              '';
+      final currentUser = SocketService.instance.currentUser ?? '';
 
-      final from =
-          data['from']
-                  ?.toString()
-                  .trim() ??
-              '';
+      final from = data['from']?.toString().trim() ?? '';
 
-      final to =
-          data['to']
-                  ?.toString()
-                  .trim() ??
-              '';
+      final to = data['to']?.toString().trim() ?? '';
 
-      final isTyping =
-          data['isTyping'] == true;
+      final isTyping = data['isTyping'] == true;
 
       if (currentUser.isEmpty ||
           from.isEmpty ||
@@ -417,119 +394,123 @@ class _ChatListScreenState
         return;
       }
 
-      _setUserTyping(
-        from,
-        isTyping,
-      );
+      _setUserTyping(from, isTyping);
 
       return;
     }
 
     if (type == 'message_edited') {
-      final currentUser =
-          SocketService.instance.currentUser ??
-              '';
+      final currentUser = SocketService.instance.currentUser ?? '';
 
-      final messageId =
-          data['messageId']
-                  ?.toString()
-                  .trim() ??
-              '';
+      final messageId = data['messageId']?.toString().trim() ?? '';
 
-      final from =
-          data['from']
-                  ?.toString()
-                  .trim() ??
-              '';
+      final from = data['from']?.toString().trim() ?? '';
 
-      final to =
-          data['to']
-                  ?.toString()
-                  .trim() ??
-              '';
+      final to = data['to']?.toString().trim() ?? '';
 
-      final newText =
-          data['newText']
-                  ?.toString()
-                  .trim() ??
-              '';
+      final newText = data['newText']?.toString().trim() ?? '';
 
       final editedAt =
-          data['editedAt']
-                  ?.toString()
-                  .trim() ??
-              DateTime.now()
-                  .toIso8601String();
+          data['editedAt']?.toString().trim() ??
+          DateTime.now().toIso8601String();
 
       if (currentUser.isEmpty ||
           messageId.isEmpty ||
           newText.isEmpty ||
-          (from != currentUser &&
-              to != currentUser)) {
+          (from != currentUser && to != currentUser)) {
         return;
       }
 
-      final otherUser =
-          from == currentUser
-              ? to
-              : from;
+      final otherUser = from == currentUser ? to : from;
 
       if (otherUser.isEmpty) {
         return;
       }
 
-      final messages =
-          StorageService.getMessages(
-        currentUser,
-        otherUser,
-      );
+      final messages = StorageService.getMessages(currentUser, otherUser);
 
       var changed = false;
 
       for (final message in messages) {
-        final id =
-            message['id']
-                    ?.toString()
-                    .trim() ??
-                '';
+        final id = message['id']?.toString().trim() ?? '';
 
         if (id == messageId) {
-          message['text'] =
-              newText;
-          message['isEdited'] =
-              true;
-          message['editedAt'] =
-              editedAt;
+          message['text'] = newText;
+          message['isEdited'] = true;
+          message['editedAt'] = editedAt;
           changed = true;
         }
 
-        final rawReply =
-            message['replyTo'];
+        final rawReply = message['replyTo'];
 
-        if (rawReply is Map &&
-            rawReply['id']
-                    ?.toString()
-                    .trim() ==
-                messageId) {
-          final reply =
-              Map<String, dynamic>.from(
-            rawReply,
-          );
+        if (rawReply is Map && rawReply['id']?.toString().trim() == messageId) {
+          final reply = Map<String, dynamic>.from(rawReply);
 
-          reply['text'] =
-              newText;
-          message['replyTo'] =
-              reply;
+          reply['text'] = newText;
+          message['replyTo'] = reply;
           changed = true;
         }
       }
 
       if (changed) {
-        StorageService.saveMessages(
-          currentUser,
-          otherUser,
-          messages,
-        );
+        StorageService.saveMessages(currentUser, otherUser, messages);
+
+        _loadChats();
+      }
+
+      return;
+    }
+
+    if (type == 'message_deleted') {
+      final currentUser = SocketService.instance.currentUser ?? '';
+
+      final messageId = data['messageId']?.toString().trim() ?? '';
+
+      final from = data['from']?.toString().trim() ?? '';
+
+      final to = data['to']?.toString().trim() ?? '';
+
+      if (currentUser.isEmpty ||
+          messageId.isEmpty ||
+          (from != currentUser && to != currentUser)) {
+        return;
+      }
+
+      final otherUser = from == currentUser ? to : from;
+
+      if (otherUser.isEmpty) {
+        return;
+      }
+
+      final messages = StorageService.getMessages(currentUser, otherUser);
+
+      var changed = false;
+
+      final before = messages.length;
+
+      messages.removeWhere(
+        (message) => message['id']?.toString().trim() == messageId,
+      );
+
+      if (messages.length != before) {
+        changed = true;
+      }
+
+      for (final message in messages) {
+        final rawReply = message['replyTo'];
+
+        if (rawReply is Map && rawReply['id']?.toString().trim() == messageId) {
+          message.remove('replyTo');
+          changed = true;
+        }
+      }
+
+      if (changed) {
+        StorageService.saveMessages(currentUser, otherUser, messages);
+
+        if (messages.isEmpty) {
+          StorageService.clearUnreadCount(currentUser, otherUser);
+        }
 
         _loadChats();
       }
@@ -538,27 +519,17 @@ class _ChatListScreenState
     }
 
     if (type == 'message') {
-      final currentUser =
-          SocketService.instance.currentUser ??
-              '';
+      final currentUser = SocketService.instance.currentUser ?? '';
 
-      final from =
-          data['from']?.toString() ?? '';
+      final from = data['from']?.toString() ?? '';
 
-      final to =
-          data['to']?.toString() ??
-              currentUser;
+      final to = data['to']?.toString() ?? currentUser;
 
-      final text =
-          data['text']?.toString() ?? '';
+      final text = data['text']?.toString() ?? '';
 
-      final time =
-          data['time']?.toString() ??
-              DateTime.now()
-                  .toIso8601String();
+      final time = data['time']?.toString() ?? DateTime.now().toIso8601String();
 
-      final id =
-          data['id']?.toString() ?? '';
+      final id = data['id']?.toString() ?? '';
 
       if (currentUser.isEmpty ||
           from.isEmpty ||
@@ -567,84 +538,68 @@ class _ChatListScreenState
         return;
       }
 
-      _setUserTyping(
-        from,
-        false,
-      );
+      _setUserTyping(from, false);
 
-      final messages =
-          StorageService.getMessages(
-        currentUser,
-        from,
-      );
+      final messages = StorageService.getMessages(currentUser, from);
 
       bool alreadyExists = false;
 
       for (final message in messages) {
-        final oldId =
-            message['id']?.toString() ?? '';
+        final oldId = message['id']?.toString() ?? '';
 
-        if (id.isNotEmpty &&
-            oldId.isNotEmpty &&
-            oldId == id) {
+        if (id.isNotEmpty && oldId.isNotEmpty && oldId == id) {
           alreadyExists = true;
           break;
         }
 
-        final oldFrom =
-            message['from']?.toString() ?? '';
+        final oldFrom = message['from']?.toString() ?? '';
 
-        final oldText =
-            message['text']?.toString() ?? '';
+        final oldText = message['text']?.toString() ?? '';
 
-        final oldTime =
-            message['time']?.toString() ?? '';
+        final oldTime = message['time']?.toString() ?? '';
 
-        if (oldFrom == from &&
-            oldText == text &&
-            oldTime == time) {
+        if (oldFrom == from && oldText == text && oldTime == time) {
           alreadyExists = true;
           break;
         }
       }
 
       if (!alreadyExists) {
-        messages.add(
-          {
-            'id': id,
-            'from': from,
-            'to': to,
-            'text': text,
-            'time': time,
-            'status': 'delivered',
-            if (data['replyTo'] is Map)
-              'replyTo': Map<String, dynamic>.from(
-                data['replyTo'] as Map,
-              ),
-            if (data['forwardedFrom'] != null)
-              'forwardedFrom':
-                  data['forwardedFrom'].toString(),
-            if (data['forwardComment'] != null)
-              'forwardComment':
-                  data['forwardComment'].toString(),
-            if (data['isEdited'] == true)
-              'isEdited': true,
-            if (data['editedAt'] != null)
-              'editedAt':
-                  data['editedAt'].toString(),
-          },
-        );
+        messages.add({
+          'id': id,
+          'from': from,
+          'to': to,
+          'text': text,
+          'messageType': data['messageType']?.toString().trim() ?? 'text',
+          if (data['voiceData'] is String)
+            'voiceData': data['voiceData'].toString(),
+          if (data['voiceDurationMs'] != null)
+            'voiceDurationMs': data['voiceDurationMs'],
+          if (data['voiceMimeType'] != null)
+            'voiceMimeType': data['voiceMimeType'].toString(),
+          if (data['mediaId'] != null &&
+              data['mediaId'].toString().trim().isNotEmpty)
+            'mediaId': data['mediaId'].toString(),
+          if (data['mediaData'] is String)
+            'mediaData': data['mediaData'].toString(),
+          if (data['fileName'] != null) 'fileName': data['fileName'].toString(),
+          if (data['fileSize'] != null) 'fileSize': data['fileSize'],
+          if (data['mimeType'] != null) 'mimeType': data['mimeType'].toString(),
+          'time': time,
+          'status': 'delivered',
+          if (data['replyTo'] is Map)
+            'replyTo': Map<String, dynamic>.from(data['replyTo'] as Map),
+          if (data['forwardedFrom'] != null)
+            'forwardedFrom': data['forwardedFrom'].toString(),
+          if (data['forwardComment'] != null)
+            'forwardComment': data['forwardComment'].toString(),
+          if (data['isEdited'] == true) 'isEdited': true,
+          if (data['editedAt'] != null) 'editedAt': data['editedAt'].toString(),
+        });
 
-        StorageService.saveMessages(
-          currentUser,
-          from,
-          messages,
-        );
+        StorageService.saveMessages(currentUser, from, messages);
 
-        StorageService.incrementUnreadCount(
-          currentUser,
-          from,
-        );
+        StorageService.incrementUnreadCount(currentUser, from);
       }
 
       _loadChats();
@@ -653,60 +608,39 @@ class _ChatListScreenState
     }
 
     if (type == 'message_sent') {
-      final currentUser =
-          SocketService.instance.currentUser ??
-              '';
+      final currentUser = SocketService.instance.currentUser ?? '';
 
-      final to =
-          data['to']?.toString() ?? '';
+      final to = data['to']?.toString() ?? '';
 
-      final text =
-          data['text']?.toString() ?? '';
+      final text = data['text']?.toString() ?? '';
 
-      final time =
-          data['time']?.toString() ??
-              DateTime.now()
-                  .toIso8601String();
+      final time = data['time']?.toString() ?? DateTime.now().toIso8601String();
 
-      final id =
-          data['id']?.toString() ?? '';
+      final id = data['id']?.toString() ?? '';
 
-      if (currentUser.isEmpty ||
-          to.isEmpty ||
-          text.isEmpty) {
+      if (currentUser.isEmpty || to.isEmpty || text.isEmpty) {
         return;
       }
 
-      final messages =
-          StorageService.getMessages(
-        currentUser,
-        to,
-      );
+      final messages = StorageService.getMessages(currentUser, to);
 
       bool alreadyExists = false;
 
       for (final message in messages) {
-        final oldId =
-            message['id']?.toString() ?? '';
+        final oldId = message['id']?.toString() ?? '';
 
-        if (id.isNotEmpty &&
-            oldId.isNotEmpty &&
-            oldId == id) {
+        if (id.isNotEmpty && oldId.isNotEmpty && oldId == id) {
           alreadyExists = true;
           break;
         }
 
-        final oldFrom =
-            message['from']?.toString() ?? '';
+        final oldFrom = message['from']?.toString() ?? '';
 
-        final oldTo =
-            message['to']?.toString() ?? '';
+        final oldTo = message['to']?.toString() ?? '';
 
-        final oldText =
-            message['text']?.toString() ?? '';
+        final oldText = message['text']?.toString() ?? '';
 
-        final oldTime =
-            message['time']?.toString() ?? '';
+        final oldTime = message['time']?.toString() ?? '';
 
         if (oldFrom == currentUser &&
             oldTo == to &&
@@ -718,37 +652,39 @@ class _ChatListScreenState
       }
 
       if (!alreadyExists) {
-        messages.add(
-          {
-            'id': id,
-            'from': currentUser,
-            'to': to,
-            'text': text,
-            'time': time,
-            'status': 'sent',
-            if (data['replyTo'] is Map)
-              'replyTo': Map<String, dynamic>.from(
-                data['replyTo'] as Map,
-              ),
-            if (data['forwardedFrom'] != null)
-              'forwardedFrom':
-                  data['forwardedFrom'].toString(),
-            if (data['forwardComment'] != null)
-              'forwardComment':
-                  data['forwardComment'].toString(),
-            if (data['isEdited'] == true)
-              'isEdited': true,
-            if (data['editedAt'] != null)
-              'editedAt':
-                  data['editedAt'].toString(),
-          },
-        );
+        messages.add({
+          'id': id,
+          'from': currentUser,
+          'to': to,
+          'text': text,
+          'messageType': data['messageType']?.toString().trim() ?? 'text',
+          if (data['voiceData'] is String)
+            'voiceData': data['voiceData'].toString(),
+          if (data['voiceDurationMs'] != null)
+            'voiceDurationMs': data['voiceDurationMs'],
+          if (data['voiceMimeType'] != null)
+            'voiceMimeType': data['voiceMimeType'].toString(),
+          if (data['mediaId'] != null &&
+              data['mediaId'].toString().trim().isNotEmpty)
+            'mediaId': data['mediaId'].toString(),
+          if (data['mediaData'] is String)
+            'mediaData': data['mediaData'].toString(),
+          if (data['fileName'] != null) 'fileName': data['fileName'].toString(),
+          if (data['fileSize'] != null) 'fileSize': data['fileSize'],
+          if (data['mimeType'] != null) 'mimeType': data['mimeType'].toString(),
+          'time': time,
+          'status': 'sent',
+          if (data['replyTo'] is Map)
+            'replyTo': Map<String, dynamic>.from(data['replyTo'] as Map),
+          if (data['forwardedFrom'] != null)
+            'forwardedFrom': data['forwardedFrom'].toString(),
+          if (data['forwardComment'] != null)
+            'forwardComment': data['forwardComment'].toString(),
+          if (data['isEdited'] == true) 'isEdited': true,
+          if (data['editedAt'] != null) 'editedAt': data['editedAt'].toString(),
+        });
 
-        StorageService.saveMessages(
-          currentUser,
-          to,
-          messages,
-        );
+        StorageService.saveMessages(currentUser, to, messages);
       }
 
       _loadChats();
@@ -761,15 +697,13 @@ class _ChatListScreenState
   // НАЖАТИЕ НА УВЕДОМЛЕНИЕ
   // ========================================
 
-  void _handleNotificationPayload(
-    String payload,
-  ) {
+  void _handleNotificationPayload(String payload) {
+    if (CallService.instance.hasCall) return;
     if (!mounted) {
       return;
     }
 
-    final value =
-        payload.trim();
+    final value = payload.trim();
 
     if (value.isEmpty) {
       return;
@@ -777,69 +711,58 @@ class _ChatListScreenState
 
     String? user;
 
+    if (value.startsWith('group:')) {
+      final id = value.substring('group:'.length);
+      for (final group in _groups) {
+        if (group['id']?.toString() == id) {
+          _openGroup(group);
+          return;
+        }
+      }
+      return;
+    }
+
     if (value.startsWith('message:')) {
-      user =
-          value.substring(
-        'message:'.length,
-      ).trim();
+      user = value.substring('message:'.length).trim();
     } else if (value.startsWith('reaction:')) {
-      user =
-          value.substring(
-        'reaction:'.length,
-      ).trim();
+      user = value.substring('reaction:'.length).trim();
     }
 
-    if (user == null ||
-        user.isEmpty) {
+    if (user == null || user.isEmpty) {
       return;
     }
 
-    final currentUser =
-        SocketService.instance.currentUser ?? '';
+    final currentUser = SocketService.instance.currentUser ?? '';
 
-    if (currentUser.isEmpty ||
-        user == currentUser) {
+    if (currentUser.isEmpty || user == currentUser) {
       return;
     }
 
-    print(
-      '🔔 Открываем чат из уведомления: $user',
-    );
+    print('🔔 Открываем чат из уведомления: $user');
 
     // При входе именно через шторку очищаем
     // уведомления приложения. Это также убирает
     // системное FCM-уведомление, которое нельзя
     // удалить по локальному ID собеседника.
-    unawaited(
-      NotificationService.instance.cancelAll(),
-    );
+    unawaited(NotificationService.instance.cancelAll());
 
-    _openChat(
-      user,
-    );
+    _openChat(user);
   }
 
   // ========================================
   // ОТКРЫТИЕ ЧАТА
   // ========================================
 
-  void _openChat(
-    String user,
-  ) {
-    final currentUser =
-        SocketService.instance.currentUser ?? '';
+  void _openChat(String user) {
+    final currentUser = SocketService.instance.currentUser ?? '';
 
     if (currentUser.isEmpty) {
       return;
     }
 
-    StorageService.clearUnreadCount(
-      currentUser,
-      user,
-    );
+    StorageService.clearUnreadCount(currentUser, user);
 
-    final isDesktopLayout =
-        MediaQuery.sizeOf(context).width >= 900;
+    final isDesktopLayout = MediaQuery.sizeOf(context).width >= 900;
 
     if (isDesktopLayout) {
       if (!mounted) {
@@ -848,6 +771,9 @@ class _ChatListScreenState
 
       setState(() {
         _selectedDesktopUser = user;
+        _selectedDesktopGroup = null;
+        _desktopSaved = false;
+        _section = 0;
       });
 
       return;
@@ -859,42 +785,29 @@ class _ChatListScreenState
 
     Navigator.push(
       context,
-      MaterialPageRoute(
-        builder: (_) =>
-            ChatScreen(
-          targetUser: user,
-        ),
-      ),
-    ).then(
-      (_) {
-        if (!mounted) {
-          return;
-        }
+      MaterialPageRoute(builder: (_) => ChatScreen(targetUser: user)),
+    ).then((_) {
+      if (!mounted) {
+        return;
+      }
 
-        _loadChats();
-        _loadOnlineUsers();
-      },
-    );
+      _loadChats();
+      _loadOnlineUsers();
+    });
   }
 
   // ========================================
   // УДАЛЕНИЕ ЧАТА
   // ========================================
 
-  Future<void> _deleteChat(
-    String user,
-  ) async {
-    final currentUser =
-        SocketService.instance.currentUser ?? '';
+  Future<void> _deleteChat(String user) async {
+    final currentUser = SocketService.instance.currentUser ?? '';
 
     if (currentUser.isEmpty) {
       return;
     }
 
-    await StorageService.removeChat(
-      currentUser,
-      user,
-    );
+    await StorageService.removeChat(currentUser, user);
 
     if (!mounted) {
       return;
@@ -910,15 +823,9 @@ class _ChatListScreenState
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(
-          'Чат с $user удалён',
-        ),
-        backgroundColor:
-            Colors.red,
-        duration:
-            const Duration(
-          seconds: 1,
-        ),
+        content: Text('Чат с $user удалён'),
+        backgroundColor: Colors.red,
+        duration: const Duration(seconds: 1),
       ),
     );
   }
@@ -927,69 +834,47 @@ class _ChatListScreenState
   // ПОСЛЕДНЕЕ СООБЩЕНИЕ
   // ========================================
 
-  String _getLastMessage(
-    String user,
-  ) {
-    final currentUser =
-        SocketService.instance.currentUser ?? '';
+  String _getLastMessage(String user) {
+    final currentUser = SocketService.instance.currentUser ?? '';
 
     if (currentUser.isEmpty) {
       return '';
     }
 
-    final messages =
-        StorageService.getMessages(
-      currentUser,
-      user,
-    );
+    final messages = StorageService.getMessages(currentUser, user);
 
     if (messages.isEmpty) {
       return '';
     }
 
-    return messages.last['text']
-            ?.toString() ??
-        '';
+    return messages.last['text']?.toString() ?? '';
   }
 
   // ========================================
   // ВРЕМЯ
   // ========================================
 
-  String _getLastMessageTime(
-    String user,
-  ) {
-    final currentUser =
-        SocketService.instance.currentUser ?? '';
+  String _getLastMessageTime(String user) {
+    final currentUser = SocketService.instance.currentUser ?? '';
 
     if (currentUser.isEmpty) {
       return '';
     }
 
-    final messages =
-        StorageService.getMessages(
-      currentUser,
-      user,
-    );
+    final messages = StorageService.getMessages(currentUser, user);
 
     if (messages.isEmpty) {
       return '';
     }
 
-    final timeString =
-        messages.last['time']
-            ?.toString();
+    final timeString = messages.last['time']?.toString();
 
-    if (timeString == null ||
-        timeString.isEmpty) {
+    if (timeString == null || timeString.isEmpty) {
       return '';
     }
 
     try {
-      final time =
-          DateTime.parse(
-        timeString,
-      ).toLocal();
+      final time = DateTime.parse(timeString).toLocal();
 
       return '${time.hour.toString().padLeft(2, '0')}:'
           '${time.minute.toString().padLeft(2, '0')}';
@@ -1002,116 +887,68 @@ class _ChatListScreenState
   // СЧЁТЧИК
   // ========================================
 
-  int _getUnreadCount(
-    String user,
-  ) {
-    final currentUser =
-        SocketService.instance.currentUser ?? '';
+  int _getUnreadCount(String user) {
+    final currentUser = SocketService.instance.currentUser ?? '';
 
     if (currentUser.isEmpty) {
       return 0;
     }
 
-    return StorageService.getUnreadCount(
-      currentUser,
-      user,
-    );
+    return StorageService.getUnreadCount(currentUser, user);
   }
 
   // ========================================
   // ОНЛАЙН
   // ========================================
 
-  bool _isUserOnline(
-    String user,
-  ) {
-    return _onlineUsers.contains(
-      user,
-    );
+  bool _isUserOnline(String user) {
+    return _onlineUsers.contains(user);
   }
 
   // ========================================
   // АВАТАРКА С КЭШЕМ
   // ========================================
 
-  Widget _buildAvatar(
-    String username, {
-    double radius = 30,
-  }) {
-    final avatar =
-        StorageService.getAvatar(
-      username,
-    );
+  Widget _buildAvatar(String username, {double radius = 30}) {
+    final avatar = StorageService.getAvatar(username);
 
-    if (avatar != null &&
-        avatar.isNotEmpty) {
+    if (avatar != null && avatar.isNotEmpty) {
       try {
-        final cachedBase64 =
-            _avatarBase64Cache[
-                username];
+        final cachedBase64 = _avatarBase64Cache[username];
 
-        MemoryImage? image =
-            _avatarCache[
-                username];
+        MemoryImage? image = _avatarCache[username];
 
-        if (image == null ||
-            cachedBase64 != avatar) {
-          final bytes =
-              base64Decode(
-            avatar,
-          );
+        if (image == null || cachedBase64 != avatar) {
+          final bytes = base64Decode(avatar);
 
-          image =
-              MemoryImage(
-            bytes,
-          );
+          image = MemoryImage(bytes);
 
-          _avatarCache[
-              username] = image;
+          _avatarCache[username] = image;
 
-          _avatarBase64Cache[
-              username] = avatar;
+          _avatarBase64Cache[username] = avatar;
         }
 
         return CircleAvatar(
-          key: ValueKey(
-            'avatar_$username',
-          ),
+          key: ValueKey('avatar_$username'),
           radius: radius,
-          backgroundColor:
-              const Color(
-            0xFF111111,
-          ),
-          backgroundImage:
-              image,
+          backgroundColor: SpartanPalette.canvas,
+          backgroundImage: image,
         );
       } catch (error) {
-        print(
-          '❌ Ошибка аватарки $username: $error',
-        );
+        print('❌ Ошибка аватарки $username: $error');
       }
     }
 
     return CircleAvatar(
-      key: ValueKey(
-        'avatar_fallback_$username',
-      ),
+      key: ValueKey('avatar_fallback_$username'),
       radius: radius,
-      backgroundColor:
-          const Color(
-        0xFFD4AF37,
-      ),
+      backgroundColor: SpartanPalette.blue,
       child: Text(
-        username.isNotEmpty
-            ? username[0].toUpperCase()
-            : '?',
-        style:
-            TextStyle(
-          color: Colors.black,
-          fontSize:
-              radius * 0.72,
-          fontWeight:
-              FontWeight.bold,
+        username.isNotEmpty ? username[0].toUpperCase() : '?',
+        style: TextStyle(
+          color: SpartanPalette.ink,
+          fontSize: radius * 0.72,
+          fontWeight: FontWeight.bold,
         ),
       ),
     );
@@ -1121,93 +958,53 @@ class _ChatListScreenState
   // УВЕЛИЧЕННАЯ АВАТАРКА
   // ========================================
 
-  void _showAvatarPreview(
-    String username,
-  ) {
-    final avatar =
-        StorageService.getAvatar(
-      username,
-    );
+  void _showAvatarPreview(String username) {
+    final avatar = StorageService.getAvatar(username);
 
-    if (avatar == null ||
-        avatar.isEmpty) {
+    if (avatar == null || avatar.isEmpty) {
       return;
     }
 
     try {
-      final bytes =
-          base64Decode(
-        avatar,
-      );
+      final bytes = base64Decode(avatar);
 
       if (bytes.isEmpty) {
         return;
       }
 
-      final image =
-          MemoryImage(
-        bytes,
-      );
+      final image = MemoryImage(bytes);
 
       showDialog<void>(
         context: context,
-        barrierColor:
-            Colors.black.withValues(
-          alpha: 0.85,
-        ),
-        builder: (
-          dialogContext,
-        ) {
-          final screenWidth =
-              MediaQuery.of(
-            dialogContext,
-          ).size.width;
+        barrierColor: Colors.black.withValues(alpha: 0.85),
+        builder: (dialogContext) {
+          final screenWidth = MediaQuery.of(dialogContext).size.width;
 
-          final size =
-              screenWidth > 320
-                  ? 260.0
-                  : 220.0;
+          final size = screenWidth > 320 ? 260.0 : 220.0;
 
           return Dialog(
-            backgroundColor:
-                Colors.transparent,
+            backgroundColor: Colors.transparent,
             elevation: 0,
-            insetPadding:
-                const EdgeInsets.all(
-              24,
-            ),
+            insetPadding: const EdgeInsets.all(24),
             child: GestureDetector(
               onTap: () {
-                Navigator.of(
-                  dialogContext,
-                ).pop();
+                Navigator.of(dialogContext).pop();
               },
               child: Column(
-                mainAxisSize:
-                    MainAxisSize.min,
+                mainAxisSize: MainAxisSize.min,
                 children: [
                   Container(
                     width: size,
                     height: size,
-                    decoration:
-                        BoxDecoration(
-                      shape:
-                          BoxShape.circle,
-                      border:
-                          Border.all(
-                        color:
-                            const Color(
-                          0xFFD4AF37,
-                        ),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: const Color(0xFFD4AF37),
                         width: 3,
                       ),
                       boxShadow: [
                         BoxShadow(
-                          color:
-                              Colors.black
-                                  .withValues(
-                            alpha: 0.5,
-                          ),
+                          color: Colors.black.withValues(alpha: 0.5),
                           blurRadius: 20,
                           spreadRadius: 3,
                         ),
@@ -1218,25 +1015,19 @@ class _ChatListScreenState
                         image: image,
                         width: size,
                         height: size,
-                        fit:
-                            BoxFit.cover,
+                        fit: BoxFit.cover,
                       ),
                     ),
                   ),
 
-                  const SizedBox(
-                    height: 18,
-                  ),
+                  const SizedBox(height: 18),
 
                   Text(
                     username,
-                    style:
-                        const TextStyle(
-                      color:
-                          Colors.white,
+                    style: const TextStyle(
+                      color: Colors.white,
                       fontSize: 18,
-                      fontWeight:
-                          FontWeight.bold,
+                      fontWeight: FontWeight.bold,
                     ),
                   ),
                 ],
@@ -1246,9 +1037,7 @@ class _ChatListScreenState
         },
       );
     } catch (error) {
-      print(
-        '❌ Ошибка увеличения аватарки $username: $error',
-      );
+      print('❌ Ошибка увеличения аватарки $username: $error');
     }
   }
 
@@ -1256,1218 +1045,758 @@ class _ChatListScreenState
   // СТРОКА ЧАТА
   // ========================================
 
-  Widget _buildChatTile(
-    String user,
-  ) {
-    final lastMessage =
-        _getLastMessage(
-      user,
-    );
-
-    final lastTime =
-        _getLastMessageTime(
-      user,
-    );
-
-    final unreadCount =
-        _getUnreadCount(
-      user,
-    );
-
-    final isOnline =
-        _isUserOnline(
-      user,
-    );
-
-    final isTyping =
-        _typingUsers.contains(
-      user,
-    );
-
-    final isDesktopLayout =
-        MediaQuery.sizeOf(context).width >= 900;
-
-    final isSelected =
-        _selectedDesktopUser == user &&
-        isDesktopLayout;
-
-    return Dismissible(
-      key: Key(
-        user,
-      ),
-      direction:
-          DismissDirection.endToStart,
-      background:
-          Container(
-        alignment:
-            Alignment.centerRight,
-        padding:
-            const EdgeInsets.only(
-          right: 24,
-        ),
-        color:
-            Colors.red.withValues(
-          alpha: 0.92,
-        ),
-        child:
-            const Icon(
-          Icons.delete,
-          color:
-              Colors.white,
-        ),
-      ),
-      onDismissed:
-          (_) {
-        _deleteChat(
-          user,
-        );
-      },
-      child: Material(
-        color:
-            Colors.transparent,
-        child: Ink(
-          decoration:
-              BoxDecoration(
-            borderRadius:
-                isDesktopLayout
-                    ? BorderRadius.circular(
-                        12,
-                      )
-                    : null,
-            color:
-                isSelected
-                    ? null
-                    : Colors.black.withValues(
-                        alpha:
-                            isDesktopLayout
-                                ? 0.22
-                                : 0.16,
-                      ),
-            gradient:
-                isSelected
-                    ? LinearGradient(
-                        begin:
-                            Alignment.centerLeft,
-                        end:
-                            Alignment.centerRight,
-                        colors: [
-                          const Color(
-                            0xFFD4AF37,
-                          ).withValues(
-                            alpha: 0.22,
-                          ),
-                          const Color(
-                            0xFFD4AF37,
-                          ).withValues(
-                            alpha: 0.07,
-                          ),
-                          Colors.transparent,
-                        ],
-                      )
-                    : null,
-            border:
-                isDesktopLayout
-                    ? Border.all(
-                        color:
-                            isSelected
-                                ? const Color(
-                                    0xFFD4AF37,
-                                  ).withValues(
-                                    alpha: 0.42,
-                                  )
-                                : Colors.white.withValues(
-                                    alpha: 0.08,
-                                  ),
-                        width: 0.8,
-                      )
-                    : Border(
-                        bottom:
-                            BorderSide(
-                          color:
-                              isSelected
-                                  ? const Color(
-                                      0xFFD4AF37,
-                                    ).withValues(
-                                      alpha: 0.28,
-                                    )
-                                  : Colors.white.withValues(
-                                      alpha: 0.08,
-                                    ),
-                          width: 0.8,
-                        ),
-                      ),
-          ),
-        child: ListTile(
-          selected:
-              isSelected,
-          mouseCursor:
-              isDesktopLayout
-                  ? SystemMouseCursors.click
-                  : MouseCursor.defer,
-          hoverColor:
-              isDesktopLayout
-                  ? const Color(
-                      0xFFD4AF37,
-                    ).withValues(
-                      alpha: 0.075,
-                    )
-                  : null,
-          splashColor:
-              isDesktopLayout
-                  ? const Color(
-                      0xFFD4AF37,
-                    ).withValues(
-                      alpha: 0.13,
-                    )
-                  : null,
-          focusColor:
-              isDesktopLayout
-                  ? const Color(
-                      0xFFD4AF37,
-                    ).withValues(
-                      alpha: 0.08,
-                    )
-                  : null,
-          shape:
-              isDesktopLayout
-                  ? RoundedRectangleBorder(
-                      borderRadius:
-                          BorderRadius.circular(
-                        12,
-                      ),
-                    )
-                  : null,
-          dense:
-              isDesktopLayout,
-          visualDensity:
-              isDesktopLayout
-                  ? const VisualDensity(
-                      horizontal: -0.5,
-                      vertical: -0.7,
-                    )
-                  : null,
-          minTileHeight:
-              isDesktopLayout
-                  ? 82
-                  : 96,
-          contentPadding:
-              EdgeInsets.symmetric(
-            horizontal:
-                isDesktopLayout
-                    ? 14
-                    : 18,
-            vertical:
-                isDesktopLayout
-                    ? 4
-                    : 8,
-          ),
-          leading:
-              GestureDetector(
-            behavior:
-                HitTestBehavior.opaque,
-            onTap: () {
-              _showAvatarPreview(
-                user,
-              );
-            },
-            child:
-                Stack(
-              clipBehavior:
-                  Clip.none,
-              children: [
-                _buildAvatar(
-                  user,
-                  radius:
-                      isDesktopLayout
-                          ? 27
-                          : 30,
-                ),
-
-                if (isOnline)
-                  Positioned(
-                    right: -1,
-                    bottom: 2,
-                    child:
-                        Container(
-                      width:
-                          isDesktopLayout
-                              ? 14
-                              : 16,
-                      height:
-                          isDesktopLayout
-                              ? 14
-                              : 16,
-                      decoration:
-                          BoxDecoration(
-                        color:
-                            const Color(
-                          0xFF25D94F,
-                        ),
-                        shape:
-                            BoxShape.circle,
-                        border:
-                            Border.all(
-                          color:
-                              Colors.black,
-                          width: 2,
-                        ),
-                        boxShadow: [
-                          BoxShadow(
-                            color:
-                                Colors.black.withValues(
-                              alpha: 0.7,
-                            ),
-                            blurRadius: 3,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-
-          title:
-              Text(
-            user,
-            maxLines: 1,
-            overflow:
-                TextOverflow.ellipsis,
-            style:
-                TextStyle(
-              color:
-                  Colors.white,
-              fontWeight:
-                  FontWeight.w600,
-              fontSize:
-                  isDesktopLayout
-                      ? 16
-                      : 17,
-            ),
-          ),
-
-          subtitle:
-              Padding(
-            padding:
-                EdgeInsets.only(
-              top:
-                  isDesktopLayout
-                      ? 4
-                      : 7,
-            ),
-            child:
-                AnimatedSwitcher(
-              duration:
-                  const Duration(
-                milliseconds: 180,
-              ),
-              child:
-                  isTyping
-                      ? Row(
-                          key:
-                              ValueKey(
-                            'typing_$user',
-                          ),
-                          mainAxisSize:
-                              MainAxisSize.min,
-                          children: [
-                            const Icon(
-                              Icons.edit_outlined,
-                              size: 14,
-                              color:
-                                  Color(
-                                0xFFD4AF37,
-                              ),
-                            ),
-
-                            const SizedBox(
-                              width: 5,
-                            ),
-
-                            Text(
-                              'печатает',
-                              style:
-                                  TextStyle(
-                                color:
-                                    Color(
-                                  0xFFD4AF37,
-                                ),
-                                fontSize:
-                                    isDesktopLayout
-                                        ? 13
-                                        : 14,
-                                fontWeight:
-                                    FontWeight.w600,
-                              ),
-                            ),
-
-                            const SizedBox(
-                              width: 5,
-                            ),
-
-                            Text(
-                              '•••',
-                              style:
-                                  TextStyle(
-                                color:
-                                    const Color(
-                                  0xFFD4AF37,
-                                ).withValues(
-                                  alpha: 0.85,
-                                ),
-                                fontSize:
-                                  isDesktopLayout
-                                      ? 13
-                                      : 14,
-                                fontWeight:
-                                    FontWeight.bold,
-                                letterSpacing: 2,
-                              ),
-                            ),
-                          ],
-                        )
-                      : Align(
-                          key:
-                              ValueKey(
-                            'message_$user',
-                          ),
-                          alignment:
-                              Alignment.centerLeft,
-                          child:
-                              Text(
-                            lastMessage.isEmpty
-                                ? 'Нет сообщений'
-                                : lastMessage,
-                            maxLines: 1,
-                            overflow:
-                                TextOverflow.ellipsis,
-                            style:
-                                TextStyle(
-                              color:
-                                  unreadCount > 0
-                                      ? Colors.white
-                                      : Colors.white60,
-                              fontSize: 14,
-                              fontWeight:
-                                  unreadCount > 0
-                                      ? FontWeight.w600
-                                      : FontWeight.normal,
-                            ),
-                          ),
-                        ),
-            ),
-          ),
-
-          trailing:
-              SizedBox(
-            width:
-                isDesktopLayout
-                    ? 52
-                    : 58,
-            child:
-                Column(
-              mainAxisSize:
-                  MainAxisSize.min,
-              mainAxisAlignment:
-                  MainAxisAlignment.center,
-              crossAxisAlignment:
-                  CrossAxisAlignment.end,
-              children: [
-                if (lastTime.isNotEmpty)
-                  Text(
-                    lastTime,
-                    style:
-                        TextStyle(
-                      color:
-                          unreadCount > 0
-                              ? const Color(
-                                  0xFFD4AF37,
-                                )
-                              : Colors.white54,
-                      fontSize:
-                          isDesktopLayout
-                              ? 12
-                              : 13,
-                      fontWeight:
-                          unreadCount > 0
-                              ? FontWeight.w600
-                              : FontWeight.normal,
-                    ),
-                  ),
-
-                const SizedBox(
-                  height: 3,
-                ),
-
-                if (unreadCount > 0)
-                  Container(
-                    constraints:
-                        BoxConstraints(
-                      minWidth:
-                          isDesktopLayout
-                              ? 22
-                              : 26,
-                      minHeight:
-                          isDesktopLayout
-                              ? 22
-                              : 26,
-                    ),
-                    alignment:
-                        Alignment.center,
-                    padding:
-                        const EdgeInsets.symmetric(
-                      horizontal: 7,
-                    ),
-                    decoration:
-                        const BoxDecoration(
-                      color:
-                          Color(
-                        0xFFD4AF37,
-                      ),
-                      shape:
-                          BoxShape.circle,
-                    ),
-                    child:
-                        Text(
-                      unreadCount > 99
-                          ? '99+'
-                          : unreadCount
-                              .toString(),
-                      style:
-                          TextStyle(
-                        color:
-                            Colors.black,
-                        fontSize:
-                            isDesktopLayout
-                                ? 11
-                                : 12,
-                        fontWeight:
-                            FontWeight.bold,
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          ),
-
-          onTap: () {
-            _openChat(
-              user,
-            );
-          },
-        ),
-        ),
-      ),
-    );
-  }
-
   // ========================================
-  // ПУСТОЙ СПИСОК
+  // GROUPS — STAGE 24
+  // SPARTAN_STAGE24_GROUPS
   // ========================================
 
-  Widget _buildEmptyState() {
-    return RefreshIndicator(
-      color:
-          const Color(
-        0xFFD4AF37,
-      ),
-      backgroundColor:
-          const Color(
-        0xFF111111,
-      ),
-      onRefresh:
-          _refreshChats,
-      child: ListView(
-        physics:
-            const AlwaysScrollableScrollPhysics(),
-        children: [
-          SizedBox(
-            height:
-                MediaQuery.of(
-                      context,
-                    ).size.height *
-                    0.28,
-          ),
-
-          const Icon(
-            Icons.chat_bubble_outline,
-            size: 64,
-            color:
-                Color(
-              0xFFD4AF37,
-            ),
-          ),
-
-          const SizedBox(
-            height: 16,
-          ),
-
-          const Center(
-            child: Text(
-              'Нет чатов',
-              style:
-                  TextStyle(
-                color:
-                    Colors.white70,
-                fontSize: 16,
-              ),
-            ),
-          ),
-        ],
-      ),
+  Future<void> _openCreateGroup() async {
+    final result = await Navigator.push<Map<String, dynamic>>(
+      context,
+      MaterialPageRoute(builder: (_) => const GroupCreateScreen()),
     );
-  }
 
-  // ========================================
-  // СПИСОК ЧАТОВ
-  // ========================================
-
-  Widget _buildChatList() {
-    final isDesktopLayout =
-        MediaQuery.sizeOf(context).width >= 900;
-
-    return Stack(
-      children: [
-        RefreshIndicator(
-          color:
-              const Color(
-            0xFFD4AF37,
-          ),
-          backgroundColor:
-              const Color(
-            0xFF111111,
-          ),
-          onRefresh:
-              _refreshChats,
-          child:
-              ListView.builder(
-            physics:
-                const AlwaysScrollableScrollPhysics(
-              parent:
-                  BouncingScrollPhysics(),
-            ),
-            padding:
-                EdgeInsets.fromLTRB(
-              isDesktopLayout
-                  ? 6
-                  : 0,
-              isDesktopLayout
-                  ? 6
-                  : 0,
-              isDesktopLayout
-                  ? 6
-                  : 0,
-              isDesktopLayout
-                  ? 12
-                  : 58,
-            ),
-            itemCount:
-                _chats.length,
-            itemBuilder:
-                (
-              context,
-              index,
-            ) {
-              return _buildChatTile(
-                _chats[index],
-              );
-            },
-          ),
-        ),
-
-        // ==================================
-        // ПОДСКАЗКА ЗАКРЕПЛЕНА СНИЗУ
-        // ==================================
-
-        if (!isDesktopLayout)
-          Positioned(
-          left: 0,
-          right: 0,
-          bottom: 14,
-          child:
-              IgnorePointer(
-            child:
-                Center(
-              child:
-                  Container(
-                padding:
-                    const EdgeInsets.symmetric(
-                  horizontal: 14,
-                  vertical: 6,
-                ),
-                decoration:
-                    BoxDecoration(
-                  color:
-                      Colors.black.withValues(
-                    alpha: 0.38,
-                  ),
-                  borderRadius:
-                      BorderRadius.circular(
-                    20,
-                  ),
-                ),
-                child:
-                    Text(
-                  'Потяните вниз для обновления',
-                  style:
-                      TextStyle(
-                    color:
-                        Colors.white.withValues(
-                      alpha: 0.45,
-                    ),
-                    fontSize: 13,
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  // ========================================
-  // ЭКРАН
-  // ========================================
-
-  Widget _buildChatListPane() {
-    return Scaffold(
-      backgroundColor:
-          Colors.black,
-      appBar: AppBar(
-        toolbarHeight:
-            MediaQuery.sizeOf(context).width >= 900
-                ? 68
-                : kToolbarHeight,
-        backgroundColor:
-            Colors.black.withValues(
-          alpha: 0.94,
-        ),
-        surfaceTintColor:
-            Colors.transparent,
-        shadowColor:
-            Colors.transparent,
-        elevation: 0,
-        centerTitle:
-            MediaQuery.sizeOf(context).width < 900,
-        titleSpacing:
-            MediaQuery.sizeOf(context).width >= 900
-                ? 18
-                : NavigationToolbar.kMiddleSpacing,
-        title:
-            MediaQuery.sizeOf(context).width >= 900
-                ? const Column(
-                    mainAxisSize:
-                        MainAxisSize.min,
-                    crossAxisAlignment:
-                        CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'SPARTAN',
-                        style:
-                            TextStyle(
-                          color:
-                              Color(
-                            0xFFD4AF37,
-                          ),
-                          fontSize: 18,
-                          fontWeight:
-                              FontWeight.w800,
-                          letterSpacing: 1.4,
-                        ),
-                      ),
-                      SizedBox(
-                        height: 1,
-                      ),
-                      Text(
-                        'ЧАТЫ',
-                        style:
-                            TextStyle(
-                          color:
-                              Colors.white54,
-                          fontSize: 10,
-                          fontWeight:
-                              FontWeight.w600,
-                          letterSpacing: 2.2,
-                        ),
-                      ),
-                    ],
-                  )
-                : const Text(
-                    'Чаты',
-                    style:
-                        TextStyle(
-                      color:
-                          Color(
-                        0xFFD4AF37,
-                      ),
-                      fontSize: 21,
-                      fontWeight:
-                          FontWeight.w700,
-                    ),
-                  ),
-        bottom:
-            PreferredSize(
-          preferredSize:
-              const Size.fromHeight(
-            1,
-          ),
-          child:
-              Container(
-            height: 1,
-            color:
-                MediaQuery.sizeOf(context).width >= 900
-                    ? const Color(
-                        0xFFD4AF37,
-                      ).withValues(
-                        alpha: 0.24,
-                      )
-                    : Colors.white.withValues(
-                        alpha: 0.10,
-                      ),
-          ),
-        ),
-        actions: [
-          IconButton(
-            tooltip:
-                'Обновить',
-            icon:
-                Icon(
-              Icons.refresh_rounded,
-              color:
-                  Color(
-                0xFFD4AF37,
-              ),
-              size:
-                  MediaQuery.sizeOf(context).width >= 900
-                      ? 24
-                      : 29,
-            ),
-            onPressed: () {
-              _refreshChats();
-            },
-          ),
-          IconButton(
-            tooltip:
-                'Настройки',
-            icon:
-                Icon(
-              Icons.settings_outlined,
-              color:
-                  Color(
-                0xFFD4AF37,
-              ),
-              size:
-                  MediaQuery.sizeOf(context).width >= 900
-                      ? 24
-                      : 29,
-            ),
-            onPressed: () {
-              final currentUser =
-                  SocketService
-                          .instance
-                          .currentUser ??
-                      '';
-
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) =>
-                      SettingsScreen(
-                    username:
-                        currentUser,
-                    onLogout: () async {
-                      final prefs =
-                          await SharedPreferences
-                              .getInstance();
-
-                      await prefs.setBool(
-                        'logged_in',
-                        false,
-                      );
-
-                      await SocketService
-                          .instance
-                          .disconnect();
-
-                      if (!mounted) {
-                        return;
-                      }
-
-                      Navigator.of(
-                        this.context,
-                      ).pushAndRemoveUntil(
-                        MaterialPageRoute(
-                          builder: (_) =>
-                              const AuthScreen(),
-                        ),
-                        (route) =>
-                            false,
-                      );
-                    },
-                    onDeleteAccount:
-                        () {},
-                  ),
-                ),
-              ).then(
-                (_) {
-                  if (!mounted) {
-                    return;
-                  }
-
-                  _loadChats(
-                    requestAvatars:
-                        true,
-                  );
-
-                  _loadOnlineUsers();
-                },
-              );
-            },
-          ),
-
-          const SizedBox(
-            width: 4,
-          ),
-        ],
-      ),
-      body: Stack(
-        fit:
-            StackFit.expand,
-        children: [
-          Image.asset(
-            'assets/images/chat_list_bg.png',
-            fit:
-                BoxFit.cover,
-            alignment:
-                Alignment.center,
-            filterQuality:
-                FilterQuality.high,
-            gaplessPlayback:
-                true,
-          ),
-
-          Container(
-            color:
-                Colors.black.withValues(
-              alpha: 0.24,
-            ),
-          ),
-
-          if (_isLoading)
-            const Center(
-              child:
-                  CircularProgressIndicator(
-                color:
-                    Color(
-                  0xFFD4AF37,
-                ),
-              ),
-            )
-          else if (_chats.isEmpty)
-            Stack(
-              children: [
-                _buildEmptyState(),
-
-                Positioned(
-                  left: 0,
-                  right: 0,
-                  bottom: 14,
-                  child:
-                      IgnorePointer(
-                    child:
-                        Center(
-                      child:
-                          Container(
-                        padding:
-                            const EdgeInsets.symmetric(
-                          horizontal: 14,
-                          vertical: 6,
-                        ),
-                        decoration:
-                            BoxDecoration(
-                          color:
-                              Colors.black.withValues(
-                            alpha: 0.38,
-                          ),
-                          borderRadius:
-                              BorderRadius.circular(
-                            20,
-                          ),
-                        ),
-                        child:
-                            Text(
-                          'Потяните вниз для обновления',
-                          style:
-                              TextStyle(
-                            color:
-                                Colors.white.withValues(
-                              alpha: 0.45,
-                            ),
-                            fontSize: 13,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-              ],
-            )
-          else
-            _buildChatList(),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildDesktopEmptyChat() {
-    return Stack(
-      fit:
-          StackFit.expand,
-      children: [
-        Image.asset(
-          'assets/images/chat_list_bg.png',
-          fit:
-              BoxFit.cover,
-          alignment:
-              Alignment.center,
-          filterQuality:
-              FilterQuality.high,
-        ),
-
-        Container(
-          color:
-              Colors.black.withValues(
-            alpha: 0.63,
-          ),
-        ),
-
-        Center(
-          child:
-              Container(
-            constraints:
-                const BoxConstraints(
-              maxWidth: 420,
-            ),
-            margin:
-                const EdgeInsets.all(
-              28,
-            ),
-            padding:
-                const EdgeInsets.symmetric(
-              horizontal: 34,
-              vertical: 30,
-            ),
-            decoration:
-                BoxDecoration(
-              color:
-                  Colors.black.withValues(
-                alpha: 0.62,
-              ),
-              borderRadius:
-                  BorderRadius.circular(
-                24,
-              ),
-              border:
-                  Border.all(
-                color:
-                    const Color(
-                  0xFFD4AF37,
-                ).withValues(
-                  alpha: 0.45,
-                ),
-                width: 1,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color:
-                      Colors.black.withValues(
-                    alpha: 0.55,
-                  ),
-                  blurRadius: 24,
-                  spreadRadius: 2,
-                ),
-              ],
-            ),
-            child:
-                Column(
-              mainAxisSize:
-                  MainAxisSize.min,
-              children: [
-                const Icon(
-                  Icons.forum_outlined,
-                  color:
-                      Color(
-                    0xFFD4AF37,
-                  ),
-                  size: 54,
-                ),
-
-                const SizedBox(
-                  height: 16,
-                ),
-
-                const Text(
-                  'SPARTAN CHAT',
-                  textAlign:
-                      TextAlign.center,
-                  style:
-                      TextStyle(
-                    color:
-                        Color(
-                      0xFFD4AF37,
-                    ),
-                    fontSize: 24,
-                    fontWeight:
-                        FontWeight.w800,
-                    letterSpacing: 1.2,
-                  ),
-                ),
-
-                const SizedBox(
-                  height: 10,
-                ),
-
-                Text(
-                  'Выберите чат слева',
-                  textAlign:
-                      TextAlign.center,
-                  style:
-                      TextStyle(
-                    color:
-                        Colors.white.withValues(
-                      alpha: 0.78,
-                    ),
-                    fontSize: 16,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildDesktopLayout() {
-    final screenWidth =
-        MediaQuery.sizeOf(context).width;
-
-    final sidebarWidth =
-        screenWidth >= 1700
-            ? 400.0
-            : screenWidth >= 1300
-                ? 365.0
-                : 325.0;
-
-    return Scaffold(
-      backgroundColor:
-          const Color(
-        0xFF090909,
-      ),
-      body:
-          Row(
-        children: [
-          SizedBox(
-            width:
-                sidebarWidth,
-            child:
-                _buildChatListPane(),
-          ),
-
-          Container(
-            width: 2,
-            decoration:
-                BoxDecoration(
-              gradient:
-                  LinearGradient(
-                begin:
-                    Alignment.topCenter,
-                end:
-                    Alignment.bottomCenter,
-                colors: [
-                  Colors.transparent,
-                  const Color(
-                    0xFFD4AF37,
-                  ).withValues(
-                    alpha: 0.32,
-                  ),
-                  const Color(
-                    0xFFD4AF37,
-                  ).withValues(
-                    alpha: 0.72,
-                  ),
-                  const Color(
-                    0xFFD4AF37,
-                  ).withValues(
-                    alpha: 0.32,
-                  ),
-                  Colors.transparent,
-                ],
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color:
-                      const Color(
-                    0xFFD4AF37,
-                  ).withValues(
-                    alpha: 0.12,
-                  ),
-                  blurRadius: 10,
-                ),
-              ],
-            ),
-          ),
-
-          Expanded(
-            child:
-                Container(
-              color:
-                  const Color(
-                0xFF090909,
-              ),
-              alignment:
-                  Alignment.center,
-              child:
-                  _selectedDesktopUser == null
-                      ? _buildDesktopEmptyChat()
-                      : Center(
-                          child:
-                              ConstrainedBox(
-                            constraints:
-                                const BoxConstraints(
-                              maxWidth: 1120,
-                            ),
-                            child:
-                                ChatScreen(
-                              key:
-                                  ValueKey(
-                                'desktop_chat_$_selectedDesktopUser',
-                              ),
-                              targetUser:
-                                  _selectedDesktopUser!,
-                            ),
-                          ),
-                        ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  @override
-  Widget build(
-    BuildContext context,
-  ) {
-    final isDesktopLayout =
-        MediaQuery.sizeOf(context).width >= 900;
-
-    if (isDesktopLayout) {
-      return _buildDesktopLayout();
+    if (!mounted) {
+      return;
     }
 
-    return _buildChatListPane();
+    if (result != null) {
+      final groupId = result['id']?.toString() ?? '';
+      if (groupId.isNotEmpty) {
+        _groups.removeWhere((item) => item['id']?.toString() == groupId);
+        _groups.insert(0, result);
+      }
+    }
+
+    SocketService.instance.getGroups();
+    _loadChats();
   }
 
+  void _openGroup(Map<String, dynamic> group) {
+    if (MediaQuery.sizeOf(context).width >= 900) {
+      setState(() {
+        _selectedDesktopGroup = group;
+        _selectedDesktopUser = null;
+        _desktopSaved = false;
+        _section = 0;
+      });
+      return;
+    }
+    Navigator.push(
+      context,
+      MaterialPageRoute(builder: (_) => GroupChatScreen(group: group)),
+    );
+  }
+
+  Widget _buildGroupTile(Map<String, dynamic> group) {
+    final id = group['id']?.toString() ?? '';
+    final name = group['name']?.toString() ?? 'Группа';
+    final preview = group['lastMessage']?.toString() ?? '';
+    final members = group['members'];
+    return _conversationTile(
+      title: name,
+      subtitle: preview.isEmpty
+          ? '${members is List ? members.length : 0} участников'
+          : preview,
+      avatar: const CircleAvatar(
+        radius: 24,
+        backgroundColor: SpartanPalette.blue,
+        child: Icon(Icons.groups_rounded, color: SpartanPalette.gold),
+      ),
+      selected: _selectedDesktopGroup?['id'] == id,
+      onTap: () => _openGroup(group),
+    );
+  }
+
+  Widget _conversationTile({
+    required String title,
+    required String subtitle,
+    required Widget avatar,
+    required VoidCallback onTap,
+    String time = '',
+    int unread = 0,
+    bool selected = false,
+    bool pinned = false,
+    VoidCallback? onLongPress,
+  }) => Padding(
+    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+    child: Material(
+      color: selected ? SpartanPalette.blue : Colors.transparent,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        onTap: onTap,
+        onLongPress: onLongPress,
+        borderRadius: BorderRadius.circular(14),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
+          child: Row(
+            children: [
+              avatar,
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                        color: SpartanPalette.ink,
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        color: SpartanPalette.secondary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (time.isNotEmpty || unread > 0 || pinned) ...[
+                const SizedBox(width: 8),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    if (time.isNotEmpty)
+                      Text(
+                        time,
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: SpartanPalette.secondary,
+                        ),
+                      ),
+                    const SizedBox(height: 5),
+                    if (unread > 0)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: SpartanPalette.gold,
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          unread > 99 ? '99+' : '$unread',
+                          style: const TextStyle(
+                            color: SpartanPalette.onGold,
+                            fontSize: 11,
+                          ),
+                        ),
+                      )
+                    else if (pinned)
+                      const Icon(
+                        Icons.push_pin_outlined,
+                        size: 14,
+                        color: SpartanPalette.secondary,
+                      ),
+                  ],
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    ),
+  );
+
+  Future<void> _showChatOptions(String user) async {
+    final owner = SocketService.instance.currentUser ?? '';
+    final pinned = StorageService.getPinnedChats(owner).contains(user);
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.push_pin_outlined),
+              title: Text(pinned ? 'Открепить чат' : 'Закрепить чат'),
+              onTap: () => Navigator.pop(context, 'pin'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.delete_outline),
+              title: const Text('Удалить локальную историю'),
+              onTap: () => Navigator.pop(context, 'delete'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted) return;
+    if (action == 'pin') {
+      StorageService.togglePinChat(owner, user);
+      setState(() {});
+    }
+    if (action == 'delete') {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text('Удалить чат с $user?'),
+          content: const Text('История удалится только на этом устройстве.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Отмена'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Удалить'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed == true && mounted) await _deleteChat(user);
+    }
+  }
+
+  Widget _buildChatTile(String user) {
+    if (user.startsWith('group::')) {
+      for (final group in _groups) {
+        if ('group::${group['id']}' == user) return _buildGroupTile(group);
+      }
+      return const SizedBox.shrink();
+    }
+    final pinned = StorageService.getPinnedChats(
+      SocketService.instance.currentUser ?? '',
+    ).contains(user);
+    return _conversationTile(
+      title: user,
+      subtitle: _typingUsers.contains(user)
+          ? 'печатает…'
+          : _getLastMessage(user),
+      time: _getLastMessageTime(user),
+      unread: _getUnreadCount(user),
+      pinned: pinned,
+      selected:
+          _selectedDesktopUser == user &&
+          !_desktopSaved &&
+          _selectedDesktopGroup == null,
+      avatar: GestureDetector(
+        onLongPress: () => _showAvatarPreview(user),
+        child: Stack(
+          children: [
+            _buildAvatar(user, radius: 24),
+            if (_isUserOnline(user))
+              Positioned(
+                right: 0,
+                bottom: 0,
+                child: Container(
+                  width: 10,
+                  height: 10,
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF70C7A5),
+                    shape: BoxShape.circle,
+                    border: Border.all(color: SpartanPalette.surface, width: 2),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+      onTap: () => _openChat(user),
+      onLongPress: () => unawaited(_showChatOptions(user)),
+    );
+  }
+
+  List<String> get _visibleChats {
+    final query = _search.text.trim().toLowerCase();
+    final result = _chats.where((entry) {
+      final isGroup = entry.startsWith('group::');
+      if (_filter == 1 && isGroup || _filter == 2 && !isGroup) return false;
+      var name = entry;
+      if (isGroup) {
+        for (final group in _groups) {
+          if ('group::${group['id']}' == entry)
+            name = group['name']?.toString() ?? '';
+        }
+      }
+      return name.toLowerCase().contains(query);
+    }).toList();
+    final pinned = StorageService.getPinnedChats(
+      SocketService.instance.currentUser ?? '',
+    );
+    final times = {for (final entry in result) entry: _lastActivity(entry)};
+    result.sort((a, b) {
+      final pa = pinned.indexOf(a), pb = pinned.indexOf(b);
+      if (pa >= 0 || pb >= 0) {
+        if (pa < 0) return 1;
+        if (pb < 0) return -1;
+        return pa.compareTo(pb);
+      }
+      final time = times[b]!.compareTo(times[a]!);
+      return time == 0 ? a.toLowerCase().compareTo(b.toLowerCase()) : time;
+    });
+    return result;
+  }
+
+  DateTime _lastActivity(String user) {
+    if (user.startsWith('group::')) {
+      for (final group in _groups) {
+        if ('group::${group['id']}' == user) {
+          return DateTime.tryParse(
+                group['lastMessageTime']?.toString() ?? '',
+              ) ??
+              DateTime(2000);
+        }
+      }
+      return DateTime(2000);
+    }
+    final messages = StorageService.getMessages(
+      SocketService.instance.currentUser ?? '',
+      user,
+    );
+    return messages.isEmpty
+        ? DateTime(2000)
+        : DateTime.tryParse(messages.last['time']?.toString() ?? '') ??
+              DateTime(2000);
+  }
+
+  void _openSaved() {
+    if (MediaQuery.sizeOf(context).width >= 900) {
+      setState(() {
+        _desktopSaved = true;
+        _selectedDesktopGroup = null;
+        _selectedDesktopUser = null;
+        _section = 0;
+      });
+    } else {
+      Navigator.push(
+        context,
+        MaterialPageRoute<void>(
+          builder: (_) => SavedMessagesScreen(
+            owner: SocketService.instance.currentUser ?? '',
+          ),
+        ),
+      );
+    }
+  }
+
+  Widget _savedTile() => _conversationTile(
+    title: 'Сохранённое',
+    subtitle: 'Заметки и сообщения · на устройстве',
+    avatar: const CircleAvatar(
+      radius: 24,
+      backgroundColor: SpartanPalette.blue,
+      child: Icon(Icons.bookmark_outline_rounded, color: SpartanPalette.gold),
+    ),
+    selected: _desktopSaved,
+    onTap: _openSaved,
+  );
+
+  Widget _buildChatListPane() {
+    final visible = _visibleChats;
+    final query = _search.text.trim().toLowerCase();
+    final showSaved =
+        _filter != 2 &&
+        (query.isEmpty || 'сохранённое сохраненное заметки'.contains(query));
+    return ColoredBox(
+      color: SpartanPalette.surface,
+      child: SafeArea(
+        bottom: false,
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 14, 12, 4),
+              child: Row(
+                children: [
+                  const Expanded(child: SpartanBrand()),
+                  IconButton(
+                    tooltip: 'Создать группу',
+                    onPressed: _openCreateGroup,
+                    icon: const Icon(Icons.group_add_outlined),
+                  ),
+                  IconButton(
+                    tooltip: 'Обновить контакты',
+                    onPressed: _refreshChats,
+                    icon: const Icon(Icons.refresh_rounded),
+                  ),
+                ],
+              ),
+            ),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 2, 20, 14),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(
+                  'Чаты',
+                  style: TextStyle(fontSize: 26, fontWeight: FontWeight.w700),
+                ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: TextField(
+                key: const ValueKey('contact-search'),
+                controller: _search,
+                onChanged: (_) => setState(() {}),
+                onTap: _loadOnlineUsers,
+                decoration: InputDecoration(
+                  hintText: 'Поиск контактов и чатов',
+                  prefixIcon: const Icon(Icons.search_rounded),
+                  suffixIcon: _search.text.isEmpty
+                      ? null
+                      : IconButton(
+                          tooltip: 'Очистить поиск',
+                          icon: const Icon(Icons.close),
+                          onPressed: () {
+                            _search.clear();
+                            setState(() {});
+                          },
+                        ),
+                  fillColor: SpartanPalette.canvas,
+                  isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(vertical: 13),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: List.generate(
+                3,
+                (index) => Expanded(
+                  child: InkWell(
+                    key: ValueKey('chat-filter-$index'),
+                    onTap: () => setState(() => _filter = index),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      decoration: BoxDecoration(
+                        border: Border(
+                          bottom: BorderSide(
+                            color: _filter == index
+                                ? SpartanPalette.gold
+                                : SpartanPalette.line,
+                            width: _filter == index ? 2 : .5,
+                          ),
+                        ),
+                      ),
+                      child: Text(
+                        ['Все', 'Личные', 'Группы'][index],
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: _filter == index
+                              ? SpartanPalette.gold
+                              : SpartanPalette.secondary,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+            Expanded(
+              child: _isLoading
+                  ? const Center(child: CircularProgressIndicator())
+                  : RefreshIndicator(
+                      onRefresh: _refreshChats,
+                      child: ListView(
+                        keyboardDismissBehavior:
+                            ScrollViewKeyboardDismissBehavior.onDrag,
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        children: [
+                          for (final user in visible) _buildChatTile(user),
+                          if (showSaved) _savedTile(),
+                          if (visible.isEmpty)
+                            Padding(
+                              padding: const EdgeInsets.all(24),
+                              child: Text(
+                                query.isEmpty
+                                    ? (_filter == 2
+                                          ? 'Пока нет групп. Создайте первую.'
+                                          : 'Здесь появятся ваши чаты и контакты онлайн.')
+                                    : 'Ничего не найдено. Поиск по существующим чатам и контактам онлайн.',
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(
+                                  color: SpartanPalette.secondary,
+                                ),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _logout() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('logged_in', false);
+    await SocketService.instance.disconnect();
+    if (!mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const AuthScreen()),
+      (_) => false,
+    );
+  }
+
+  Widget _settings() => SettingsScreen(
+    username: SocketService.instance.currentUser ?? '',
+    onLogout: _logout,
+    onDeleteAccount: () {},
+  );
+
+  void _dial(String user, bool video) {
+    if (!SocketService.instance.isAuthenticated) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Для звонка подключитесь к серверу')),
+      );
+      return;
+    }
+    if (CallService.instance.hasCall) {
+      ScaffoldMessenger.of(context)
+          .showSnackBar(const SnackBar(content: Text('Звонок уже активен')));
+      return;
+    }
+    unawaited(CallService.instance.startCall(peer: user, video: video));
+  }
+
+  Widget _callsPane() => Scaffold(
+    appBar: AppBar(title: const Text('Звонки')),
+    body: ValueListenableBuilder<int>(
+      valueListenable: CallHistoryService.changes,
+      builder: (context, _, child) {
+        final history = CallHistoryService.items(
+          SocketService.instance.currentUser ?? '',
+        );
+        final contacts = _chats.where((e) => !e.startsWith('group::')).toList()
+          ..sort();
+        return ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            const Text(
+              'Недавние',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 12),
+            if (history.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 20),
+                child: Text(
+                  'История появится после новых звонков.',
+                  style: TextStyle(color: SpartanPalette.secondary),
+                ),
+              ),
+            for (final item in history)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: _buildAvatar(item['peer'].toString(), radius: 22),
+                title: Text(item['peer'].toString()),
+                subtitle: Text(
+                  '${item['incoming'] == true ? 'Входящий' : 'Исходящий'} · '
+                  '${CallHistoryService.status(item)}'
+                  '\n${_formatCallDate(item['time']?.toString() ?? '')}',
+                  style: item['outcome'] == 'missed'
+                      ? const TextStyle(color: Colors.redAccent)
+                      : null,
+                ),
+                trailing: IconButton(
+                  tooltip: 'Повторить звонок',
+                  icon: Icon(
+                    item['video'] == true
+                        ? Icons.videocam_outlined
+                        : Icons.call_outlined,
+                  ),
+                  onPressed: () =>
+                      _dial(item['peer'].toString(), item['video'] == true),
+                ),
+              ),
+            const SizedBox(height: 24),
+            const Text(
+              'Позвонить контакту',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 8),
+            for (final user in contacts)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: _buildAvatar(user, radius: 22),
+                title: Text(user),
+                subtitle: Text(_isUserOnline(user) ? 'в сети' : 'не в сети'),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      tooltip: 'Аудиозвонок: $user',
+                      onPressed: () => _dial(user, false),
+                      icon: const Icon(Icons.call_outlined),
+                    ),
+                    IconButton(
+                      tooltip: 'Видеозвонок: $user',
+                      onPressed: () => _dial(user, true),
+                      icon: const Icon(Icons.videocam_outlined),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        );
+      },
+    ),
+  );
+
+  String _formatCallDate(String raw) {
+    final date = DateTime.tryParse(raw)?.toLocal();
+    if (date == null) return '';
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${two(date.day)}.${two(date.month)} · ${two(date.hour)}:${two(date.minute)}';
+  }
+
+  void _selectSection(int value) {
+    if (_section == value) return;
+    setState(() => _section = value);
+    // A hidden desktop conversation must not auto-mark incoming messages read.
+    if (value != 0) SocketService.instance.setActiveChatUser('');
+    _loadChats();
+    _loadOnlineUsers();
+  }
+
+  Widget _desktopConversation() {
+    if (_desktopSaved)
+      return SavedMessagesScreen(
+        owner: SocketService.instance.currentUser ?? '',
+      );
+    if (_selectedDesktopGroup != null)
+      return GroupChatScreen(
+        key: ValueKey('desktop-group-${_selectedDesktopGroup!['id']}'),
+        group: _selectedDesktopGroup!,
+      );
+    if (_selectedDesktopUser != null)
+      return ChatScreen(
+        key: ValueKey('desktop_chat_$_selectedDesktopUser'),
+        targetUser: _selectedDesktopUser!,
+      );
+    return const Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          SpartanBrand(),
+          SizedBox(height: 20),
+          Text('Выберите чат', style: TextStyle(fontSize: 22)),
+          SizedBox(height: 8),
+          Text(
+            'Сообщения, фото и звонки — рядом',
+            style: TextStyle(color: SpartanPalette.secondary),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _railButton(int index, IconData icon, String label) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 5),
+    child: Tooltip(
+      message: label,
+      child: InkWell(
+        key: ValueKey('nav-$index'),
+        onTap: () => _selectSection(index),
+        borderRadius: BorderRadius.circular(13),
+        child: Container(
+          width: 48,
+          height: 48,
+          decoration: BoxDecoration(
+            color: _section == index ? SpartanPalette.gold : Colors.transparent,
+            borderRadius: BorderRadius.circular(13),
+          ),
+          child: Icon(
+            icon,
+            color: _section == index
+                ? SpartanPalette.onGold
+                : SpartanPalette.ink,
+          ),
+        ),
+      ),
+    ),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final desktop = MediaQuery.sizeOf(context).width >= 900;
+    final body = _section == 1
+        ? _callsPane()
+        : _section == 2
+        ? _settings()
+        : desktop
+        ? Row(
+            children: [
+              SizedBox(
+                width: MediaQuery.sizeOf(context).width >= 1300 ? 340 : 310,
+                child: _buildChatListPane(),
+              ),
+              const VerticalDivider(width: 1, thickness: 1),
+              Expanded(child: _desktopConversation()),
+            ],
+          )
+        : _buildChatListPane();
+    if (desktop)
+      return Scaffold(
+        body: Row(
+          children: [
+            ColoredBox(
+              color: SpartanPalette.rail,
+              child: SafeArea(
+                child: SizedBox(
+                  width: 72,
+                  child: Column(
+                    children: [
+                      const SizedBox(height: 22),
+                      const SpartanBrand(compact: true),
+                      const SizedBox(height: 34),
+                      _railButton(0, Icons.chat_bubble_outline_rounded, 'Чаты'),
+                      _railButton(1, Icons.call_outlined, 'Звонки'),
+                      const Spacer(),
+                      _railButton(2, Icons.settings_outlined, 'Настройки'),
+                      const SizedBox(height: 20),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            Expanded(child: body),
+          ],
+        ),
+      );
+    return Scaffold(
+      body: body,
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _section,
+        onDestinationSelected: _selectSection,
+        destinations: const [
+          NavigationDestination(
+            icon: Icon(Icons.chat_bubble_outline_rounded),
+            label: 'Чаты',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.call_outlined),
+            label: 'Звонки',
+          ),
+          NavigationDestination(
+            icon: Icon(Icons.settings_outlined),
+            label: 'Настройки',
+          ),
+        ],
+      ),
+    );
+  }
 }

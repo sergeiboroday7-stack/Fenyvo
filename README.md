@@ -1,44 +1,17 @@
-# SPARTAN CHAT
+# spartan_chat_final
 
-Мессенджер для Android и Windows на Flutter с сервером на Node.js.
+A new Flutter project.
 
-## Версия в репозитории
+## Getting Started
 
-Здесь находятся **исходники STAGE17 от 01.09.2026**, очищенные от
-пользовательских данных 04.09.2026. Код приложения и сервера при очистке не
-менялся. Более новые локальные сборки пока не перенесены в эту ветку.
+This project is a starting point for a Flutter application.
 
-## Состав
+A few resources to get you started if this is your first Flutter project:
 
-- `lib/` — Flutter-приложение.
-- `android/`, `windows/` — платформенные проекты.
-- `assets/` — оформление и звуки.
-- `server.js`, `package.json`, `package-lock.json` — сервер и зависимости.
-- `pubspec.yaml`, `pubspec.lock` — зависимости Flutter.
+- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
+- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
+- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
 
-Личные аватарки, учётные записи, сообщения, FCM-токены, секреты сервера
-и готовые APK не входят в репозиторий. Настройки Firebase для клиента
-не заменяют секретный ключ Firebase Admin для сервера.
-
-## Безопасность
-
-Данные пользователей и секреты хранятся отдельно от исходников.
-Не добавляйте их в Git даже временно. `.gitignore` не удаляет файлы,
-которые уже попали в старую историю.
-
-Новая история начинается с очищенного снимка. Старые локальные копии
-сохранены владельцу: **не публикуйте из них старую историю и не объединяйте
-её с новой веткой**. Дальнейшие изменения вносите через чистую копию.
-
-Перезапись ветки не удаляет чужие копии и не гарантирует удаления
-кешированных старых страниц GitHub. При необходимости обратитесь в GitHub
-Support. Если обнаружен опубликованный секрет, отзовите или замените его.
-
-## Обновления
-
-После каждой успешно проверенной доработки обновляются исходники, README
-и [CHANGELOG.md](CHANGELOG.md). В журнале отдельно указываются автоматические
-проверки, испытания на устройствах и известные ограничения.
-
-Очистка репозитория не является новой сборкой и не подтверждает
-работоспособность STAGE17 на современных устройствах.
+For help getting started with Flutter development, view the
+[online documentation](https://docs.flutter.dev/), which offers tutorials,
+samples, guidance on mobile development, and a full API reference.

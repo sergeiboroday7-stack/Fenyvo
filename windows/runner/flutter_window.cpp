@@ -1,6 +1,7 @@
 #include "flutter_window.h"
 
 #include <optional>
+#include <flutter/standard_method_codec.h>
 
 #include "flutter/generated_plugin_registrant.h"
 
@@ -26,6 +27,21 @@ bool FlutterWindow::OnCreate() {
   }
   RegisterPlugins(flutter_controller_->engine());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
+  window_channel_ = std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+      flutter_controller_->engine()->messenger(), "spartan_chat/window",
+      &flutter::StandardMethodCodec::GetInstance());
+  window_channel_->SetMethodCallHandler([this](const auto& call, auto result) {
+    if (call.method_name() == "show") {
+      HWND window = GetHandle();
+      ShowWindow(window, IsIconic(window) ? SW_RESTORE : SW_SHOW);
+      SetForegroundWindow(window);
+      result->Success();
+    } else if (call.method_name() == "flash") {
+      FLASHWINFO info = {sizeof(FLASHWINFO), GetHandle(), FLASHW_TRAY, 6, 0};
+      FlashWindowEx(&info);
+      result->Success();
+    } else result->NotImplemented();
+  });
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
     this->Show();
@@ -40,6 +56,7 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  window_channel_ = nullptr;
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }

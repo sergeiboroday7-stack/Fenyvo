@@ -10,6 +10,7 @@ android {
 
     compileSdk 36
     ndkVersion "28.2.13676358"
+    ndkPath = file("../../.ndk_local_28.2.13676358").absolutePath
 
     compileOptions {
         coreLibraryDesugaringEnabled true
@@ -29,7 +30,7 @@ android {
     defaultConfig {
         applicationId "com.example.spartan_chat_final"
 
-        minSdkVersion flutter.minSdkVersion
+        minSdk = 24
         targetSdkVersion 36
 
         versionCode 1
@@ -43,8 +44,19 @@ android {
             shrinkResources false
         }
     }
+
+    // Keep test updates compatible with the already-installed application,
+    // even when ANDROID_USER_HOME points at an isolated build directory.
+    def originalDebugKey = new File(
+        System.getenv('USERPROFILE') ?: System.getProperty('user.home'),
+        '.android/debug.keystore'
+    )
+    if (originalDebugKey.exists()) {
+        signingConfigs.debug.storeFile = originalDebugKey
+    }
 }
 
 dependencies {
+    testImplementation 'junit:junit:4.13.2'
     coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.1.5"
 }
