@@ -17,6 +17,7 @@ import 'package:record/record.dart';
 
 import '../services/socket_service.dart';
 import '../services/call_service.dart';
+import '../services/pulse_service.dart';
 import '../services/storage_service.dart';
 import '../services/media_cache_service.dart';
 import '../services/download_service.dart';
@@ -476,10 +477,7 @@ class _PrivateVideoFullScreenState extends State<_PrivateVideoFullScreen> {
 class ChatScreen extends StatefulWidget {
   final String targetUser;
 
-  const ChatScreen({
-    super.key,
-    required this.targetUser,
-  });
+  const ChatScreen({super.key, required this.targetUser});
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -9394,6 +9392,342 @@ class _ChatScreenState extends State<ChatScreen>
   // \u042D\u041A\u0420\u0410\u041D
   // ========================================
 
+  Future<void> _showPulseSheet() async {
+    final service = PulseService.instance;
+    var video = false;
+    var windowMinutes = 60;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: SpartanPalette.surface,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        return StatefulBuilder(
+          builder: (context, setSheetState) {
+            return AnimatedBuilder(
+              animation: service,
+              builder: (context, _) {
+                final active = service.activeFor(widget.targetUser);
+                final incoming =
+                    active != null &&
+                    service.phase == SpartanPulsePhase.incoming;
+                final matched =
+                    active != null &&
+                    service.phase == SpartanPulsePhase.matched;
+                final width = MediaQuery.sizeOf(context).width;
+
+                Widget modeButton({
+                  required bool selected,
+                  required IconData icon,
+                  required String label,
+                  required VoidCallback onPressed,
+                }) {
+                  return Expanded(
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(18),
+                      onTap: onPressed,
+                      child: AnimatedContainer(
+                        duration: const Duration(milliseconds: 180),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 14,
+                        ),
+                        decoration: BoxDecoration(
+                          color: selected
+                              ? SpartanPalette.blue
+                              : SpartanPalette.canvas,
+                          borderRadius: BorderRadius.circular(18),
+                          border: Border.all(
+                            color: selected
+                                ? SpartanPalette.gold
+                                : SpartanPalette.line,
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              icon,
+                              color: selected
+                                  ? SpartanPalette.gold
+                                  : SpartanPalette.secondary,
+                            ),
+                            const SizedBox(width: 8),
+                            Flexible(
+                              child: Text(
+                                label,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  color: selected
+                                      ? SpartanPalette.ink
+                                      : SpartanPalette.secondary,
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  );
+                }
+
+                return SafeArea(
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxWidth: width > 620 ? 560 : width,
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(22, 4, 22, 24),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Row(
+                            children: [
+                              Container(
+                                width: 52,
+                                height: 52,
+                                decoration: BoxDecoration(
+                                  color: SpartanPalette.blue,
+                                  borderRadius: BorderRadius.circular(18),
+                                  border: Border.all(
+                                    color: SpartanPalette.gold,
+                                  ),
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: SpartanPalette.gold.withValues(
+                                        alpha: .18,
+                                      ),
+                                      blurRadius: 18,
+                                    ),
+                                  ],
+                                ),
+                                child: const Icon(
+                                  Icons.bolt_rounded,
+                                  color: SpartanPalette.gold,
+                                  size: 30,
+                                ),
+                              ),
+                              const SizedBox(width: 14),
+                              const Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'SPARTAN PULSE',
+                                      style: TextStyle(
+                                        color: SpartanPalette.gold,
+                                        fontSize: 19,
+                                        fontWeight: FontWeight.w900,
+                                        letterSpacing: 1,
+                                      ),
+                                    ),
+                                    Text(
+                                      'Созвон без дозвона',
+                                      style: TextStyle(
+                                        color: SpartanPalette.secondary,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 22),
+                          if (active != null) ...[
+                            Container(
+                              padding: const EdgeInsets.all(18),
+                              decoration: BoxDecoration(
+                                color: SpartanPalette.canvas,
+                                borderRadius: BorderRadius.circular(22),
+                                border: Border.all(
+                                  color: matched
+                                      ? SpartanPalette.gold
+                                      : SpartanPalette.line,
+                                ),
+                              ),
+                              child: Column(
+                                children: [
+                                  Icon(
+                                    matched
+                                        ? Icons.graphic_eq_rounded
+                                        : incoming
+                                        ? Icons.notifications_active_rounded
+                                        : Icons.schedule_rounded,
+                                    size: 38,
+                                    color: SpartanPalette.gold,
+                                  ),
+                                  const SizedBox(height: 10),
+                                  Text(
+                                    matched
+                                        ? 'Оба готовы · ${service.countdownSeconds}'
+                                        : incoming
+                                        ? '${widget.targetUser} ждёт вашего решения'
+                                        : 'Ждём готовность ${widget.targetUser}',
+                                    textAlign: TextAlign.center,
+                                    style: const TextStyle(
+                                      color: SpartanPalette.ink,
+                                      fontSize: 17,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    active.video
+                                        ? 'Видеозвонок'
+                                        : 'Аудиозвонок',
+                                    style: const TextStyle(
+                                      color: SpartanPalette.secondary,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                            if (incoming)
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: OutlinedButton(
+                                      onPressed: () {
+                                        service.decline();
+                                        Navigator.of(sheetContext).pop();
+                                      },
+                                      child: const Text('Не сейчас'),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: FilledButton.icon(
+                                      onPressed: () {
+                                        service.accept();
+                                        Navigator.of(sheetContext).pop();
+                                      },
+                                      icon: const Icon(Icons.check_rounded),
+                                      label: const Text('Я готов'),
+                                    ),
+                                  ),
+                                ],
+                              )
+                            else
+                              OutlinedButton.icon(
+                                onPressed: () {
+                                  service.cancel();
+                                  Navigator.of(sheetContext).pop();
+                                },
+                                icon: const Icon(Icons.close_rounded),
+                                label: const Text('Отменить SPARTAN PULSE'),
+                              ),
+                          ] else ...[
+                            Text(
+                              'Сообщить ${widget.targetUser}, что вы готовы поговорить. '
+                              'Звонок начнётся только после взаимного согласия.',
+                              style: const TextStyle(
+                                color: SpartanPalette.secondary,
+                                height: 1.4,
+                              ),
+                            ),
+                            const SizedBox(height: 18),
+                            Row(
+                              children: [
+                                modeButton(
+                                  selected: !video,
+                                  icon: Icons.call_rounded,
+                                  label: 'Аудио',
+                                  onPressed: () =>
+                                      setSheetState(() => video = false),
+                                ),
+                                const SizedBox(width: 10),
+                                modeButton(
+                                  selected: video,
+                                  icon: Icons.videocam_rounded,
+                                  label: 'Видео',
+                                  onPressed: () =>
+                                      setSheetState(() => video = true),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 18),
+                            const Text(
+                              'Я свободен в течение',
+                              style: TextStyle(
+                                color: SpartanPalette.ink,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 10),
+                            Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                for (final option in const {
+                                  15: '15 минут',
+                                  60: '1 час',
+                                  240: '4 часа',
+                                }.entries)
+                                  ChoiceChip(
+                                    label: Text(option.value),
+                                    selected: windowMinutes == option.key,
+                                    selectedColor: SpartanPalette.blue,
+                                    backgroundColor: SpartanPalette.canvas,
+                                    side: BorderSide(
+                                      color: windowMinutes == option.key
+                                          ? SpartanPalette.gold
+                                          : SpartanPalette.line,
+                                    ),
+                                    labelStyle: TextStyle(
+                                      color: windowMinutes == option.key
+                                          ? SpartanPalette.ink
+                                          : SpartanPalette.secondary,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                    onSelected: (_) => setSheetState(
+                                      () => windowMinutes = option.key,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                            const SizedBox(height: 22),
+                            FilledButton.icon(
+                              style: FilledButton.styleFrom(
+                                minimumSize: const Size.fromHeight(52),
+                              ),
+                              onPressed: () {
+                                service.request(
+                                  peer: widget.targetUser,
+                                  video: video,
+                                  windowMinutes: windowMinutes,
+                                );
+                                Navigator.of(sheetContext).pop();
+                              },
+                              icon: const Icon(Icons.bolt_rounded),
+                              label: const Text('ПОЗВАТЬ, КОГДА ОБА СВОБОДНЫ'),
+                            ),
+                            const SizedBox(height: 10),
+                            const Text(
+                              'Точный статус занятости не раскрывается. Видно только взаимную готовность.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: SpartanPalette.muted,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+
   void _startPrivateCall({required bool video}) {
     if (!SocketService.instance.isConnected) {
       ScaffoldMessenger.of(context)
@@ -9548,6 +9882,33 @@ class _ChatScreenState extends State<ChatScreen>
             ],
           ),
           actions: [
+            AnimatedBuilder(
+              animation: PulseService.instance,
+              builder: (context, _) {
+                final active =
+                    PulseService.instance.activeFor(widget.targetUser) != null;
+                return Container(
+                  margin: const EdgeInsets.symmetric(vertical: 8),
+                  decoration: BoxDecoration(
+                    color: active ? SpartanPalette.blue : Colors.transparent,
+                    borderRadius: BorderRadius.circular(14),
+                    border: active
+                        ? Border.all(color: SpartanPalette.gold)
+                        : null,
+                  ),
+                  child: IconButton(
+                    tooltip: 'SPARTAN PULSE · созвон, когда оба свободны',
+                    onPressed: () => unawaited(_showPulseSheet()),
+                    icon: Icon(
+                      Icons.bolt_rounded,
+                      color: active
+                          ? SpartanPalette.gold
+                          : SpartanPalette.secondary,
+                    ),
+                  ),
+                );
+              },
+            ),
             IconButton(
               tooltip: 'Аудиозвонок',
               onPressed: () {

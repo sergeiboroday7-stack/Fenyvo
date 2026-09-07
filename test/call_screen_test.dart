@@ -29,7 +29,7 @@ void main() {
       SystemCallService.instance.onRemoteCancel!('remote-cancel-test');
       await tester.pump();
       expect(service.lastFinishedCall?.outcome, CallOutcome.missed);
-      expect(service.statusText, 'Пропущенный звонок');
+      expect(service.lastFinishedCall?.message, 'Пропущенный звонок');
       await tester.pump(const Duration(seconds: 2));
       expect(service.phase, CallPhase.idle);
       expect(service.lastFinishedCall?.outcome, CallOutcome.missed);
@@ -48,6 +48,14 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     expect(service.lastFinishedCall?.outcome, CallOutcome.completed);
     expect(service.lastFinishedCall?.id, 'connected-native-end');
+  });
+
+  test('ended call hides its route before native cleanup completes', () {
+    service.phase = CallPhase.ended;
+    service.callId = 'ended-route';
+    service.peerUser = 'Test peer';
+    expect(service.hasCall, isTrue);
+    expect(service.shouldShowCallScreen, isFalse);
   });
 
   testWidgets('incoming audio call can be rejected without opening media', (

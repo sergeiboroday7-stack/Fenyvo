@@ -2,7 +2,7 @@ name: spartan_chat_final
 description: Spartan Chat messenger
 publish_to: "none"
 
-version: 1.0.0+1
+version: 1.1.1+2101
 
 environment:
   sdk: ">=3.13.0 <4.0.0"
@@ -14,7 +14,7 @@ dependencies:
   cupertino_icons: ^1.0.9
 
   shared_preferences: ^2.5.5
-  image_picker: ^1.2.3
+  image_picker: 1.1.2
   file_picker: ^10.3.3
   public_file_saver: ^1.1.0
   web_socket_channel: ^3.0.3
@@ -25,7 +25,7 @@ dependencies:
   encrypt: ^5.0.3
   pointycastle: ^3.9.1
 
-  path_provider: ^2.1.6
+  path_provider: 2.1.5
 
   flutter_local_notifications: ^22.3.0
   firebase_core: ^4.14.0
@@ -35,14 +35,19 @@ dependencies:
   record: 6.2.1
   video_player: ^2.14.0
   video_player_win: ^3.2.2
-  flutter_webrtc: ^1.6.1
+  flutter_webrtc: 0.12.8
   flutter_callkit_incoming: ^3.1.5
+  permission_handler: 11.3.1
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
 
   flutter_lints: ^6.0.0
+
+dependency_overrides:
+  jni:
+    path: third_party/jni
 
 flutter:
   uses-material-design: true

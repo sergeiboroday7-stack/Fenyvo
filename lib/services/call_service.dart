@@ -58,6 +58,7 @@ class CallService extends ChangeNotifier {
       (Platform.isAndroid || Platform.isIOS) && _mediaReady;
   String statusText = '';
   bool get hasCall => phase != CallPhase.idle;
+  bool get shouldShowCallScreen => hasCall && phase != CallPhase.ended;
   bool Function() externalCallBusy = () => false;
   bool get canSwitchCamera => Platform.isAndroid || Platform.isIOS;
 
@@ -110,7 +111,10 @@ class CallService extends ChangeNotifier {
 
   Future<void> startCall({required String peer, required bool video}) async {
     final target = peer.trim();
-    if (target.isEmpty || hasCall || externalCallBusy() || !SocketService.instance.isAuthenticated)
+    if (target.isEmpty ||
+        hasCall ||
+        externalCallBusy() ||
+        !SocketService.instance.isAuthenticated)
       return;
     final bytes = List<int>.generate(16, (_) => Random.secure().nextInt(256));
     bytes[6] = (bytes[6] & 15) | 64;
@@ -530,7 +534,11 @@ class CallService extends ChangeNotifier {
         sdp['sdp']?.toString().isNotEmpty != true)
       return;
     if (externalCallBusy()) {
-      SocketService.instance.sendCallReject(to: from, callId: id, reason: 'busy');
+      SocketService.instance.sendCallReject(
+        to: from,
+        callId: id,
+        reason: 'busy',
+      );
       return;
     }
     if (hasCall) {
@@ -788,18 +796,18 @@ class CallService extends ChangeNotifier {
     final id = callId;
     if (id == null || !_isCurrent(id)) return;
     _recordFinished(clock.connected ? CallOutcome.completed : result, message);
-    phase = CallPhase.ended;
-    statusText = message;
-    clock.stop();
-    _clockTick?.cancel();
-    _timeout?.cancel();
-    _disconnectTimeout?.cancel();
-    notifyListeners();
-    await IncomingCallAlertService.instance.stop();
-    await SystemCallService.instance.end(id);
-    await _releaseMedia();
-    await Future<void>.delayed(const Duration(milliseconds: 1200));
     if (callId == id) await _cleanup();
+  }
+
+  Future<void> _cleanupStep(
+    Future<void> operation, {
+    Duration timeout = const Duration(seconds: 2),
+  }) async {
+    try {
+      await operation.timeout(timeout);
+    } catch (error) {
+      debugPrint('Call cleanup step skipped: $error');
+    }
   }
 
   Future<void> _disposeStream(MediaStream stream) async {
@@ -851,46 +859,52 @@ class CallService extends ChangeNotifier {
   Future<void> _cleanup() async {
     if (_cleaning) return;
     _cleaning = true;
-    if (callId != null) {
-      _dismissedCalls.add(callId!);
-      if (_dismissedCalls.length > 32)
-        _dismissedCalls.remove(_dismissedCalls.first);
+    final endingCallId = callId;
+    try {
+      if (endingCallId != null) {
+        _dismissedCalls.add(endingCallId);
+        if (_dismissedCalls.length > 32) {
+          _dismissedCalls.remove(_dismissedCalls.first);
+        }
+      }
+      phase = CallPhase.ended;
+      _clockTick?.cancel();
+      _timeout?.cancel();
+      _disconnectTimeout?.cancel();
+      notifyListeners();
+      if (Platform.isAndroid && endingCallId != null) {
+        await _cleanupStep(
+          const MethodChannel('spartan_chat/call_window')
+              .invokeMethod<void>('hide', {'callId': endingCallId}),
+        );
+      }
+      await _cleanupStep(IncomingCallAlertService.instance.stop());
+      await _cleanupStep(SystemCallService.instance.end(endingCallId));
+      await _cleanupStep(_releaseMedia(), timeout: const Duration(seconds: 4));
+    } finally {
+      clock.reset();
+      _pendingOffer = null;
+      _incomingData = null;
+      avatarBytes = null;
+      _pendingCandidates.clear();
+      _localCandidates.clear();
+      _remoteDescriptionSet = false;
+      _localDescriptionSent = false;
+      _answerApplying = false;
+      callId = null;
+      peerUser = null;
+      isVideo = false;
+      isIncoming = false;
+      _accepted = false;
+      speakerphoneEnabled = false;
+      _speakerChanging = false;
+      microphoneEnabled = true;
+      cameraEnabled = true;
+      statusText = '';
+      phase = CallPhase.idle;
+      _cleaning = false;
+      notifyListeners();
     }
-    phase = CallPhase.ended;
-    _clockTick?.cancel();
-    clock.reset();
-    if (Platform.isAndroid && callId != null) {
-      try {
-        await const MethodChannel('spartan_chat/call_window')
-            .invokeMethod<void>('hide', {'callId': callId});
-      } catch (_) {}
-    }
-    _timeout?.cancel();
-    _disconnectTimeout?.cancel();
-    await IncomingCallAlertService.instance.stop();
-    await SystemCallService.instance.end(callId);
-    await _releaseMedia();
-    _pendingOffer = null;
-    _incomingData = null;
-    avatarBytes = null;
-    _pendingCandidates.clear();
-    _localCandidates.clear();
-    _remoteDescriptionSet = false;
-    _localDescriptionSent = false;
-    _answerApplying = false;
-    callId = null;
-    peerUser = null;
-    isVideo = false;
-    isIncoming = false;
-    _accepted = false;
-    speakerphoneEnabled = false;
-    _speakerChanging = false;
-    microphoneEnabled = true;
-    cameraEnabled = true;
-    statusText = '';
-    phase = CallPhase.idle;
-    _cleaning = false;
-    notifyListeners();
   }
 
   String _readableError(Object error) {

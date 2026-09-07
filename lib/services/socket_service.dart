@@ -12,20 +12,15 @@ import 'app_visibility.dart';
 import 'system_call_service.dart';
 
 class SocketService {
-  static final SocketService _instance =
-      SocketService._internal();
+  static final SocketService _instance = SocketService._internal();
 
-  static SocketService get instance =>
-      _instance;
+  static SocketService get instance => _instance;
 
   SocketService._internal();
 
   WebSocketChannel? _channel;
 
-  final List<
-      void Function(
-        Map<String, dynamic>,
-      )> _messageHandlers = [];
+  final List<void Function(Map<String, dynamic>)> _messageHandlers = [];
 
   String? currentUser;
 
@@ -49,21 +44,16 @@ class SocketService {
 
   String? _lastPassword;
 
-  bool get isConnected =>
-      _isConnected;
+  bool get isConnected => _isConnected;
 
-  String? get activeChatUser =>
-      _activeChatUser;
+  String? get activeChatUser => _activeChatUser;
 
   // ========================================
   // АКТИВНЫЙ ЧАТ
   // ========================================
 
-  void setActiveChatUser(
-    String username,
-  ) {
-    final user =
-        username.trim();
+  void setActiveChatUser(String username) {
+    final user = username.trim();
 
     if (user.isEmpty) {
       _activeChatUser = null;
@@ -72,19 +62,13 @@ class SocketService {
 
     _activeChatUser = user;
 
-    print(
-      '💬 Активный чат: $user',
-    );
+    print('💬 Активный чат: $user');
   }
 
-  void clearActiveChatUser([
-    String? username,
-  ]) {
-    final user =
-        username?.trim() ?? '';
+  void clearActiveChatUser([String? username]) {
+    final user = username?.trim() ?? '';
 
-    if (user.isNotEmpty &&
-        _activeChatUser != user) {
+    if (user.isNotEmpty && _activeChatUser != user) {
       return;
     }
 
@@ -102,32 +86,18 @@ class SocketService {
   // ОБРАБОТЧИКИ
   // ========================================
 
-  void addMessageHandler(
-    void Function(
-      Map<String, dynamic>,
-    ) handler,
-  ) {
+  void addMessageHandler(void Function(Map<String, dynamic>) handler) {
     if (!_messageHandlers.contains(handler)) {
       _messageHandlers.add(handler);
     }
   }
 
-  void removeMessageHandler(
-    void Function(
-      Map<String, dynamic>,
-    ) handler,
-  ) {
+  void removeMessageHandler(void Function(Map<String, dynamic>) handler) {
     _messageHandlers.remove(handler);
   }
 
-  void _notifyHandlers(
-    Map<String, dynamic> message,
-  ) {
-    final handlers =
-        List<
-            void Function(
-              Map<String, dynamic>,
-            )>.from(
+  void _notifyHandlers(Map<String, dynamic> message) {
+    final handlers = List<void Function(Map<String, dynamic>)>.from(
       _messageHandlers,
     );
 
@@ -135,9 +105,7 @@ class SocketService {
       try {
         handler(message);
       } catch (error) {
-        print(
-          '❌ Ошибка обработчика: $error',
-        );
+        print('❌ Ошибка обработчика: $error');
       }
     }
   }
@@ -146,12 +114,8 @@ class SocketService {
   // ПОДКЛЮЧЕНИЕ
   // ========================================
 
-  Future<bool> connect(
-    String url,
-  ) async {
-    if (_isConnected &&
-        _serverUrl == url &&
-        _channel != null) {
+  Future<bool> connect(String url) async {
+    if (_isConnected && _serverUrl == url && _channel != null) {
       return true;
     }
 
@@ -164,9 +128,7 @@ class SocketService {
     _isReconnecting = false;
 
     try {
-      print(
-        '🔌 Подключение к серверу: $url',
-      );
+      print('🔌 Подключение к серверу: $url');
 
       if (_channel != null) {
         try {
@@ -176,52 +138,32 @@ class SocketService {
         _channel = null;
       }
 
-      final uri =
-          Uri.parse(
-        url,
-      );
+      final uri = Uri.parse(url);
 
-      _channel =
-          WebSocketChannel.connect(
-        uri,
-      );
+      _channel = WebSocketChannel.connect(uri);
 
       _channel!.stream.listen(
         _handleRawMessage,
         onError: (Object error) {
-          print(
-            '❌ Ошибка WebSocket: $error',
-          );
+          print('❌ Ошибка WebSocket: $error');
 
-          _handleDisconnect(
-            reason:
-                'Ошибка подключения к серверу',
-          );
+          _handleDisconnect(reason: 'Ошибка подключения к серверу');
         },
         onDone: () {
-          print(
-            '🔴 WebSocket отключён',
-          );
+          print('🔴 WebSocket отключён');
 
-          _handleDisconnect(
-            reason:
-                'Соединение с сервером закрыто',
-          );
+          _handleDisconnect(reason: 'Соединение с сервером закрыто');
         },
         cancelOnError: false,
       );
 
       _isConnected = true;
 
-      print(
-        '✅ WebSocket подключён',
-      );
+      print('✅ WebSocket подключён');
 
       return true;
     } catch (error) {
-      print(
-        '❌ Не удалось подключиться: $error',
-      );
+      print('❌ Не удалось подключиться: $error');
 
       _isConnected = false;
 
@@ -235,40 +177,25 @@ class SocketService {
   // ПОЛУЧЕНИЕ СООБЩЕНИЙ
   // ========================================
 
-  Future<void> _handleRawMessage(
-    dynamic rawMessage,
-  ) async {
+  Future<void> _handleRawMessage(dynamic rawMessage) async {
     try {
-      final decoded =
-          jsonDecode(
-        rawMessage.toString(),
-      );
+      final decoded = jsonDecode(rawMessage.toString());
 
       if (decoded is! Map) {
         return;
       }
 
-      final message =
-          Map<String, dynamic>.from(
-        decoded,
-      );
+      final message = Map<String, dynamic>.from(decoded);
 
-      final type =
-          message['type']?.toString() ?? '';
+      final type = message['type']?.toString() ?? '';
 
-      final rawData =
-          message['data'];
+      final rawData = message['data'];
 
-      final data =
-          rawData is Map
-              ? Map<String, dynamic>.from(
-                  rawData,
-                )
-              : <String, dynamic>{};
+      final data = rawData is Map
+          ? Map<String, dynamic>.from(rawData)
+          : <String, dynamic>{};
 
-      print(
-        '📨 ПОЛУЧЕНО: $type',
-      );
+      print('📨 ПОЛУЧЕНО: $type');
 
       // ======================================
       // УСПЕШНЫЙ ВХОД
@@ -276,16 +203,12 @@ class SocketService {
 
       if (type == 'login_success') {
         _authenticated = true;
-        final username =
-            data['username']
-                ?.toString();
+        final username = data['username']?.toString();
 
-        if (username != null &&
-            username.isNotEmpty) {
+        if (username != null && username.isNotEmpty) {
           currentUser = username;
 
-          final mediaToken =
-              data['mediaToken']?.toString().trim() ?? '';
+          final mediaToken = data['mediaToken']?.toString().trim() ?? '';
           final mediaPort =
               int.tryParse(data['mediaPort']?.toString() ?? '') ?? 8081;
           final serverUrl = _serverUrl?.trim() ?? '';
@@ -312,14 +235,10 @@ class SocketService {
       // ОФЛАЙН-СООБЩЕНИЯ ПОЛУЧЕНЫ
       // ======================================
 
-      if (type ==
-          'offline_messages_complete') {
-        _receivingOfflineMessages =
-            false;
+      if (type == 'offline_messages_complete') {
+        _receivingOfflineMessages = false;
 
-        print(
-          '📭 Получение офлайн-сообщений завершено',
-        );
+        print('📭 Получение офлайн-сообщений завершено');
       }
 
       // ======================================
@@ -327,48 +246,22 @@ class SocketService {
       // ======================================
 
       if (type == 'message') {
-        final id =
-            data['id']
-                    ?.toString()
-                    .trim() ??
-                '';
+        final id = data['id']?.toString().trim() ?? '';
 
-        final from =
-            data['from']
-                    ?.toString()
-                    .trim() ??
-                '';
+        final from = data['from']?.toString().trim() ?? '';
 
-        final to =
-            data['to']
-                    ?.toString()
-                    .trim() ??
-                '';
+        final to = data['to']?.toString().trim() ?? '';
 
-        final text =
-            data['text']
-                    ?.toString()
-                    .trim() ??
-                '';
+        final text = data['text']?.toString().trim() ?? '';
 
         final messageType =
-            data['messageType']
-                    ?.toString()
-                    .trim()
-                    .toLowerCase() ??
-                'text';
+            data['messageType']?.toString().trim().toLowerCase() ?? 'text';
 
-        final voiceDurationMs =
-            int.tryParse(
-              data['voiceDurationMs']
-                      ?.toString() ??
-                  '',
-            );
+        final voiceDurationMs = int.tryParse(
+          data['voiceDurationMs']?.toString() ?? '',
+        );
 
-        final fileName =
-            data['fileName']
-                    ?.toString()
-                    .trim();
+        final fileName = data['fileName']?.toString().trim();
 
         // Сообщение реально дошло до приложения.
         // Подтверждаем доставку серверу.
@@ -379,11 +272,7 @@ class SocketService {
             currentUser!.isNotEmpty &&
             to == currentUser &&
             from != currentUser) {
-          sendMessageDelivered(
-            messageId: id,
-            from: from,
-            to: to,
-          );
+          sendMessageDelivered(messageId: id, from: from, to: to);
         }
 
         // Уведомление показываем только если:
@@ -393,11 +282,13 @@ class SocketService {
         if (from.isNotEmpty &&
             text.isNotEmpty &&
             from != currentUser &&
-            AppVisibility.shouldNotify(foreground: AppVisibility.instance.foreground, sameChat: from == _activeChatUser) &&
+            AppVisibility.shouldNotify(
+              foreground: AppVisibility.instance.foreground,
+              sameChat: from == _activeChatUser,
+            ) &&
             !_receivingOfflineMessages) {
           unawaited(
-            NotificationService.instance
-                .showMessageNotification(
+            NotificationService.instance.showMessageNotification(
               from: from,
               message: text,
               messageType: messageType,
@@ -410,8 +301,7 @@ class SocketService {
             '🔔 Уведомление о сообщении: '
             '$from',
           );
-        } else if (from.isNotEmpty &&
-            from == _activeChatUser) {
+        } else if (from.isNotEmpty && from == _activeChatUser) {
           print(
             '💬 Чат с $from открыт — '
             'уведомление не показываем',
@@ -423,13 +313,8 @@ class SocketService {
       // ПОДТВЕРЖДЕНИЕ ДОСТАВКИ
       // ======================================
 
-      if (type ==
-          'message_delivered') {
-        final messageId =
-            data['messageId']
-                    ?.toString()
-                    .trim() ??
-                '';
+      if (type == 'message_delivered') {
+        final messageId = data['messageId']?.toString().trim() ?? '';
 
         if (messageId.isNotEmpty) {
           print(
@@ -444,11 +329,7 @@ class SocketService {
       // ======================================
 
       if (type == 'message_read') {
-        final messageId =
-            data['messageId']
-                    ?.toString()
-                    .trim() ??
-                '';
+        final messageId = data['messageId']?.toString().trim() ?? '';
 
         if (messageId.isNotEmpty) {
           print(
@@ -465,31 +346,35 @@ class SocketService {
       if (type == 'group_message') {
         final groupId = data['groupId']?.toString() ?? '';
         final from = data['from']?.toString() ?? '';
-        if (groupId.isNotEmpty && from.isNotEmpty && from != currentUser &&
-            AppVisibility.shouldNotify(foreground: AppVisibility.instance.foreground, sameChat: activeGroupId == groupId)) {
-          unawaited(NotificationService.instance.showGroupMessageNotification(groupId: groupId,
-            from: from, message: data['text']?.toString() ?? 'Новое сообщение')
-            .catchError((Object error) { print('Уведомление группы недоступно: $error'); }));
+        if (groupId.isNotEmpty &&
+            from.isNotEmpty &&
+            from != currentUser &&
+            AppVisibility.shouldNotify(
+              foreground: AppVisibility.instance.foreground,
+              sameChat: activeGroupId == groupId,
+            )) {
+          unawaited(
+            NotificationService.instance
+                .showGroupMessageNotification(
+                  groupId: groupId,
+                  from: from,
+                  message: data['text']?.toString() ?? 'Новое сообщение',
+                )
+                .catchError((Object error) {
+                  print('Уведомление группы недоступно: $error');
+                }),
+          );
         }
       }
 
       if (type == 'reaction_update') {
-        final changedBy =
-            data['changedBy']
-                    ?.toString()
-                    .trim() ??
-                '';
+        final changedBy = data['changedBy']?.toString().trim() ?? '';
 
-        final reactionAdded =
-            data['reactionAdded'] ==
-                true;
+        final reactionAdded = data['reactionAdded'] == true;
 
-        if (reactionAdded &&
-            changedBy.isNotEmpty &&
-            changedBy != currentUser) {
+        if (reactionAdded && changedBy.isNotEmpty && changedBy != currentUser) {
           unawaited(
-            NotificationService.instance
-                .showReactionNotification(
+            NotificationService.instance.showReactionNotification(
               from: changedBy,
             ),
           );
@@ -506,31 +391,20 @@ class SocketService {
       // ======================================
 
       if (type == 'avatar_data') {
-        final username =
-            data['username']
-                    ?.toString() ??
-                '';
+        final username = data['username']?.toString() ?? '';
 
-        final avatar =
-            data['avatar']
-                    ?.toString() ??
-                '';
+        final avatar = data['avatar']?.toString() ?? '';
 
         if (username.isNotEmpty) {
           if (avatar.isNotEmpty) {
-            StorageService.saveAvatar(
-              username,
-              avatar,
-            );
+            StorageService.saveAvatar(username, avatar);
 
             print(
               '🖼️ Аватарка получена и сохранена: '
               '$username',
             );
           } else {
-            StorageService.removeAvatar(
-              username,
-            );
+            StorageService.removeAvatar(username);
 
             print(
               '🗑️ У пользователя нет аватарки: '
@@ -544,17 +418,11 @@ class SocketService {
       // АВАТАРКА ОБНОВЛЕНА
       // ======================================
 
-      if (type ==
-          'avatar_updated') {
-        final username =
-            data['username']
-                    ?.toString() ??
-                '';
+      if (type == 'avatar_updated') {
+        final username = data['username']?.toString() ?? '';
 
         if (username.isNotEmpty) {
-          requestAvatar(
-            username,
-          );
+          requestAvatar(username);
         }
       }
 
@@ -565,13 +433,9 @@ class SocketService {
       // ПЕРЕДАЁМ СОБЫТИЕ ЭКРАНАМ
       // ======================================
 
-      _notifyHandlers(
-        message,
-      );
+      _notifyHandlers(message);
     } catch (error) {
-      print(
-        '❌ Ошибка обработки сообщения: $error',
-      );
+      print('❌ Ошибка обработки сообщения: $error');
     }
   }
 
@@ -580,15 +444,9 @@ class SocketService {
   // ========================================
 
   void _sendFcmToken() {
-    final username =
-        currentUser?.trim() ?? '';
+    final username = currentUser?.trim() ?? '';
 
-    final token =
-        FirebaseMessagingService
-                .instance
-                .token
-                ?.trim() ??
-            '';
+    final token = FirebaseMessagingService.instance.token?.trim() ?? '';
 
     if (username.isEmpty) {
       print(
@@ -608,12 +466,7 @@ class SocketService {
       return;
     }
 
-    _send(
-      'register_fcm_token',
-      {
-        'token': token,
-      },
-    );
+    _send('register_fcm_token', {'token': token});
 
     print(
       '🔥 FCM token отправлен на сервер '
@@ -625,16 +478,13 @@ class SocketService {
   // ПОТЕРЯ СОЕДИНЕНИЯ
   // ========================================
 
-  void _handleDisconnect({
-    required String reason,
-  }) {
+  void _handleDisconnect({required String reason}) {
     _isConnected = false;
     _authenticated = false;
 
     _channel = null;
 
-    _receivingOfflineMessages =
-        false;
+    _receivingOfflineMessages = false;
 
     if (_manualDisconnect) {
       print(
@@ -645,16 +495,10 @@ class SocketService {
       return;
     }
 
-    _notifyHandlers(
-      {
-        'type':
-            'disconnected',
-        'data': {
-          'reason':
-              reason,
-        },
-      },
-    );
+    _notifyHandlers({
+      'type': 'disconnected',
+      'data': {'reason': reason},
+    });
 
     _scheduleReconnect();
   }
@@ -672,8 +516,7 @@ class SocketService {
       return;
     }
 
-    if (_serverUrl == null ||
-        _serverUrl!.isEmpty) {
+    if (_serverUrl == null || _serverUrl!.isEmpty) {
       return;
     }
 
@@ -688,63 +531,39 @@ class SocketService {
 
     _reconnectTimer?.cancel();
 
-    _reconnectTimer =
-        Timer(
-      const Duration(
-        seconds: 5,
-      ),
-      () async {
-        _isReconnecting = false;
+    _reconnectTimer = Timer(const Duration(seconds: 5), () async {
+      _isReconnecting = false;
 
-        if (_manualDisconnect) {
-          return;
-        }
+      if (_manualDisconnect) {
+        return;
+      }
 
-        final url =
-            _serverUrl;
+      final url = _serverUrl;
 
-        final username =
-            currentUser;
+      final username = currentUser;
 
-        final password =
-            _lastPassword;
+      final password = _lastPassword;
 
-        if (url == null ||
-            username == null ||
-            password == null) {
-          return;
-        }
+      if (url == null || username == null || password == null) {
+        return;
+      }
 
-        print(
-          '🔄 Попытка переподключения...',
-        );
+      print('🔄 Попытка переподключения...');
 
-        final connected =
-            await connect(
-          url,
-        );
+      final connected = await connect(url);
 
-        if (connected &&
-            !_manualDisconnect) {
-          login(
-            username,
-            password,
-          );
-        }
-      },
-    );
+      if (connected && !_manualDisconnect) {
+        login(username, password);
+      }
+    });
   }
 
   // ========================================
   // ОТПРАВКА НА СЕРВЕР
   // ========================================
 
-  void _send(
-    String type,
-    Map<String, dynamic> data,
-  ) {
-    if (!_isConnected ||
-        _channel == null) {
+  void _send(String type, Map<String, dynamic> data) {
+    if (!_isConnected || _channel == null) {
       print(
         '⚠️ Нет подключения. '
         'Не отправлено: $type',
@@ -753,28 +572,16 @@ class SocketService {
       return;
     }
 
-    final message = {
-      'type': type,
-      'data': data,
-    };
+    final message = {'type': type, 'data': data};
 
     try {
-      final json =
-          jsonEncode(
-        message,
-      );
+      final json = jsonEncode(message);
 
-      print(
-        '📤 Отправлено: $type',
-      );
+      print('📤 Отправлено: $type');
 
-      _channel!.sink.add(
-        json,
-      );
+      _channel!.sink.add(json);
     } catch (error) {
-      print(
-        '❌ Ошибка отправки: $error',
-      );
+      print('❌ Ошибка отправки: $error');
     }
   }
 
@@ -782,34 +589,18 @@ class SocketService {
   // РЕГИСТРАЦИЯ
   // ========================================
 
-  void register(
-    String username,
-    String password,
-  ) {
-    _send(
-      'register',
-      {
-        'username':
-            username.trim(),
-        'password':
-            password,
-      },
-    );
+  void register(String username, String password) {
+    _send('register', {'username': username.trim(), 'password': password});
   }
 
   // ========================================
   // ВХОД
   // ========================================
 
-  void login(
-    String username,
-    String password,
-  ) {
-    final user =
-        username.trim();
+  void login(String username, String password) {
+    final user = username.trim();
 
-    if (user.isEmpty ||
-        password.isEmpty) {
+    if (user.isEmpty || password.isEmpty) {
       return;
     }
 
@@ -819,13 +610,7 @@ class SocketService {
 
     _lastPassword = password;
 
-    _send(
-      'login',
-      {
-        'username': user,
-        'password': password,
-      },
-    );
+    _send('login', {'username': user, 'password': password});
   }
 
   // ========================================
@@ -833,10 +618,7 @@ class SocketService {
   // ========================================
 
   void getUsers() {
-    _send(
-      'get_users',
-      {},
-    );
+    _send('get_users', {});
   }
   // ========================================
   // GROUPS — STAGE 24
@@ -844,23 +626,14 @@ class SocketService {
   // ========================================
 
   void getRegisteredUsers() {
-    _send(
-      'get_registered_users',
-      {},
-    );
+    _send('get_registered_users', {});
   }
 
   void getGroups() {
-    _send(
-      'get_groups',
-      {},
-    );
+    _send('get_groups', {});
   }
 
-  void createGroup(
-    String name,
-    List<String> members,
-  ) {
+  void createGroup(String name, List<String> members) {
     final groupName = name.trim();
     final cleanMembers = members
         .map((user) => user.trim())
@@ -872,19 +645,11 @@ class SocketService {
       return;
     }
 
-    _send(
-      'create_group',
-      {
-        'name': groupName,
-        'members': cleanMembers,
-      },
-    );
+    _send('create_group', {'name': groupName, 'members': cleanMembers});
   }
+
   // SPARTAN_STAGE24_1_ADD_MEMBERS
-  void addGroupMembers(
-    String groupId,
-    List<String> members,
-  ) {
+  void addGroupMembers(String groupId, List<String> members) {
     final id = groupId.trim();
     final cleanMembers = members
         .map((user) => user.trim())
@@ -896,13 +661,7 @@ class SocketService {
       return;
     }
 
-    _send(
-      'add_group_members',
-      {
-        'groupId': id,
-        'members': cleanMembers,
-      },
-    );
+    _send('add_group_members', {'groupId': id, 'members': cleanMembers});
   }
 
   // ========================================
@@ -910,11 +669,7 @@ class SocketService {
   // SPARTAN_STAGE25_GROUP_MESSAGES
   // ========================================
 
-  void getGroupMessages(
-    String groupId, {
-    String? before,
-    int limit = 60,
-  }) {
+  void getGroupMessages(String groupId, {String? before, int limit = 60}) {
     final id = groupId.trim();
     if (id.isEmpty) return;
 
@@ -932,33 +687,20 @@ class SocketService {
   // GROUP TYPING - STAGE 30
   // ========================================
 
-  void sendGroupTyping(
-    String groupId,
-    bool isTyping,
-  ) {
-    final id =
-        groupId.trim();
+  void sendGroupTyping(String groupId, bool isTyping) {
+    final id = groupId.trim();
 
     if (id.isEmpty) {
       return;
     }
 
-    final user =
-        currentUser
-                ?.trim() ??
-            '';
+    final user = currentUser?.trim() ?? '';
 
     if (user.isEmpty) {
       return;
     }
 
-    _send(
-      'group_typing',
-      {
-        'groupId': id,
-        'isTyping': isTyping,
-      },
-    );
+    _send('group_typing', {'groupId': id, 'isTyping': isTyping});
   }
 
   void sendGroupMessage(
@@ -966,45 +708,27 @@ class SocketService {
     String text, {
     Map<String, dynamic>? replyTo,
   }) {
-    final id =
-        groupId.trim();
+    final id = groupId.trim();
 
-    final messageText =
-        text.trim();
+    final messageText = text.trim();
 
-    if (id.isEmpty ||
-        messageText.isEmpty) {
+    if (id.isEmpty || messageText.isEmpty) {
       return;
     }
 
     final data = <String, dynamic>{
-      'id':
-          DateTime.now()
-              .microsecondsSinceEpoch
-              .toString(),
-      'groupId':
-          id,
-      'text':
-          messageText,
-      'time':
-          DateTime.now()
-              .toIso8601String(),
+      'id': DateTime.now().microsecondsSinceEpoch.toString(),
+      'groupId': id,
+      'text': messageText,
+      'time': DateTime.now().toIso8601String(),
     };
 
     if (replyTo != null) {
-      data['replyTo'] =
-          Map<String, dynamic>.from(
-        replyTo,
-      );
+      data['replyTo'] = Map<String, dynamic>.from(replyTo);
     }
 
-    _send(
-      'group_message',
-      data,
-    );
+    _send('group_message', data);
   }
-
-
 
   // ========================================
   // GROUP MEDIA - STAGE 28
@@ -1059,7 +783,6 @@ class SocketService {
     _send('group_message', data);
   }
 
-
   // ========================================
   // GROUP MESSAGE ACTIONS - STAGE 26
   // SPARTAN_STAGE26_GROUP_ACTIONS
@@ -1074,20 +797,15 @@ class SocketService {
     final targetMessageId = messageId.trim();
     final messageText = text.trim();
 
-    if (id.isEmpty ||
-        targetMessageId.isEmpty ||
-        messageText.isEmpty) {
+    if (id.isEmpty || targetMessageId.isEmpty || messageText.isEmpty) {
       return;
     }
 
-    _send(
-      'group_edit_message',
-      {
-        'groupId': id,
-        'messageId': targetMessageId,
-        'text': messageText,
-      },
-    );
+    _send('group_edit_message', {
+      'groupId': id,
+      'messageId': targetMessageId,
+      'text': messageText,
+    });
   }
 
   void deleteGroupMessage({
@@ -1101,13 +819,10 @@ class SocketService {
       return;
     }
 
-    _send(
-      'group_delete_message',
-      {
-        'groupId': id,
-        'messageId': targetMessageId,
-      },
-    );
+    _send('group_delete_message', {
+      'groupId': id,
+      'messageId': targetMessageId,
+    });
   }
 
   void sendGroupReaction({
@@ -1119,86 +834,57 @@ class SocketService {
     final targetMessageId = messageId.trim();
     final reactionValue = reaction.trim();
 
-    if (id.isEmpty ||
-        targetMessageId.isEmpty ||
-        reactionValue.isEmpty) {
+    if (id.isEmpty || targetMessageId.isEmpty || reactionValue.isEmpty) {
       return;
     }
 
-    _send(
-      'group_reaction',
-      {
-        'groupId': id,
-        'messageId': targetMessageId,
-        'reaction': reactionValue,
-      },
-    );
+    _send('group_reaction', {
+      'groupId': id,
+      'messageId': targetMessageId,
+      'reaction': reactionValue,
+    });
   }
-
 
   // ========================================
   // ОФЛАЙН-СООБЩЕНИЯ
   // ========================================
 
   void getOfflineMessages() {
-    _receivingOfflineMessages =
-        true;
+    _receivingOfflineMessages = true;
 
-    _send(
-      'get_offline_messages',
-      {},
-    );
+    _send('get_offline_messages', {});
   }
 
   // ========================================
   // СТАТУС КОНТАКТА / LAST SEEN
   // ========================================
 
-  void getUserStatus(
-    String username,
-  ) {
-    final user =
-        username.trim();
+  void getUserStatus(String username) {
+    final user = username.trim();
 
     if (user.isEmpty) {
       return;
     }
 
-    _send(
-      'get_user_status',
-      {
-        'username': user,
-      },
-    );
+    _send('get_user_status', {'username': user});
   }
 
   // ========================================
   // ПЕЧАТАЕТ / TYPING
   // ========================================
 
-  void sendTyping(
-    String to,
-    bool isTyping,
-  ) {
-    final target =
-        to.trim();
+  void sendTyping(String to, bool isTyping) {
+    final target = to.trim();
 
     if (target.isEmpty) {
       return;
     }
 
-    if (currentUser == null ||
-        currentUser!.isEmpty) {
+    if (currentUser == null || currentUser!.isEmpty) {
       return;
     }
 
-    _send(
-      'typing',
-      {
-        'to': target,
-        'isTyping': isTyping,
-      },
-    );
+    _send('typing', {'to': target, 'isTyping': isTyping});
   }
 
   // ========================================
@@ -1212,87 +898,51 @@ class SocketService {
     String? forwardedFrom,
     String? forwardComment,
   }) {
-    final target =
-        to.trim();
+    final target = to.trim();
 
-    final messageText =
-        text.trim();
+    final messageText = text.trim();
 
-    if (target.isEmpty ||
-        messageText.isEmpty) {
+    if (target.isEmpty || messageText.isEmpty) {
       return;
     }
 
-    final messageData =
-        <String, dynamic>{
-      'id':
-          DateTime.now()
-              .microsecondsSinceEpoch
-              .toString(),
-      'to':
-          target,
-      'text':
-          messageText,
-      'time':
-          DateTime.now()
-              .toIso8601String(),
+    final messageData = <String, dynamic>{
+      'id': DateTime.now().microsecondsSinceEpoch.toString(),
+      'to': target,
+      'text': messageText,
+      'time': DateTime.now().toIso8601String(),
     };
 
     if (replyTo != null) {
-      final replyId =
-          replyTo['id']
-                  ?.toString()
-                  .trim() ??
-              '';
+      final replyId = replyTo['id']?.toString().trim() ?? '';
 
-      final replyFrom =
-          replyTo['from']
-                  ?.toString()
-                  .trim() ??
-              '';
+      final replyFrom = replyTo['from']?.toString().trim() ?? '';
 
-      final replyText =
-          replyTo['text']
-                  ?.toString()
-                  .trim() ??
-              '';
+      final replyText = replyTo['text']?.toString().trim() ?? '';
 
-      if (replyId.isNotEmpty &&
-          replyFrom.isNotEmpty &&
-          replyText.isNotEmpty) {
+      if (replyId.isNotEmpty && replyFrom.isNotEmpty && replyText.isNotEmpty) {
         messageData['replyTo'] = {
-          'id':
-              replyId,
-          'from':
-              replyFrom,
-          'text':
-              replyText,
+          'id': replyId,
+          'from': replyFrom,
+          'text': replyText,
         };
       }
     }
 
-    final originalAuthor =
-        forwardedFrom?.trim() ?? '';
+    final originalAuthor = forwardedFrom?.trim() ?? '';
 
     if (originalAuthor.isNotEmpty) {
-      messageData['forwardedFrom'] =
-          originalAuthor;
+      messageData['forwardedFrom'] = originalAuthor;
     }
 
-    final comment =
-        forwardComment?.trim() ?? '';
+    final comment = forwardComment?.trim() ?? '';
 
     if (comment.isNotEmpty) {
-      messageData['forwardComment'] =
-          comment;
+      messageData['forwardComment'] = comment;
     }
 
-    _send(
-      'message',
-      messageData,
-    );
+    _send('message', messageData);
   }
-
 
   // ========================================
   // STAGE 29 - PRIVATE MEDIA
@@ -1343,11 +993,7 @@ class SocketService {
       final replyFrom = replyTo['from']?.toString().trim() ?? '';
       final replyText = replyTo['text']?.toString().trim() ?? '';
       if (replyId.isNotEmpty && replyFrom.isNotEmpty && replyText.isNotEmpty) {
-        data['replyTo'] = {
-          'id': replyId,
-          'from': replyFrom,
-          'text': replyText,
-        };
+        data['replyTo'] = {'id': replyId, 'from': replyFrom, 'text': replyText};
       }
     }
     final originalAuthor = forwardedFrom?.trim() ?? '';
@@ -1378,7 +1024,10 @@ class SocketService {
   }) {
     final target = to.trim();
     final remoteId = mediaId.trim();
-    if (target.isEmpty || remoteId.isEmpty || durationMs <= 0 || fileSize <= 0) {
+    if (target.isEmpty ||
+        remoteId.isEmpty ||
+        durationMs <= 0 ||
+        fileSize <= 0) {
       return;
     }
 
@@ -1431,29 +1080,17 @@ class SocketService {
     required String to,
     required String newText,
   }) {
-    final id =
-        messageId.trim();
+    final id = messageId.trim();
 
-    final target =
-        to.trim();
+    final target = to.trim();
 
-    final text =
-        newText.trim();
+    final text = newText.trim();
 
-    if (id.isEmpty ||
-        target.isEmpty ||
-        text.isEmpty) {
+    if (id.isEmpty || target.isEmpty || text.isEmpty) {
       return;
     }
 
-    _send(
-      'edit_message',
-      {
-        'messageId': id,
-        'to': target,
-        'newText': text,
-      },
-    );
+    _send('edit_message', {'messageId': id, 'to': target, 'newText': text});
   }
 
   // ========================================
@@ -1464,24 +1101,15 @@ class SocketService {
     required String messageId,
     required String to,
   }) {
-    final id =
-        messageId.trim();
+    final id = messageId.trim();
 
-    final target =
-        to.trim();
+    final target = to.trim();
 
-    if (id.isEmpty ||
-        target.isEmpty) {
+    if (id.isEmpty || target.isEmpty) {
       return;
     }
 
-    _send(
-      'delete_message_for_everyone',
-      {
-        'messageId': id,
-        'to': target,
-      },
-    );
+    _send('delete_message_for_everyone', {'messageId': id, 'to': target});
   }
 
   // ========================================
@@ -1493,18 +1121,13 @@ class SocketService {
     required String from,
     required String to,
   }) {
-    final id =
-        messageId.trim();
+    final id = messageId.trim();
 
-    final messageFrom =
-        from.trim();
+    final messageFrom = from.trim();
 
-    final messageTo =
-        to.trim();
+    final messageTo = to.trim();
 
-    if (id.isEmpty ||
-        messageFrom.isEmpty ||
-        messageTo.isEmpty) {
+    if (id.isEmpty || messageFrom.isEmpty || messageTo.isEmpty) {
       return;
     }
 
@@ -1514,17 +1137,11 @@ class SocketService {
       return;
     }
 
-    _send(
-      'message_delivered',
-      {
-        'messageId':
-            id,
-        'from':
-            messageFrom,
-        'to':
-            messageTo,
-      },
-    );
+    _send('message_delivered', {
+      'messageId': id,
+      'from': messageFrom,
+      'to': messageTo,
+    });
   }
 
   // ========================================
@@ -1536,18 +1153,13 @@ class SocketService {
     required String from,
     required String to,
   }) {
-    final id =
-        messageId.trim();
+    final id = messageId.trim();
 
-    final messageFrom =
-        from.trim();
+    final messageFrom = from.trim();
 
-    final messageTo =
-        to.trim();
+    final messageTo = to.trim();
 
-    if (id.isEmpty ||
-        messageFrom.isEmpty ||
-        messageTo.isEmpty) {
+    if (id.isEmpty || messageFrom.isEmpty || messageTo.isEmpty) {
       return;
     }
 
@@ -1557,17 +1169,11 @@ class SocketService {
       return;
     }
 
-    _send(
-      'message_read',
-      {
-        'messageId':
-            id,
-        'from':
-            messageFrom,
-        'to':
-            messageTo,
-      },
-    );
+    _send('message_read', {
+      'messageId': id,
+      'from': messageFrom,
+      'to': messageTo,
+    });
   }
 
   // ========================================
@@ -1580,17 +1186,13 @@ class SocketService {
     required String to,
     required String reaction,
   }) {
-    final id =
-        messageId.trim();
+    final id = messageId.trim();
 
-    final messageFrom =
-        from.trim();
+    final messageFrom = from.trim();
 
-    final messageTo =
-        to.trim();
+    final messageTo = to.trim();
 
-    final reactionValue =
-        reaction.trim();
+    final reactionValue = reaction.trim();
 
     if (id.isEmpty ||
         messageFrom.isEmpty ||
@@ -1599,42 +1201,27 @@ class SocketService {
       return;
     }
 
-    _send(
-      'message_reaction',
-      {
-        'messageId':
-            id,
-        'from':
-            messageFrom,
-        'to':
-            messageTo,
-        'reaction':
-            reactionValue,
-      },
-    );
+    _send('message_reaction', {
+      'messageId': id,
+      'from': messageFrom,
+      'to': messageTo,
+      'reaction': reactionValue,
+    });
   }
 
   // ========================================
   // ЗАГРУЗКА АВАТАРКИ
   // ========================================
 
-  Future<void> setAvatarFromPath(
-    String path,
-  ) async {
+  Future<void> setAvatarFromPath(String path) async {
     try {
-      if (currentUser == null ||
-          currentUser!.isEmpty) {
-        print(
-          '⚠️ Пользователь не авторизован',
-        );
+      if (currentUser == null || currentUser!.isEmpty) {
+        print('⚠️ Пользователь не авторизован');
 
         return;
       }
 
-      final file =
-          File(
-        path,
-      );
+      final file = File(path);
 
       if (!await file.exists()) {
         print(
@@ -1645,30 +1232,15 @@ class SocketService {
         return;
       }
 
-      final bytes =
-          await file.readAsBytes();
+      final bytes = await file.readAsBytes();
 
-      final avatarBase64 =
-          base64Encode(
-        bytes,
-      );
+      final avatarBase64 = base64Encode(bytes);
 
-      StorageService.saveAvatar(
-        currentUser!,
-        avatarBase64,
-      );
+      StorageService.saveAvatar(currentUser!, avatarBase64);
 
-      _send(
-        'upload_avatar',
-        {
-          'avatar':
-              avatarBase64,
-        },
-      );
+      _send('upload_avatar', {'avatar': avatarBase64});
 
-      print(
-        '🖼️ Аватарка отправлена на сервер',
-      );
+      print('🖼️ Аватарка отправлена на сервер');
     } catch (error) {
       print(
         '❌ Ошибка загрузки аватарки: '
@@ -1681,23 +1253,14 @@ class SocketService {
   // ЗАПРОС АВАТАРКИ
   // ========================================
 
-  void requestAvatar(
-    String username,
-  ) {
-    final user =
-        username.trim();
+  void requestAvatar(String username) {
+    final user = username.trim();
 
     if (user.isEmpty) {
       return;
     }
 
-    _send(
-      'get_avatar',
-      {
-        'username':
-            user,
-      },
-    );
+    _send('get_avatar', {'username': user});
   }
 
   // ========================================
@@ -1705,26 +1268,17 @@ class SocketService {
   // ========================================
 
   Future<void> deleteAvatar() async {
-    final username =
-        currentUser;
+    final username = currentUser;
 
-    if (username == null ||
-        username.isEmpty) {
+    if (username == null || username.isEmpty) {
       return;
     }
 
-    _send(
-      'delete_avatar',
-      {},
-    );
+    _send('delete_avatar', {});
 
-    await StorageService.removeAvatar(
-      username,
-    );
+    await StorageService.removeAvatar(username);
 
-    print(
-      '🗑️ Аватарка удалена',
-    );
+    print('🗑️ Аватарка удалена');
   }
 
   // ========================================
@@ -1736,49 +1290,33 @@ class SocketService {
     required String action,
     required String text,
   }) {
-    final id =
-        requestId.trim();
-    final cleanAction =
-        action.trim();
-    final cleanText =
-        text.trim();
+    final id = requestId.trim();
+    final cleanAction = action.trim();
+    final cleanText = text.trim();
 
-    if (id.isEmpty ||
-        cleanAction.isEmpty ||
-        cleanText.isEmpty) {
+    if (id.isEmpty || cleanAction.isEmpty || cleanText.isEmpty) {
       return;
     }
 
-    _send(
-      'chatgpt_request',
-      {
-        'requestId': id,
-        'action': cleanAction,
-        'text': cleanText,
-      },
-    );
+    _send('chatgpt_request', {
+      'requestId': id,
+      'action': cleanAction,
+      'text': cleanText,
+    });
   }
 
   // ========================================
   // SPARTAN AI
   // ========================================
 
-  void requestSpartanAiHistory({
-    required String requestId,
-  }) {
-    final id =
-        requestId.trim();
+  void requestSpartanAiHistory({required String requestId}) {
+    final id = requestId.trim();
 
     if (id.isEmpty) {
       return;
     }
 
-    _send(
-      'get_spartan_ai_history',
-      {
-        'requestId': id,
-      },
-    );
+    _send('get_spartan_ai_history', {'requestId': id});
   }
 
   void sendSpartanAiRequest({
@@ -1786,66 +1324,43 @@ class SocketService {
     required String text,
     String? peer,
   }) {
-    final id =
-        requestId.trim();
-    final cleanText =
-        text.trim();
-    final cleanPeer =
-        peer?.trim() ?? '';
+    final id = requestId.trim();
+    final cleanText = text.trim();
+    final cleanPeer = peer?.trim() ?? '';
 
-    if (id.isEmpty ||
-        cleanText.isEmpty) {
+    if (id.isEmpty || cleanText.isEmpty) {
       return;
     }
 
-    _send(
-      'spartan_ai_request',
-      {
-        'requestId': id,
-        'text': cleanText,
-        'peer': cleanPeer,
-      },
-    );
+    _send('spartan_ai_request', {
+      'requestId': id,
+      'text': cleanText,
+      'peer': cleanPeer,
+    });
   }
 
-  void clearSpartanAiHistory({
-    required String requestId,
-  }) {
-    final id =
-        requestId.trim();
+  void clearSpartanAiHistory({required String requestId}) {
+    final id = requestId.trim();
 
     if (id.isEmpty) {
       return;
     }
 
-    _send(
-      'clear_spartan_ai_history',
-      {
-        'requestId': id,
-      },
-    );
+    _send('clear_spartan_ai_history', {'requestId': id});
   }
 
   // ========================================
   // CHATGPT AUTO REPLY
   // ========================================
 
-  void requestAutoReplySettings(
-    String peer,
-  ) {
-    final target =
-        peer.trim();
+  void requestAutoReplySettings(String peer) {
+    final target = peer.trim();
 
     if (target.isEmpty) {
       return;
     }
 
-    _send(
-      'get_auto_reply_settings',
-      {
-        'peer': target,
-      },
-    );
+    _send('get_auto_reply_settings', {'peer': target});
   }
 
   void setAutoReplySettings({
@@ -1859,53 +1374,44 @@ class SocketService {
     required String boundaries,
     required int delaySeconds,
   }) {
-    final target =
-        peer.trim();
+    final target = peer.trim();
 
     if (target.isEmpty) {
       return;
     }
 
-    _send(
-      'set_auto_reply_settings',
-      {
-        'peer': target,
-        'enabled': enabled,
-        'mode': mode.trim(),
-        'idleSeconds': idleSeconds,
-        'goal': goal.trim(),
-        'prompt': prompt.trim(),
-        'context': context.trim(),
-        'boundaries': boundaries.trim(),
-        'delaySeconds': delaySeconds,
-      },
-    );
+    _send('set_auto_reply_settings', {
+      'peer': target,
+      'enabled': enabled,
+      'mode': mode.trim(),
+      'idleSeconds': idleSeconds,
+      'goal': goal.trim(),
+      'prompt': prompt.trim(),
+      'context': context.trim(),
+      'boundaries': boundaries.trim(),
+      'delaySeconds': delaySeconds,
+    });
   }
 
-  void clearAutoReplyHistory(
-    String peer,
-  ) {
-    final target =
-        peer.trim();
+  void clearAutoReplyHistory(String peer) {
+    final target = peer.trim();
 
     if (target.isEmpty) {
       return;
     }
 
-    _send(
-      'clear_auto_reply_history',
-      {
-        'peer': target,
-      },
-    );
+    _send('clear_auto_reply_history', {'peer': target});
   }
 
   // ========================================
   // PRIVATE AUDIO / VIDEO CALL SIGNALING
   // ========================================
 
-  void requestPendingCall([String? callId]) => _send('get_pending_call', {'callId': callId ?? ''});
-  void sendGroupCall(String type, Map<String, dynamic> data) => _send(type, data);
+  void requestPendingCall([String? callId]) =>
+      _send('get_pending_call', {'callId': callId ?? ''});
+  void sendGroupCall(String type, Map<String, dynamic> data) =>
+      _send(type, data);
+  void sendPulse(String type, Map<String, dynamic> data) => _send(type, data);
   void sendCallConnected({required String to, required String callId}) =>
       _send('call_connected', {'to': to, 'callId': callId});
 
@@ -1915,15 +1421,12 @@ class SocketService {
     required bool video,
     required Map<String, dynamic> sdp,
   }) {
-    _send(
-      'call_offer',
-      {
-        'to': to.trim(),
-        'callId': callId.trim(),
-        'video': video,
-        'sdp': sdp,
-      },
-    );
+    _send('call_offer', {
+      'to': to.trim(),
+      'callId': callId.trim(),
+      'video': video,
+      'sdp': sdp,
+    });
   }
 
   void sendCallAnswer({
@@ -1931,14 +1434,11 @@ class SocketService {
     required String callId,
     required Map<String, dynamic> sdp,
   }) {
-    _send(
-      'call_answer',
-      {
-        'to': to.trim(),
-        'callId': callId.trim(),
-        'sdp': sdp,
-      },
-    );
+    _send('call_answer', {
+      'to': to.trim(),
+      'callId': callId.trim(),
+      'sdp': sdp,
+    });
   }
 
   void sendCallIceCandidate({
@@ -1946,14 +1446,11 @@ class SocketService {
     required String callId,
     required Map<String, dynamic> candidate,
   }) {
-    _send(
-      'call_ice_candidate',
-      {
-        'to': to.trim(),
-        'callId': callId.trim(),
-        'candidate': candidate,
-      },
-    );
+    _send('call_ice_candidate', {
+      'to': to.trim(),
+      'callId': callId.trim(),
+      'candidate': candidate,
+    });
   }
 
   void sendCallReject({
@@ -1961,49 +1458,36 @@ class SocketService {
     required String callId,
     String reason = 'declined',
   }) {
-    _send(
-      'call_reject',
-      {
-        'to': to.trim(),
-        'callId': callId.trim(),
-        'reason': reason.trim(),
-      },
-    );
+    _send('call_reject', {
+      'to': to.trim(),
+      'callId': callId.trim(),
+      'reason': reason.trim(),
+    });
   }
 
-  void sendCallEnd({
-    required String to,
-    required String callId,
-  }) {
-    _send(
-      'call_end',
-      {
-        'to': to.trim(),
-        'callId': callId.trim(),
-      },
-    );
+  void sendCallEnd({required String to, required String callId}) {
+    _send('call_end', {'to': to.trim(), 'callId': callId.trim()});
   }
 
   // ========================================
   // РУЧНОЙ ВЫХОД
   // ========================================
 
-  Future<void> disconnect({
-    bool clearUser = true,
-  }) async {
+  Future<void> disconnect({bool clearUser = true}) async {
     _manualDisconnect = true;
-    _notifyHandlers({'type': 'disconnected', 'data': {'reason': 'Выход из приложения'}});
+    _notifyHandlers({
+      'type': 'disconnected',
+      'data': {'reason': 'Выход из приложения'},
+    });
 
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
 
     _isReconnecting = false;
 
-    _receivingOfflineMessages =
-        false;
+    _receivingOfflineMessages = false;
 
-    final channel =
-        _channel;
+    final channel = _channel;
 
     if (clearUser) {
       _authenticated = false;
@@ -2046,14 +1530,11 @@ class SocketService {
       return;
     }
 
-    _send(
-      pinned ? 'pin_message' : 'unpin_message',
-      {
-        'messageId': id,
-        'to': target,
-        'messageFrom': messageFrom.trim(),
-        'text': text,
-      },
-    );
+    _send(pinned ? 'pin_message' : 'unpin_message', {
+      'messageId': id,
+      'to': target,
+      'messageFrom': messageFrom.trim(),
+      'text': text,
+    });
   }
 }

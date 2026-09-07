@@ -7,6 +7,7 @@ list(APPEND FLUTTER_PLUGIN_LIST
   file_selector_windows
   firebase_core
   flutter_webrtc
+  permission_handler_windows
   public_file_saver
   record_windows
   video_player_win

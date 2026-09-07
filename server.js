@@ -2094,6 +2094,27 @@ const groupCallSignaling = createGroupCallSignaling({
   isPrivateBusy: username => callSignaling.isBusy(username),
 });
 
+const { createPulseSignaling } = require('./pulse_signaling');
+const pulseSignaling = createPulseSignaling({
+  send,
+  onlineUsers,
+  registeredUsers,
+  isBusy: username =>
+    callSignaling.isBusy(username) || groupCallSignaling.isBusy(username),
+  push: async (username, pulse) => sendFcmPush({
+    username,
+    title: 'SPARTAN PULSE',
+    body: `${pulse.from} предлагает созвониться, когда вы оба свободны`,
+    data: {
+      type: 'pulse_invite',
+      sender: pulse.from,
+      pulseId: pulse.id,
+      video: pulse.video,
+      expiresAt: pulse.expiresAt,
+    },
+  }),
+});
+
 const offlineMessages =
   loadOfflineMessages();
 
@@ -6672,6 +6693,7 @@ wss.on(
 
           if (callSignaling.handle(ws, currentUser, type, data)) return;
           if (groupCallSignaling.handle(ws, currentUser, type, data)) return;
+          if (pulseSignaling.handle(ws, currentUser, type, data)) return;
 
           // ====================================
           // PRIVATE MEDIA - V621

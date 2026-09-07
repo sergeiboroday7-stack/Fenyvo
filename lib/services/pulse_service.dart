@@ -1,0 +1,375 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
+
+import 'call_service.dart';
+import 'group_call_service.dart';
+import 'socket_service.dart';
+
+enum SpartanPulsePhase { idle, outgoing, incoming, matched }
+
+class SpartanPulse {
+  const SpartanPulse({
+    required this.id,
+    required this.from,
+    required this.to,
+    required this.video,
+    required this.createdAt,
+    required this.expiresAt,
+    required this.state,
+    this.acceptedAt,
+    this.startsAt,
+  });
+
+  final String id;
+  final String from;
+  final String to;
+  final bool video;
+  final int createdAt;
+  final int expiresAt;
+  final String state;
+  final int? acceptedAt;
+  final int? startsAt;
+
+  String peerFor(String currentUser) => from == currentUser ? to : from;
+
+  int get windowMinutes =>
+      ((expiresAt - createdAt) / Duration.millisecondsPerMinute)
+          .round()
+          .clamp(1, 24 * 60)
+          .toInt();
+
+  static int? _integer(Object? value) {
+    if (value is num) return value.toInt();
+    return int.tryParse(value?.toString() ?? '');
+  }
+
+  static SpartanPulse? parse(Object? value) {
+    if (value is! Map) return null;
+    final data = Map<String, dynamic>.from(value);
+    final id = data['id']?.toString().trim() ?? '';
+    final from = data['from']?.toString().trim() ?? '';
+    final to = data['to']?.toString().trim() ?? '';
+    final createdAt = _integer(data['createdAt']);
+    final expiresAt = _integer(data['expiresAt']);
+    if (id.isEmpty ||
+        from.isEmpty ||
+        to.isEmpty ||
+        createdAt == null ||
+        expiresAt == null) {
+      return null;
+    }
+    return SpartanPulse(
+      id: id,
+      from: from,
+      to: to,
+      video: data['video'] == true,
+      createdAt: createdAt,
+      expiresAt: expiresAt,
+      state: data['state']?.toString() ?? 'pending',
+      acceptedAt: _integer(data['acceptedAt']),
+      startsAt: _integer(data['startsAt']),
+    );
+  }
+}
+
+typedef PulseSender = void Function(String type, Map<String, dynamic> data);
+typedef PulseCallStarter = Future<void> Function(String peer, bool video);
+
+class PulseService extends ChangeNotifier {
+  PulseService._({
+    required PulseSender send,
+    required String Function() currentUser,
+    required bool Function() callBusy,
+    required PulseCallStarter startCall,
+    int Function()? now,
+  }) : _send = send,
+       _currentUser = currentUser,
+       _callBusy = callBusy,
+       _startCall = startCall,
+       _now = now ?? (() => DateTime.now().millisecondsSinceEpoch);
+
+  @visibleForTesting
+  PulseService.forTesting({
+    required PulseSender send,
+    required String Function() currentUser,
+    required bool Function() callBusy,
+    required PulseCallStarter startCall,
+    int Function()? now,
+  }) : this._(
+         send: send,
+         currentUser: currentUser,
+         callBusy: callBusy,
+         startCall: startCall,
+         now: now,
+       );
+
+  static final PulseService instance = PulseService._(
+    send: SocketService.instance.sendPulse,
+    currentUser: () => SocketService.instance.currentUser ?? '',
+    callBusy: () =>
+        CallService.instance.hasCall || GroupCallService.instance.hasCall,
+    startCall: (peer, video) =>
+        CallService.instance.startCall(peer: peer, video: video),
+  );
+
+  final PulseSender _send;
+  final String Function() _currentUser;
+  final bool Function() _callBusy;
+  final PulseCallStarter _startCall;
+  final int Function() _now;
+
+  bool _initialized = false;
+  Timer? _startTimer;
+  Timer? _tickTimer;
+
+  SpartanPulsePhase phase = SpartanPulsePhase.idle;
+  SpartanPulse? current;
+  String? notice;
+  int noticeSerial = 0;
+
+  bool get hasPulse => phase != SpartanPulsePhase.idle && current != null;
+
+  int get countdownSeconds {
+    final startsAt = current?.startsAt;
+    if (phase != SpartanPulsePhase.matched || startsAt == null) return 0;
+    final remaining = startsAt - _now();
+    if (remaining <= 0) return 0;
+    return (remaining / 1000).ceil();
+  }
+
+  SpartanPulse? activeFor(String peer) {
+    final value = current;
+    if (value == null || value.peerFor(_currentUser()) != peer) return null;
+    return value;
+  }
+
+  void initialize() {
+    if (_initialized) return;
+    _initialized = true;
+    SocketService.instance.addMessageHandler(handleMessage);
+  }
+
+  void request({
+    required String peer,
+    required bool video,
+    required int windowMinutes,
+  }) {
+    final target = peer.trim();
+    if (target.isEmpty || _currentUser().isEmpty) {
+      _showNotice('Не удалось определить собеседника');
+      return;
+    }
+    if (_callBusy()) {
+      _showNotice('Сначала завершите текущий звонок');
+      return;
+    }
+    _send('pulse_request', {
+      'to': target,
+      'video': video,
+      'windowMinutes': windowMinutes,
+      'requestId': 'pulse-${_now()}',
+    });
+    _showNotice(
+      video
+          ? 'Видеоприглашение SPARTAN PULSE отправлено'
+          : 'Аудиоприглашение SPARTAN PULSE отправлено',
+    );
+  }
+
+  void accept() {
+    final pulse = current;
+    if (pulse == null || phase != SpartanPulsePhase.incoming) return;
+    _send('pulse_accept', {
+      'pulseId': pulse.id,
+      'requestId': 'accept-${_now()}',
+    });
+    phase = SpartanPulsePhase.outgoing;
+    _showNotice('Готовность подтверждена. Ищем общий момент…');
+    notifyListeners();
+  }
+
+  void decline() {
+    final pulse = current;
+    if (pulse == null) return;
+    _cancelTimers();
+    _send('pulse_decline', {
+      'pulseId': pulse.id,
+      'requestId': 'decline-${_now()}',
+    });
+    _clear();
+  }
+
+  void cancel() {
+    final pulse = current;
+    if (pulse == null) return;
+    _cancelTimers();
+    _send('pulse_cancel', {
+      'pulseId': pulse.id,
+      'requestId': 'cancel-${_now()}',
+    });
+    _clear();
+    _showNotice('SPARTAN PULSE отменён');
+  }
+
+  void sync() {
+    if (_currentUser().isNotEmpty) _send('pulse_sync', const {});
+  }
+
+  @visibleForTesting
+  void handleMessage(Map<String, dynamic> message) {
+    final type = message['type']?.toString() ?? '';
+    final rawData = message['data'];
+    final data = rawData is Map
+        ? Map<String, dynamic>.from(rawData)
+        : <String, dynamic>{};
+
+    switch (type) {
+      case 'login_success':
+        sync();
+        break;
+      case 'pulse_sync':
+        _handleSync(data);
+        break;
+      case 'pulse_invite':
+        final pulse = SpartanPulse.parse(data['pulse']);
+        if (pulse != null) _applyPulse(pulse, incoming: true);
+        break;
+      case 'pulse_state':
+        final pulse = SpartanPulse.parse(data['pulse']);
+        if (pulse != null) _applyPulse(pulse);
+        break;
+      case 'pulse_match':
+        final pulse = SpartanPulse.parse(data['pulse']);
+        if (pulse != null) _applyMatch(pulse);
+        break;
+      case 'pulse_waiting':
+        final pulse = SpartanPulse.parse(data['pulse']);
+        if (pulse != null) _applyPulse(pulse);
+        _showNotice(data['reason']?.toString() ?? 'Ждём подходящий момент…');
+        break;
+      case 'pulse_closed':
+        _handleClosed(data);
+        break;
+      case 'pulse_error':
+        _showNotice(data['reason']?.toString() ?? 'Ошибка SPARTAN PULSE');
+        break;
+    }
+  }
+
+  void _handleSync(Map<String, dynamic> data) {
+    final raw = data['pulses'];
+    if (raw is! List || raw.isEmpty) {
+      if (phase != SpartanPulsePhase.matched) _clear();
+      return;
+    }
+    final user = _currentUser();
+    final pulses =
+        raw.map(SpartanPulse.parse).whereType<SpartanPulse>().toList()
+          ..sort((left, right) {
+            int priority(SpartanPulse pulse) {
+              if (pulse.state == 'matched') return 0;
+              if (pulse.to == user && pulse.state == 'pending') return 1;
+              return 2;
+            }
+
+            final byPriority = priority(left).compareTo(priority(right));
+            return byPriority != 0
+                ? byPriority
+                : right.createdAt.compareTo(left.createdAt);
+          });
+    if (pulses.isEmpty) {
+      _clear();
+    } else if (pulses.first.state == 'matched') {
+      _applyMatch(pulses.first);
+    } else {
+      _applyPulse(pulses.first);
+    }
+  }
+
+  void _applyPulse(SpartanPulse pulse, {bool incoming = false}) {
+    _cancelTimers();
+    current = pulse;
+    final user = _currentUser();
+    phase = incoming || (pulse.to == user && pulse.state == 'pending')
+        ? SpartanPulsePhase.incoming
+        : SpartanPulsePhase.outgoing;
+    notifyListeners();
+  }
+
+  void _applyMatch(SpartanPulse pulse) {
+    if (current?.id == pulse.id && phase == SpartanPulsePhase.matched) return;
+    _cancelTimers();
+    current = pulse;
+    phase = SpartanPulsePhase.matched;
+    final startsAt = pulse.startsAt ?? _now() + 4000;
+    final delay = Duration(
+      milliseconds: (startsAt - _now()).clamp(0, 10000).toInt(),
+    );
+    _tickTimer = Timer.periodic(const Duration(milliseconds: 250), (_) {
+      if (phase == SpartanPulsePhase.matched) notifyListeners();
+    });
+    if (pulse.from == _currentUser()) {
+      _startTimer = Timer(delay, () async {
+        if (current?.id != pulse.id || phase != SpartanPulsePhase.matched)
+          return;
+        if (_callBusy()) {
+          cancel();
+          _showNotice('Общий момент найден, но линия уже занята');
+          return;
+        }
+        _showNotice('Соединяем с ${pulse.to}…');
+        await _startCall(pulse.to, pulse.video);
+      });
+    }
+    notifyListeners();
+  }
+
+  void _handleClosed(Map<String, dynamic> data) {
+    final id = data['pulseId']?.toString() ?? '';
+    if (current?.id != id) return;
+    final peer = current!.peerFor(_currentUser());
+    final reason = data['reason']?.toString() ?? '';
+    _cancelTimers();
+    _clear();
+    switch (reason) {
+      case 'declined':
+        _showNotice('$peer сейчас не готов к звонку');
+        break;
+      case 'expired':
+        _showNotice('Время SPARTAN PULSE истекло');
+        break;
+      case 'cancelled':
+        _showNotice('SPARTAN PULSE отменён');
+        break;
+    }
+  }
+
+  void _showNotice(String value) {
+    notice = value;
+    noticeSerial++;
+    notifyListeners();
+  }
+
+  void _cancelTimers() {
+    _startTimer?.cancel();
+    _startTimer = null;
+    _tickTimer?.cancel();
+    _tickTimer = null;
+  }
+
+  void _clear() {
+    current = null;
+    phase = SpartanPulsePhase.idle;
+    notifyListeners();
+  }
+
+  @override
+  void dispose() {
+    _cancelTimers();
+    if (_initialized) {
+      SocketService.instance.removeMessageHandler(handleMessage);
+    }
+    super.dispose();
+  }
+}
