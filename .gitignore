@@ -28,3 +28,57 @@ android/key.properties
 # Системные файлы
 .DS_Store
 Thumbs.db
+
+# Runtime user data: stays on the server, never in Git
+/avatars/
+/media/
+/uploads/
+/users.json
+/fcm_tokens.json
+/offline_messages.json
+/offline_message_status.json
+/groups.json
+/group_messages.json
+/auto_reply_history.json
+/auto_reply_settings.json
+/spartan_ai_history.json
+/media_index.json
+/call_history.json
+
+# Credentials and local encrypted secrets
+.env
+.env.*
+!.env.example
+*.dpapi
+*.jks
+*.keystore
+*.p12
+*.pfx
+*-firebase-adminsdk-*.json
+service-account*.json
+
+# Distribution files, local SDKs and backups are not source code
+*.apk
+*.aab
+*.zip
+*.tar
+*.bundle
+/.android_sdk_local/
+/.gradle_user_home/
+/backups/
+/outputs/
+*.log
+
+# Local build environment and diagnostic output
+/.android_user_home/
+/.build_tools/
+/.gradle_call_build/
+/.ndk_local_*/
+/test/failures/
+*.bak
+*.iml
+**/*BEFORE*
+
+# Machine-specific launchers: kept locally, never used from a source clone
+/START_SPARTAN_SERVER.ps1
+/SET_OPENAI_API_KEY.ps1
