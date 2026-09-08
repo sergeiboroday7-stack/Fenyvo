@@ -189,6 +189,13 @@ const trustDecisions =
     'решений доверия',
   );
 
+function isBlockedBy(owner, contact) {
+  const ownerName = owner?.toString().trim().toLowerCase() || '';
+  const contactName = contact?.toString().trim().toLowerCase() || '';
+  if (!ownerName || !contactName) return false;
+  return trustDecisions[`${ownerName}::${contactName}`]?.blocked === true;
+}
+
 const messageReactions =
   new Map();
 
@@ -6674,6 +6681,56 @@ wss.on(
               'user_status',
               status,
             );
+
+            return;
+          }
+
+          // ====================================
+          // TRUST SERVER ENFORCEMENT
+          // ====================================
+
+          const trustProtectedTypes = new Set([
+            'typing',
+            'message',
+            'media_message',
+            'call_offer',
+            'call_answer',
+            'call_ice_candidate',
+            'call_connected',
+            'call_reject',
+            'call_end',
+            'pulse_request',
+          ]);
+          const trustTarget = data.to?.toString().trim() || '';
+          if (
+            currentUser &&
+            trustTarget &&
+            trustProtectedTypes.has(type) &&
+            isBlockedBy(trustTarget, currentUser)
+          ) {
+            console.log(
+              `🛡️ TRUST отклонил ${type}: ${currentUser} → ${trustTarget}`,
+            );
+
+            if (type === 'message' || type === 'media_message') {
+              send(ws, 'message_sent', {
+                ...data,
+                id: data.id?.toString().trim() || crypto.randomUUID(),
+                from: currentUser,
+                to: trustTarget,
+                time: data.time || new Date().toISOString(),
+              });
+            } else if (type === 'call_offer') {
+              send(ws, 'call_unavailable', {
+                callId: data.callId?.toString().trim() || '',
+                from: trustTarget,
+              });
+            } else if (type === 'pulse_request') {
+              send(ws, 'pulse_error', {
+                requestId: data.requestId?.toString().trim() || '',
+                reason: 'Собеседник сейчас недоступен',
+              });
+            }
 
             return;
           }
