@@ -10,6 +10,7 @@ class SpartanTrustService {
   static const _trustedPrefix = 'spartan_trust_trusted_';
   static const _blockedPrefix = 'spartan_trust_blocked_';
   static const _reportedPrefix = 'spartan_trust_reported_';
+  static const _explanationSeenKey = 'spartan_trust_explanation_seen';
 
   static String _key(String prefix, String contact) =>
       '$prefix${contact.trim().toLowerCase()}';
@@ -32,6 +33,16 @@ class SpartanTrustService {
   static Future<String> reportReason(String contact) async {
     final prefs = await SharedPreferences.getInstance();
     return prefs.getString('${_key(_reportedPrefix, contact)}_reason') ?? '';
+  }
+
+  static Future<bool> shouldShowExplanation() async {
+    final prefs = await SharedPreferences.getInstance();
+    return !(prefs.getBool(_explanationSeenKey) ?? false);
+  }
+
+  static Future<void> markExplanationSeen() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_explanationSeenKey, true);
   }
 
   static Future<void> setTrusted(String contact, bool value) async {

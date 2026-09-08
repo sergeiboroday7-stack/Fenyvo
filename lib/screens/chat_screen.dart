@@ -9238,7 +9238,45 @@ class _ChatScreenState extends State<ChatScreen>
     }
   }
 
+  Future<void> _showTrustExplanation({bool firstTime = false}) async {
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.shield_rounded, color: SpartanPalette.gold),
+            SizedBox(width: 10),
+            Expanded(child: Text('Что такое SPARTAN TRUST?')),
+          ],
+        ),
+        content: const Text(
+          'TRUST управляет безопасностью контакта. Доверие добавляет '
+          'золотую отметку, блокировка останавливает личные сообщения, '
+          'звонки и PULSE, а жалоба сохраняет причину.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              if (firstTime) {
+                await SpartanTrustService.markExplanationSeen();
+              }
+              if (dialogContext.mounted) Navigator.pop(dialogContext);
+            },
+            child: Text(
+              firstTime ? 'Понятно, больше не показывать' : 'Понятно',
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _openTrustActions(ShieldAssessment assessment) async {
+    if (await SpartanTrustService.shouldShowExplanation()) {
+      if (!mounted) return;
+      await _showTrustExplanation(firstTime: true);
+      if (!mounted) return;
+    }
     final action = await showModalBottomSheet<String>(
       context: context,
       backgroundColor: SpartanPalette.surface,
@@ -9250,6 +9288,28 @@ class _ChatScreenState extends State<ChatScreen>
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              Row(
+                children: [
+                  const Icon(Icons.shield_rounded, color: SpartanPalette.gold),
+                  const SizedBox(width: 10),
+                  const Expanded(
+                    child: Text(
+                      'SPARTAN TRUST',
+                      style: TextStyle(
+                        color: SpartanPalette.ink,
+                        fontSize: 20,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Что такое TRUST?',
+                    onPressed: () => unawaited(_showTrustExplanation()),
+                    icon: const Icon(Icons.info_outline_rounded),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
               Text(
                 widget.targetUser,
                 style: const TextStyle(
@@ -9276,6 +9336,7 @@ class _ChatScreenState extends State<ChatScreen>
                       ? 'Убрать из доверенных'
                       : 'Добавить в доверенные',
                 ),
+                subtitle: const Text('Показать золотую отметку доверия'),
                 onTap: () => Navigator.pop(sheetContext, 'trust'),
               ),
               ListTile(
@@ -9290,6 +9351,7 @@ class _ChatScreenState extends State<ChatScreen>
                       ? 'Разблокировать контакт'
                       : 'Заблокировать контакт',
                 ),
+                subtitle: const Text('Остановить личную связь без уведомления'),
                 onTap: () => Navigator.pop(sheetContext, 'block'),
               ),
               ListTile(
@@ -9300,6 +9362,7 @@ class _ChatScreenState extends State<ChatScreen>
                 title: Text(
                   _contactReported ? 'Жалоба отправлена' : 'Пожаловаться',
                 ),
+                subtitle: const Text('Сохранить категорию нарушения'),
                 enabled: !_contactReported,
                 onTap: _contactReported
                     ? null
@@ -10292,7 +10355,16 @@ class _ChatScreenState extends State<ChatScreen>
               itemBuilder: (_) => [
                 const PopupMenuItem(
                   value: 'trust',
-                  child: Text('SPARTAN TRUST · контакт'),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text('SPARTAN TRUST · контакт'),
+                      Text(
+                        'Доверие, блокировка и жалобы',
+                        style: TextStyle(fontSize: 11),
+                      ),
+                    ],
+                  ),
                 ),
                 const PopupMenuItem(value: 'ai', child: Text('SPARTAN AI')),
                 PopupMenuItem(
