@@ -1341,6 +1341,16 @@ class _ChatScreenState extends State<ChatScreen>
 
     final currentUser = SocketService.instance.currentUser ?? '';
 
+    if (type == 'trust_state' || type == 'trust_updated') {
+      final contact = data['contact']?.toString().trim() ?? '';
+      if (contact != widget.targetUser ||
+          (type == 'trust_state' && data['hasState'] != true)) {
+        return;
+      }
+      unawaited(_applyRemoteTrustState(data));
+      return;
+    }
+
     if (type == 'spartan_ai_result' || type == 'spartan_ai_history') {
       final requestId = data['requestId']?.toString().trim() ?? '';
 
@@ -9191,6 +9201,41 @@ class _ChatScreenState extends State<ChatScreen>
       _contactBlocked = results[1];
       _contactReported = results[2];
     });
+    SpartanTrustService.requestRemote(widget.targetUser);
+  }
+
+  Future<void> _applyRemoteTrustState(Map<String, dynamic> data) async {
+    final trusted = data['trusted'] == true;
+    final blocked = data['blocked'] == true;
+    final reported = data['reported'] == true;
+    final reason = data['reportReason']?.toString() ?? '';
+    final changed =
+        trusted != _contactTrusted ||
+        blocked != _contactBlocked ||
+        reported != _contactReported;
+
+    await SpartanTrustService.applyRemote(
+      widget.targetUser,
+      trusted: trusted,
+      blocked: blocked,
+      reported: reported,
+      reportReason: reason,
+    );
+    if (!mounted) return;
+    setState(() {
+      _contactTrusted = trusted;
+      _contactBlocked = blocked;
+      _contactReported = reported;
+      if (blocked) {
+        _messages.removeWhere((message) => message['isMe'] != true);
+      }
+    });
+    if (blocked) _saveMessages();
+    if (changed) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('SPARTAN TRUST синхронизирован')),
+      );
+    }
   }
 
   Future<void> _openTrustActions(ShieldAssessment assessment) async {

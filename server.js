@@ -4403,9 +4403,11 @@ wss.on(
             }
 
             const key = `${currentUser.toLowerCase()}::${contact.toLowerCase()}`;
+            const savedState = trustDecisions[key];
             send(ws, 'trust_state', {
               contact,
-              ...(trustDecisions[key] || {
+              hasState: Boolean(savedState),
+              ...(savedState || {
                 trusted: false,
                 blocked: false,
                 reported: false,

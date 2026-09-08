@@ -50,6 +50,25 @@ class SpartanTrustService {
     await prefs.setString('${_key(_reportedPrefix, contact)}_reason', reason);
   }
 
+  static Future<void> applyRemote(
+    String contact, {
+    required bool trusted,
+    required bool blocked,
+    required bool reported,
+    String reportReason = '',
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_key(_trustedPrefix, contact), trusted);
+    await prefs.setBool(_key(_blockedPrefix, contact), blocked);
+    await prefs.setBool(_key(_reportedPrefix, contact), reported);
+    final reasonKey = '${_key(_reportedPrefix, contact)}_reason';
+    if (reported && reportReason.trim().isNotEmpty) {
+      await prefs.setString(reasonKey, reportReason.trim());
+    } else {
+      await prefs.remove(reasonKey);
+    }
+  }
+
   /// Sends only the trust decision metadata to the authenticated server.
   /// Local persistence remains the source of truth while offline.
   static void sync(String contact) {
