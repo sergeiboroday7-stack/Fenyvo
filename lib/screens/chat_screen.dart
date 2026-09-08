@@ -19,6 +19,7 @@ import '../services/socket_service.dart';
 import '../services/call_service.dart';
 import '../services/pulse_service.dart';
 import '../services/spartan_shield_service.dart';
+import '../services/spartan_trust_service.dart';
 import '../services/storage_service.dart';
 import '../services/media_cache_service.dart';
 import '../services/download_service.dart';
@@ -562,6 +563,9 @@ class _ChatScreenState extends State<ChatScreen>
   int _autoReplyIdleSeconds = 60;
   int _autoReplyDelaySeconds = 5;
   String? _dismissedShieldFingerprint;
+  bool _contactTrusted = false;
+  bool _contactBlocked = false;
+  bool _contactReported = false;
 
   Timer? _typingStopTimer;
   Timer? _remoteTypingTimeoutTimer;
@@ -666,6 +670,7 @@ class _ChatScreenState extends State<ChatScreen>
     _loadMessages();
     _loadBackgroundSettings();
     _loadContactAvatar();
+    unawaited(_loadTrustState());
 
     SocketService.instance.addMessageHandler(_handleMessage);
 
@@ -9163,6 +9168,117 @@ class _ChatScreenState extends State<ChatScreen>
     return null;
   }
 
+  Future<void> _loadTrustState() async {
+    final results = await Future.wait<bool>([
+      SpartanTrustService.isTrusted(widget.targetUser),
+      SpartanTrustService.isBlocked(widget.targetUser),
+      SpartanTrustService.isReported(widget.targetUser),
+    ]);
+    if (!mounted) return;
+    setState(() {
+      _contactTrusted = results[0];
+      _contactBlocked = results[1];
+      _contactReported = results[2];
+    });
+  }
+
+  Future<void> _openTrustActions(ShieldAssessment assessment) async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: SpartanPalette.surface,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                widget.targetUser,
+                style: const TextStyle(
+                  color: SpartanPalette.ink,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                assessment.reason,
+                style: const TextStyle(color: SpartanPalette.secondary),
+              ),
+              const SizedBox(height: 14),
+              ListTile(
+                leading: Icon(
+                  _contactTrusted
+                      ? Icons.verified_rounded
+                      : Icons.verified_outlined,
+                  color: SpartanPalette.gold,
+                ),
+                title: Text(
+                  _contactTrusted
+                      ? 'Убрать из доверенных'
+                      : 'Добавить в доверенные',
+                ),
+                onTap: () => Navigator.pop(sheetContext, 'trust'),
+              ),
+              ListTile(
+                leading: Icon(
+                  _contactBlocked
+                      ? Icons.lock_open_rounded
+                      : Icons.block_rounded,
+                  color: SpartanPalette.gold,
+                ),
+                title: Text(
+                  _contactBlocked
+                      ? 'Разблокировать контакт'
+                      : 'Заблокировать контакт',
+                ),
+                onTap: () => Navigator.pop(sheetContext, 'block'),
+              ),
+              ListTile(
+                leading: const Icon(
+                  Icons.flag_outlined,
+                  color: SpartanPalette.gold,
+                ),
+                title: Text(
+                  _contactReported ? 'Жалоба отправлена' : 'Пожаловаться',
+                ),
+                enabled: !_contactReported,
+                onTap: _contactReported
+                    ? null
+                    : () => Navigator.pop(sheetContext, 'report'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (!mounted || action == null) return;
+    if (action == 'trust') {
+      final next = !_contactTrusted;
+      await SpartanTrustService.setTrusted(widget.targetUser, next);
+      if (mounted) setState(() => _contactTrusted = next);
+    } else if (action == 'block') {
+      final next = !_contactBlocked;
+      await SpartanTrustService.setBlocked(widget.targetUser, next);
+      if (mounted) setState(() => _contactBlocked = next);
+    } else if (action == 'report') {
+      await SpartanTrustService.report(widget.targetUser);
+      if (mounted) setState(() => _contactReported = true);
+    }
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          action == 'report'
+              ? 'Жалоба сохранена на устройстве'
+              : 'Настройка контакта сохранена',
+        ),
+      ),
+    );
+  }
+
   Widget _buildShieldBanner() {
     final finding = _latestShieldFinding();
     if (finding == null || finding.fingerprint == _dismissedShieldFingerprint) {
@@ -9211,23 +9327,7 @@ class _ChatScreenState extends State<ChatScreen>
                     ),
                   ),
                   TextButton(
-                    onPressed: () => showDialog<void>(
-                      context: context,
-                      builder: (dialogContext) => AlertDialog(
-                        title: const Text('Почему появилось предупреждение?'),
-                        content: Text(
-                          '${assessment.reason}\n\n'
-                          'Не передавайте коды, пароли и деньги по просьбе из сообщения. '
-                          'Проверьте собеседника отдельным звонком.',
-                        ),
-                        actions: [
-                          TextButton(
-                            onPressed: () => Navigator.pop(dialogContext),
-                            child: const Text('Понятно'),
-                          ),
-                        ],
-                      ),
-                    ),
+                    onPressed: () => _openTrustActions(assessment),
                     style: TextButton.styleFrom(
                       padding: EdgeInsets.zero,
                       minimumSize: const Size(0, 30),
@@ -9987,6 +10087,11 @@ class _ChatScreenState extends State<ChatScreen>
                   ],
                 ),
               ),
+              if (_contactTrusted)
+                const Padding(
+                  padding: EdgeInsets.only(right: 4),
+                  child: Icon(Icons.verified_rounded, color: _gold, size: 19),
+                ),
             ],
           ),
           actions: [
@@ -10037,8 +10142,22 @@ class _ChatScreenState extends State<ChatScreen>
               onSelected: (value) {
                 if (value == 'ai') unawaited(_showSpartanAiSheet());
                 if (value == 'auto') unawaited(_showAutoReplySettings());
+                if (value == 'trust') {
+                  unawaited(
+                    _openTrustActions(
+                      const ShieldAssessment(
+                        reason: 'Управляйте доверием и безопасностью этого контакта.',
+                        level: 'info',
+                      ),
+                    ),
+                  );
+                }
               },
               itemBuilder: (_) => [
+                const PopupMenuItem(
+                  value: 'trust',
+                  child: Text('SPARTAN TRUST · контакт'),
+                ),
                 const PopupMenuItem(value: 'ai', child: Text('SPARTAN AI')),
                 PopupMenuItem(
                   value: 'auto',
