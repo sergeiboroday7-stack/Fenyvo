@@ -4380,6 +4380,12 @@ wss.on(
               updatedAt: new Date().toISOString(),
             };
             saveJsonObjectFile(TRUST_DECISIONS_FILE, trustDecisions, 'решений доверия');
+            console.log(
+              `🛡️ TRUST обновлён: ${currentUser} → ${contact} ` +
+              `(trusted=${trustDecisions[key].trusted}, ` +
+              `blocked=${trustDecisions[key].blocked}, ` +
+              `reported=${trustDecisions[key].reported})`,
+            );
             send(ws, 'trust_updated', { contact, ...trustDecisions[key] });
             return;
           }
