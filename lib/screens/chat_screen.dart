@@ -9269,10 +9269,12 @@ class _ChatScreenState extends State<ChatScreen>
     if (action == 'trust') {
       final next = !_contactTrusted;
       await SpartanTrustService.setTrusted(widget.targetUser, next);
+      SpartanTrustService.sync(widget.targetUser);
       if (mounted) setState(() => _contactTrusted = next);
     } else if (action == 'block') {
       final next = !_contactBlocked;
       await SpartanTrustService.setBlocked(widget.targetUser, next);
+      SpartanTrustService.sync(widget.targetUser);
       if (mounted) {
         setState(() {
           _contactBlocked = next;
@@ -9310,6 +9312,7 @@ class _ChatScreenState extends State<ChatScreen>
       );
       if (reason == null) return;
       await SpartanTrustService.report(widget.targetUser, reason: reason);
+      SpartanTrustService.sync(widget.targetUser);
       if (mounted) setState(() => _contactReported = true);
     }
     if (!mounted) return;

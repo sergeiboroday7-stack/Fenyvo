@@ -82,6 +82,13 @@ const SPARTAN_AI_HISTORY_FILE = path.join(
   'spartan_ai_history.json',
 );
 
+// TRUST decisions contain only account-level safety state. Message text and
+// local runtime databases are intentionally never written here.
+const TRUST_DECISIONS_FILE = path.join(
+  __dirname,
+  'trust_decisions.json',
+);
+
 const FIREBASE_SERVICE_ACCOUNT_FILE = path.join(
   __dirname,
   'firebase-service-account.json',
@@ -175,6 +182,12 @@ const wss =
 
 const onlineUsers =
   new Map();
+
+const trustDecisions =
+  loadJsonObjectFile(
+    TRUST_DECISIONS_FILE,
+    'решений доверия',
+  );
 
 const messageReactions =
   new Map();
@@ -4340,6 +4353,60 @@ wss.on(
           const data =
             msg.data ||
             {};
+
+          // ====================================
+          // TRUST SYNC (metadata only)
+          // ====================================
+
+          if (type === 'trust_update') {
+            if (!currentUser) {
+              send(ws, 'trust_error', { reason: 'Требуется вход' });
+              return;
+            }
+
+            const contact = data.contact?.toString().trim();
+            if (!contact || contact === currentUser) {
+              send(ws, 'trust_error', { reason: 'Некорректный контакт' });
+              return;
+            }
+
+            const reason = data.reportReason?.toString().trim() || '';
+            const key = `${currentUser.toLowerCase()}::${contact.toLowerCase()}`;
+            trustDecisions[key] = {
+              trusted: data.trusted === true,
+              blocked: data.blocked === true,
+              reported: data.reported === true,
+              ...(reason ? { reportReason: reason.slice(0, 40) } : {}),
+              updatedAt: new Date().toISOString(),
+            };
+            saveJsonObjectFile(TRUST_DECISIONS_FILE, trustDecisions, 'решений доверия');
+            send(ws, 'trust_updated', { contact, ...trustDecisions[key] });
+            return;
+          }
+
+          if (type === 'get_trust_state') {
+            if (!currentUser) {
+              send(ws, 'trust_error', { reason: 'Требуется вход' });
+              return;
+            }
+
+            const contact = data.contact?.toString().trim();
+            if (!contact || contact === currentUser) {
+              send(ws, 'trust_error', { reason: 'Некорректный контакт' });
+              return;
+            }
+
+            const key = `${currentUser.toLowerCase()}::${contact.toLowerCase()}`;
+            send(ws, 'trust_state', {
+              contact,
+              ...(trustDecisions[key] || {
+                trusted: false,
+                blocked: false,
+                reported: false,
+              }),
+            });
+            return;
+          }
 
           console.log(
             '📨 Получено:',

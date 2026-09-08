@@ -1,5 +1,7 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'socket_service.dart';
+
 /// Local trust decisions for a contact. No message text or contact data leave
 /// the device; this is intentionally separate from server-side account state.
 class SpartanTrustService {
@@ -27,6 +29,11 @@ class SpartanTrustService {
     return prefs.getBool(_key(_reportedPrefix, contact)) ?? false;
   }
 
+  static Future<String> reportReason(String contact) async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('${_key(_reportedPrefix, contact)}_reason') ?? '';
+  }
+
   static Future<void> setTrusted(String contact, bool value) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_key(_trustedPrefix, contact), value);
@@ -41,5 +48,32 @@ class SpartanTrustService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_key(_reportedPrefix, contact), true);
     await prefs.setString('${_key(_reportedPrefix, contact)}_reason', reason);
+  }
+
+  /// Sends only the trust decision metadata to the authenticated server.
+  /// Local persistence remains the source of truth while offline.
+  static void sync(String contact) {
+    final user = contact.trim();
+    if (user.isEmpty || !SocketService.instance.isAuthenticated) return;
+    Future.wait<dynamic>([
+      isTrusted(user),
+      isBlocked(user),
+      isReported(user),
+      reportReason(user),
+    ]).then((values) {
+      SocketService.instance.sendPulse('trust_update', {
+        'contact': user,
+        'trusted': values[0],
+        'blocked': values[1],
+        'reported': values[2],
+        'reportReason': values[3],
+      });
+    });
+  }
+
+  static void requestRemote(String contact) {
+    final user = contact.trim();
+    if (user.isEmpty || !SocketService.instance.isAuthenticated) return;
+    SocketService.instance.sendPulse('get_trust_state', {'contact': user});
   }
 }
