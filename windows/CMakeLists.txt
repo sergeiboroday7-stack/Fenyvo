@@ -2,6 +2,13 @@
 cmake_minimum_required(VERSION 3.14)
 project(spartan_chat_final LANGUAGES CXX)
 
+# Firebase's Windows SDK is built against the dynamic MSVC runtime (MD).
+# Keep the Flutter runner and plugins on the same runtime to avoid mixing
+# static libcpmt/libucrt with the Firebase prebuilt libraries.
+if(MSVC)
+  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")
+endif()
+
 # The name of the executable created for the application. Change this to change
 # the on-disk name of your application.
 set(BINARY_NAME "spartan_chat_final")
@@ -42,6 +49,8 @@ function(APPLY_STANDARD_SETTINGS TARGET)
   target_compile_options(${TARGET} PRIVATE /W4 /WX /wd4100)
   target_compile_options(${TARGET} PRIVATE /EHsc)
   target_compile_definitions(${TARGET} PRIVATE "_HAS_EXCEPTIONS=0")
+  target_compile_definitions(${TARGET} PRIVATE
+    "_SILENCE_EXPERIMENTAL_COROUTINE_DEPRECATION_WARNINGS")
   target_compile_definitions(${TARGET} PRIVATE "$<$<CONFIG:Debug>:_DEBUG>")
 endfunction()
 

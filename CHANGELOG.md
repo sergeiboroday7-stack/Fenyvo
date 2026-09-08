@@ -1,5 +1,15 @@
 # Журнал изменений SPARTAN CHAT
 
+## 2026-09-08 — Windows TRUST 1.1 toolchain fix
+
+- Windows Release-сборка проверена на Visual Studio 18.
+- Для Firebase и Flutter зафиксирован единый динамический MSVC runtime (MD).
+- Добавлены совместимые настройки CMake для предупреждения coroutine в
+  `permission_handler_windows`.
+
+Автоматические проверки: Windows `flutter build windows --release` завершён
+успешно. Владелец подтвердил запуск приложения на Windows.
+
 ## 2026-09-08 — SPARTAN TRUST 1.1 / 4107
 
 - Блокировка контакта стала рабочей: новые входящие сообщения скрываются,
