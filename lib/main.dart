@@ -216,10 +216,20 @@ class _CallNavigationHostState extends State<CallNavigationHost> {
       unawaited(HapticFeedback.mediumImpact());
       messenger.showSnackBar(
         SnackBar(
-          duration: const Duration(days: 1),
+          duration: const Duration(seconds: 4),
           behavior: SnackBarBehavior.floating,
-          backgroundColor: SpartanPalette.surface,
-          content: _PulseInviteCard(pulse: pulse),
+          content: Row(
+            children: [
+              const Icon(Icons.bolt_rounded, color: SpartanPalette.gold),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Новый PULSE: ${pulse.from} · '
+                  '${pulse.video ? 'видеозвонок' : 'аудиозвонок'}',
+                ),
+              ),
+            ],
+          ),
         ),
       );
       return;
@@ -270,80 +280,6 @@ class _CallNavigationHostState extends State<CallNavigationHost> {
             !CallService.instance.hasCall && !GroupCallService.instance.hasCall,
         child: widget.child,
       ),
-    );
-  }
-}
-
-class _PulseInviteCard extends StatelessWidget {
-  const _PulseInviteCard({required this.pulse});
-
-  final SpartanPulse pulse;
-
-  @override
-  Widget build(BuildContext context) {
-    final service = PulseService.instance;
-    final mode = pulse.video ? 'видеозвонок' : 'аудиозвонок';
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Container(
-              width: 42,
-              height: 42,
-              decoration: BoxDecoration(
-                color: SpartanPalette.blue,
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: SpartanPalette.gold),
-              ),
-              child: const Icon(Icons.bolt_rounded, color: SpartanPalette.gold),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'SPARTAN PULSE',
-                    style: TextStyle(
-                      color: SpartanPalette.gold,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: .8,
-                    ),
-                  ),
-                  Text(
-                    '${pulse.from} предлагает $mode, когда вы оба готовы',
-                    style: const TextStyle(color: SpartanPalette.ink),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 10),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.end,
-          children: [
-            TextButton(
-              onPressed: () {
-                service.decline();
-                ScaffoldMessenger.of(context).hideCurrentSnackBar();
-              },
-              child: const Text('Не сейчас'),
-            ),
-            const SizedBox(width: 8),
-            FilledButton.icon(
-              onPressed: () {
-                service.accept();
-                ScaffoldMessenger.of(context).hideCurrentSnackBar();
-              },
-              icon: const Icon(Icons.check_rounded),
-              label: const Text('Я готов'),
-            ),
-          ],
-        ),
-      ],
     );
   }
 }

@@ -18,6 +18,7 @@ import 'package:record/record.dart';
 import '../services/socket_service.dart';
 import '../services/call_service.dart';
 import '../services/pulse_service.dart';
+import '../services/spartan_shield_service.dart';
 import '../services/storage_service.dart';
 import '../services/media_cache_service.dart';
 import '../services/download_service.dart';
@@ -560,6 +561,7 @@ class _ChatScreenState extends State<ChatScreen>
   String _autoReplyMode = 'auto';
   int _autoReplyIdleSeconds = 60;
   int _autoReplyDelaySeconds = 5;
+  String? _dismissedShieldFingerprint;
 
   Timer? _typingStopTimer;
   Timer? _remoteTypingTimeoutTimer;
@@ -9143,6 +9145,112 @@ class _ChatScreenState extends State<ChatScreen>
   // \u0421\u041F\u0418\u0421\u041E\u041A \u0421\u041E\u041E\u0411\u0429\u0415\u041D\u0418\u0419
   // ========================================
 
+  ({ShieldAssessment assessment, String fingerprint})? _latestShieldFinding() {
+    for (final message in _messages.reversed) {
+      if (message['isMe'] == true) continue;
+      final text = message['text']?.toString() ?? '';
+      if (text.trim().isEmpty) continue;
+      final assessment = SpartanShieldService.assess(text);
+      if (assessment == null) return null;
+      final fingerprint = [
+        message['id'],
+        message['timestamp'],
+        message['time'],
+        text,
+      ].join('|');
+      return (assessment: assessment, fingerprint: fingerprint);
+    }
+    return null;
+  }
+
+  Widget _buildShieldBanner() {
+    final finding = _latestShieldFinding();
+    if (finding == null || finding.fingerprint == _dismissedShieldFingerprint) {
+      return const SizedBox.shrink();
+    }
+    final assessment = finding.assessment;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+        decoration: BoxDecoration(
+          color: SpartanPalette.surface,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: _gold.withValues(alpha: 0.75)),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Icon(Icons.shield_rounded, color: _gold),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'SPARTAN SHIELD · проверьте сообщение',
+                    style: TextStyle(color: _gold, fontWeight: FontWeight.w800),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    assessment.reason,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: SpartanPalette.ink,
+                      fontSize: 12,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Анализ выполнен на устройстве',
+                    style: TextStyle(
+                      color: SpartanPalette.secondary,
+                      fontSize: 11,
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: () => showDialog<void>(
+                      context: context,
+                      builder: (dialogContext) => AlertDialog(
+                        title: const Text('Почему появилось предупреждение?'),
+                        content: Text(
+                          '${assessment.reason}\n\n'
+                          'Не передавайте коды, пароли и деньги по просьбе из сообщения. '
+                          'Проверьте собеседника отдельным звонком.',
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(dialogContext),
+                            child: const Text('Понятно'),
+                          ),
+                        ],
+                      ),
+                    ),
+                    style: TextButton.styleFrom(
+                      padding: EdgeInsets.zero,
+                      minimumSize: const Size(0, 30),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    child: const Text('Проверить контакт'),
+                  ),
+                ],
+              ),
+            ),
+            IconButton(
+              tooltip: 'Скрыть предупреждение',
+              onPressed: () => setState(
+                () => _dismissedShieldFingerprint = finding.fingerprint,
+              ),
+              icon: const Icon(Icons.close_rounded),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildMessages() {
     if (_messages.isEmpty) {
       return const Center(
@@ -9984,6 +10092,7 @@ class _ChatScreenState extends State<ChatScreen>
               ),
               child: Column(
                 children: [
+                  _buildShieldBanner(),
                   _buildPinnedMessageBanner(),
                   Expanded(child: _buildMessages()),
                   _buildMessageInput(),
