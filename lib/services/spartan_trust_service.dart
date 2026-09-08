@@ -37,8 +37,9 @@ class SpartanTrustService {
     await prefs.setBool(_key(_blockedPrefix, contact), value);
   }
 
-  static Future<void> report(String contact) async {
+  static Future<void> report(String contact, {String reason = 'Другое'}) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_key(_reportedPrefix, contact), true);
+    await prefs.setString('${_key(_reportedPrefix, contact)}_reason', reason);
   }
 }

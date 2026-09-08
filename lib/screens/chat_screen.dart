@@ -1788,6 +1788,10 @@ class _ChatScreenState extends State<ChatScreen>
         return;
       }
 
+      if (_contactBlocked && from == widget.targetUser) {
+        return;
+      }
+
       if (from == widget.targetUser) {
         _setContactTyping(false);
       }
@@ -3450,6 +3454,13 @@ class _ChatScreenState extends State<ChatScreen>
     final text = _messageController.text.trim();
 
     if (text.isEmpty) {
+      return;
+    }
+
+    if (_contactBlocked) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Сначала разблокируйте контакт')),
+      );
       return;
     }
 
@@ -9262,17 +9273,56 @@ class _ChatScreenState extends State<ChatScreen>
     } else if (action == 'block') {
       final next = !_contactBlocked;
       await SpartanTrustService.setBlocked(widget.targetUser, next);
-      if (mounted) setState(() => _contactBlocked = next);
+      if (mounted) {
+        setState(() {
+          _contactBlocked = next;
+          if (next) {
+            _messages.removeWhere((message) => message['isMe'] != true);
+          }
+        });
+        if (next) _saveMessages();
+      }
     } else if (action == 'report') {
-      await SpartanTrustService.report(widget.targetUser);
+      final reason = await showDialog<String>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Причина жалобы'),
+          content: const Text('Выберите наиболее подходящую причину.'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, 'Мошенничество'),
+              child: const Text('Мошенничество'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, 'Спам'),
+              child: const Text('Спам'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, 'Угрозы'),
+              child: const Text('Угрозы'),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext, 'Другое'),
+              child: const Text('Другое'),
+            ),
+          ],
+        ),
+      );
+      if (reason == null) return;
+      await SpartanTrustService.report(widget.targetUser, reason: reason);
       if (mounted) setState(() => _contactReported = true);
     }
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
+        duration: const Duration(seconds: 3),
         content: Text(
           action == 'report'
               ? 'Жалоба сохранена на устройстве'
+              : action == 'block'
+              ? (_contactBlocked
+                    ? 'Контакт заблокирован'
+                    : 'Контакт разблокирован')
               : 'Настройка контакта сохранена',
         ),
       ),
@@ -9344,6 +9394,44 @@ class _ChatScreenState extends State<ChatScreen>
                 () => _dismissedShieldFingerprint = finding.fingerprint,
               ),
               icon: const Icon(Icons.close_rounded),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildBlockedBanner() {
+    if (!_contactBlocked) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(
+          color: SpartanPalette.surface,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: SpartanPalette.secondary.withValues(alpha: .4),
+          ),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.block_rounded, color: SpartanPalette.secondary),
+            const SizedBox(width: 10),
+            const Expanded(
+              child: Text('Контакт заблокирован. Новые сообщения скрыты.'),
+            ),
+            TextButton(
+              onPressed: () => unawaited(
+                _openTrustActions(
+                  const ShieldAssessment(
+                    reason:
+                        'Управляйте доверием и безопасностью этого контакта.',
+                    level: 'info',
+                  ),
+                ),
+              ),
+              child: const Text('Изменить'),
             ),
           ],
         ),
@@ -10211,6 +10299,7 @@ class _ChatScreenState extends State<ChatScreen>
               ),
               child: Column(
                 children: [
+                  _buildBlockedBanner(),
                   _buildShieldBanner(),
                   _buildPinnedMessageBanner(),
                   Expanded(child: _buildMessages()),
