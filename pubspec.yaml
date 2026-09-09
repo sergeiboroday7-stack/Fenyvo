@@ -2,7 +2,7 @@ name: spartan_chat_final
 description: Spartan Chat messenger
 publish_to: "none"
 
-version: 1.4.1+4114
+version: 1.5.0+4115
 
 environment:
   sdk: ">=3.13.0 <4.0.0"

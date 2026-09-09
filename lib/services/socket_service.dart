@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'firebase_messaging_service.dart';
@@ -10,6 +11,13 @@ import 'notification_service.dart';
 import 'storage_service.dart';
 import 'app_visibility.dart';
 import 'system_call_service.dart';
+
+enum SpartanConnectionPhase {
+  disconnected,
+  connecting,
+  authenticating,
+  connected,
+}
 
 class SocketService {
   static final SocketService _instance = SocketService._internal();
@@ -32,6 +40,11 @@ class SocketService {
   bool _authenticated = false;
   bool get isAuthenticated => _isConnected && _authenticated;
 
+  final ValueNotifier<SpartanConnectionPhase> connectionPhase =
+      ValueNotifier<SpartanConnectionPhase>(
+        SpartanConnectionPhase.disconnected,
+      );
+
   bool _manualDisconnect = false;
 
   Timer? _reconnectTimer;
@@ -39,6 +52,8 @@ class SocketService {
   bool _isReconnecting = false;
 
   bool _receivingOfflineMessages = false;
+
+  bool _needsResyncAfterLogin = false;
 
   String? _serverUrl;
 
@@ -127,6 +142,8 @@ class SocketService {
 
     _isReconnecting = false;
 
+    connectionPhase.value = SpartanConnectionPhase.connecting;
+
     try {
       print('🔌 Подключение к серверу: $url');
 
@@ -159,6 +176,8 @@ class SocketService {
 
       _isConnected = true;
 
+      connectionPhase.value = SpartanConnectionPhase.authenticating;
+
       print('✅ WebSocket подключён');
 
       return true;
@@ -168,6 +187,10 @@ class SocketService {
       _isConnected = false;
 
       _channel = null;
+
+      connectionPhase.value = SpartanConnectionPhase.disconnected;
+
+      _scheduleReconnect();
 
       return false;
     }
@@ -203,6 +226,7 @@ class SocketService {
 
       if (type == 'login_success') {
         _authenticated = true;
+        connectionPhase.value = SpartanConnectionPhase.connected;
         final username = data['username']?.toString();
 
         if (username != null && username.isNotEmpty) {
@@ -228,6 +252,15 @@ class SocketService {
 
           _sendFcmToken();
           await SystemCallService.configure(serverUrl, username, mediaPort);
+
+          if (_needsResyncAfterLogin) {
+            _needsResyncAfterLogin = false;
+            _receivingOfflineMessages = true;
+            _send('get_offline_messages', const {});
+            _send('get_groups', const {});
+            _send('get_users', const {});
+            print('🔄 RELAY: состояние после переподключения синхронизировано');
+          }
         }
       }
 
@@ -486,6 +519,10 @@ class SocketService {
 
     _receivingOfflineMessages = false;
 
+    _needsResyncAfterLogin = currentUser?.isNotEmpty == true;
+
+    connectionPhase.value = SpartanConnectionPhase.disconnected;
+
     if (_manualDisconnect) {
       print(
         '⛔ Ручной выход. '
@@ -550,6 +587,8 @@ class SocketService {
 
       print('🔄 Попытка переподключения...');
 
+      connectionPhase.value = SpartanConnectionPhase.connecting;
+
       final connected = await connect(url);
 
       if (connected && !_manualDisconnect) {
@@ -609,6 +648,8 @@ class SocketService {
     currentUser = user;
 
     _lastPassword = password;
+
+    connectionPhase.value = SpartanConnectionPhase.authenticating;
 
     _send('login', {'username': user, 'password': password});
   }
@@ -1486,6 +1527,10 @@ class SocketService {
     _isReconnecting = false;
 
     _receivingOfflineMessages = false;
+
+    _needsResyncAfterLogin = false;
+
+    connectionPhase.value = SpartanConnectionPhase.disconnected;
 
     final channel = _channel;
 

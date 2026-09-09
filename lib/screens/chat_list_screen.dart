@@ -1856,23 +1856,84 @@ class _ChatListScreenState extends State<ChatListScreen> {
                       ],
                     ),
                   ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 7,
-                    ),
-                    decoration: BoxDecoration(
-                      color: SpartanPalette.surfaceSoft,
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: SpartanPalette.line),
-                    ),
-                    child: Text(
-                      'Люди: $contactCount · События: $eventCount',
-                      style: const TextStyle(
-                        color: SpartanPalette.secondary,
-                        fontSize: 10,
-                      ),
-                    ),
+                  ValueListenableBuilder<SpartanConnectionPhase>(
+                    valueListenable: SocketService.instance.connectionPhase,
+                    builder: (context, phase, _) {
+                      final connected =
+                          phase == SpartanConnectionPhase.connected;
+                      final connecting =
+                          phase == SpartanConnectionPhase.connecting ||
+                          phase == SpartanConnectionPhase.authenticating;
+                      final color = connected
+                          ? SpartanPalette.online
+                          : connecting
+                          ? SpartanPalette.gold
+                          : Colors.redAccent;
+                      final label = connected
+                          ? 'СВЯЗЬ'
+                          : connecting
+                          ? 'ПОДКЛЮЧЕНИЕ'
+                          : 'НЕТ СВЯЗИ';
+                      return Tooltip(
+                        message: connected
+                            ? 'Сервер подключён · Люди: $contactCount · События: $eventCount'
+                            : connecting
+                            ? 'Восстанавливаем соединение с сервером'
+                            : 'Сервер недоступен. Переподключение выполняется автоматически',
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 9,
+                            vertical: 7,
+                          ),
+                          decoration: BoxDecoration(
+                            color: SpartanPalette.surfaceSoft,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: color.withValues(alpha: .62),
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                width: 7,
+                                height: 7,
+                                decoration: BoxDecoration(
+                                  color: color,
+                                  shape: BoxShape.circle,
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: color.withValues(alpha: .35),
+                                      blurRadius: 6,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                label,
+                                style: TextStyle(
+                                  color: color,
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: .45,
+                                ),
+                              ),
+                              if (connected) ...[
+                                const SizedBox(width: 6),
+                                Text(
+                                  '$contactCount · $eventCount',
+                                  style: const TextStyle(
+                                    color: SpartanPalette.secondary,
+                                    fontSize: 9,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      );
+                    },
                   ),
                 ],
               ),

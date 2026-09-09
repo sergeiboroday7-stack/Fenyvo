@@ -11,15 +11,28 @@ class AppVisibility with WidgetsBindingObserver {
   final ValueNotifier<bool> changes = ValueNotifier(true);
   void initialize() {
     WidgetsBinding.instance.addObserver(this);
+    if (Platform.isWindows) {
+      const MethodChannel('spartan_chat/window')
+          .setMethodCallHandler((call) async {
+            if (call.method == 'visibilityChanged') {
+              _setForeground(call.arguments == true);
+            }
+          });
+    }
     didChangeAppLifecycleState(
       WidgetsBinding.instance.lifecycleState ?? AppLifecycleState.resumed,
     );
   }
 
+  void _setForeground(bool value) {
+    if (foreground == value) return;
+    foreground = value;
+    changes.value = value;
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    foreground = state == AppLifecycleState.resumed;
-    changes.value = foreground;
+    _setForeground(state == AppLifecycleState.resumed);
   }
 
   static bool shouldNotify({

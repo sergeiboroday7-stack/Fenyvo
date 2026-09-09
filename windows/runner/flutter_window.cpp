@@ -1,9 +1,17 @@
 #include "flutter_window.h"
 
 #include <optional>
+#include <string>
 #include <flutter/standard_method_codec.h>
 
 #include "flutter/generated_plugin_registrant.h"
+#include "resource.h"
+
+namespace {
+constexpr UINT kTrayCallbackMessage = WM_APP + 41;
+constexpr UINT kTrayOpenCommand = 42001;
+constexpr UINT kTrayExitCommand = 42002;
+}  // namespace
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
@@ -35,6 +43,7 @@ bool FlutterWindow::OnCreate() {
       HWND window = GetHandle();
       ShowWindow(window, IsIconic(window) ? SW_RESTORE : SW_SHOW);
       SetForegroundWindow(window);
+      NotifyVisibility(true);
       result->Success();
     } else if (call.method_name() == "flash") {
       FLASHWINFO info = {sizeof(FLASHWINFO), GetHandle(), FLASHW_TRAY, 6, 0};
@@ -42,6 +51,10 @@ bool FlutterWindow::OnCreate() {
       result->Success();
     } else result->NotImplemented();
   });
+
+  taskbar_created_message_ = RegisterWindowMessageW(L"TaskbarCreated");
+  restore_message_ = RegisterWindowMessageW(L"SPARTAN_CHAT_RESTORE_WINDOW");
+  AddTrayIcon();
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
     this->Show();
@@ -56,6 +69,7 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  RemoveTrayIcon();
   window_channel_ = nullptr;
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
@@ -78,11 +92,154 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
     }
   }
 
+  if (message == taskbar_created_message_) {
+    tray_icon_added_ = false;
+    AddTrayIcon();
+    return 0;
+  }
+  if (message == restore_message_) {
+    RestoreFromTray();
+    return 0;
+  }
+
   switch (message) {
+    case WM_CLOSE:
+      if (!exiting_) {
+        ShowWindow(hwnd, SW_HIDE);
+        NotifyVisibility(false);
+        ShowTrayHint();
+        return 0;
+      }
+      break;
+    case WM_SIZE:
+      if (wparam == SIZE_MINIMIZED) {
+        NotifyVisibility(false);
+      } else if (IsWindowVisible(hwnd)) {
+        NotifyVisibility(true);
+      }
+      break;
+    case kTrayCallbackMessage:
+      if (lparam == WM_LBUTTONUP || lparam == WM_LBUTTONDBLCLK) {
+        RestoreFromTray();
+        return 0;
+      }
+      if (lparam == WM_RBUTTONUP || lparam == WM_CONTEXTMENU) {
+        ShowTrayMenu();
+        return 0;
+      }
+      break;
+    case WM_COMMAND:
+      switch (LOWORD(wparam)) {
+        case kTrayOpenCommand:
+          RestoreFromTray();
+          return 0;
+        case kTrayExitCommand:
+          exiting_ = true;
+          RemoveTrayIcon();
+          DestroyWindow(hwnd);
+          return 0;
+      }
+      break;
     case WM_FONTCHANGE:
       flutter_controller_->engine()->ReloadSystemFonts();
       break;
   }
 
   return Win32Window::MessageHandler(hwnd, message, wparam, lparam);
+}
+
+void FlutterWindow::AddTrayIcon() {
+  if (tray_icon_added_ || !GetHandle()) {
+    return;
+  }
+
+  tray_icon_ = {};
+  tray_icon_.cbSize = sizeof(NOTIFYICONDATAW);
+  tray_icon_.hWnd = GetHandle();
+  tray_icon_.uID = 1;
+  tray_icon_.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
+  tray_icon_.uCallbackMessage = kTrayCallbackMessage;
+  tray_icon_.hIcon = LoadIconW(GetModuleHandle(nullptr), MAKEINTRESOURCEW(IDI_APP_ICON));
+  wcscpy_s(tray_icon_.szTip, L"SPARTAN CHAT");
+
+  tray_icon_added_ = Shell_NotifyIconW(NIM_ADD, &tray_icon_) == TRUE;
+  if (tray_icon_added_) {
+    tray_icon_.uVersion = NOTIFYICON_VERSION_4;
+    Shell_NotifyIconW(NIM_SETVERSION, &tray_icon_);
+  }
+}
+
+void FlutterWindow::RemoveTrayIcon() {
+  if (!tray_icon_added_) {
+    return;
+  }
+  Shell_NotifyIconW(NIM_DELETE, &tray_icon_);
+  tray_icon_added_ = false;
+}
+
+void FlutterWindow::RestoreFromTray() {
+  HWND window = GetHandle();
+  if (!window) {
+    return;
+  }
+  ShowWindow(window, IsIconic(window) ? SW_RESTORE : SW_SHOW);
+  SetForegroundWindow(window);
+  NotifyVisibility(true);
+}
+
+void FlutterWindow::NotifyVisibility(bool visible) {
+  if (!window_channel_) {
+    return;
+  }
+  window_channel_->InvokeMethod(
+      "visibilityChanged",
+      std::make_unique<flutter::EncodableValue>(visible));
+}
+
+void FlutterWindow::ShowTrayMenu() {
+  HWND window = GetHandle();
+  if (!window) {
+    return;
+  }
+
+  HMENU menu = CreatePopupMenu();
+  if (!menu) {
+    return;
+  }
+  AppendMenuW(
+      menu, MF_STRING, kTrayOpenCommand,
+      L"\u041E\u0442\u043A\u0440\u044B\u0442\u044C SPARTAN CHAT");
+  AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+  AppendMenuW(menu, MF_STRING, kTrayExitCommand,
+              L"\u0412\u044B\u0439\u0442\u0438");
+
+  POINT cursor{};
+  GetCursorPos(&cursor);
+  SetForegroundWindow(window);
+  TrackPopupMenu(menu, TPM_RIGHTBUTTON | TPM_BOTTOMALIGN | TPM_LEFTALIGN,
+                 cursor.x, cursor.y, 0, window, nullptr);
+  PostMessageW(window, WM_NULL, 0, 0);
+  DestroyMenu(menu);
+}
+
+void FlutterWindow::ShowTrayHint() {
+  if (!tray_icon_added_ || tray_hint_shown_) {
+    return;
+  }
+  tray_hint_shown_ = true;
+  tray_icon_.uFlags = NIF_INFO;
+  tray_icon_.dwInfoFlags = NIIF_INFO;
+  wcscpy_s(
+      tray_icon_.szInfoTitle,
+      L"SPARTAN CHAT \u0440\u0430\u0431\u043E\u0442\u0430\u0435\u0442 "
+      L"\u0432 \u0444\u043E\u043D\u0435");
+  wcscpy_s(tray_icon_.szInfo,
+           L"\u0421\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F "
+           L"\u0438 \u0437\u0432\u043E\u043D\u043A\u0438 "
+           L"\u0431\u0443\u0434\u0443\u0442 \u043F\u0440\u0438\u0445\u043E\u0434\u0438\u0442\u044C. "
+           L"\u0414\u043B\u044F \u043F\u043E\u043B\u043D\u043E\u0433\u043E "
+           L"\u0432\u044B\u0445\u043E\u0434\u0430 \u043E\u0442\u043A\u0440\u043E\u0439\u0442\u0435 "
+           L"\u043C\u0435\u043D\u044E \u0437\u043D\u0430\u0447\u043A\u0430.");
+  Shell_NotifyIconW(NIM_MODIFY, &tray_icon_);
+  tray_icon_.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
 }
