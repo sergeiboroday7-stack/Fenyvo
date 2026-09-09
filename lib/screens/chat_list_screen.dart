@@ -5,6 +5,8 @@ import 'dart:async';
 import '../services/system_call_service.dart';
 import '../services/call_service.dart';
 import '../services/call_history_service.dart';
+import '../services/pulse_service.dart';
+import '../services/spartan_trust_service.dart';
 import '../widgets/spartan_brand.dart';
 import 'saved_messages_screen.dart';
 
@@ -58,6 +60,8 @@ class _ChatListScreenState extends State<ChatListScreen> {
   // ========================================
 
   final Set<String> _typingUsers = {};
+
+  final Set<String> _trustedUsers = {};
 
   final Map<String, Timer> _typingTimers = {};
 
@@ -177,6 +181,23 @@ class _ChatListScreenState extends State<ChatListScreen> {
     if (requestAvatars) {
       _requestMissingAvatars(chats);
     }
+
+    unawaited(_loadTrustStates(chats));
+  }
+
+  Future<void> _loadTrustStates(List<String> users) async {
+    final trusted = <String>{};
+    await Future.wait(
+      users.map((user) async {
+        if (await SpartanTrustService.isTrusted(user)) trusted.add(user);
+      }),
+    );
+    if (!mounted) return;
+    setState(() {
+      _trustedUsers
+        ..clear()
+        ..addAll(trusted);
+    });
   }
 
   // ========================================
@@ -1118,52 +1139,85 @@ class _ChatListScreenState extends State<ChatListScreen> {
     bool selected = false,
     bool pinned = false,
     VoidCallback? onLongPress,
-  }) => Padding(
-    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
-    child: Material(
-      color: selected ? SpartanPalette.blue : Colors.transparent,
-      borderRadius: BorderRadius.circular(14),
-      child: InkWell(
-        onTap: onTap,
-        onLongPress: onLongPress,
-        borderRadius: BorderRadius.circular(14),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 12),
-          child: Row(
-            children: [
-              avatar,
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: SpartanPalette.ink,
-                      ),
-                    ),
-                    const SizedBox(height: 5),
-                    Text(
-                      subtitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        color: SpartanPalette.secondary,
-                      ),
-                    ),
-                  ],
-                ),
+  }) {
+    final highlighted = selected || unread > 0;
+    const cardRadius = BorderRadius.only(
+      topLeft: Radius.circular(22),
+      topRight: Radius.circular(9),
+      bottomRight: Radius.circular(22),
+      bottomLeft: Radius.circular(9),
+    );
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: cardRadius,
+        child: InkWell(
+          onTap: onTap,
+          onLongPress: onLongPress,
+          borderRadius: cardRadius,
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 220),
+            padding: const EdgeInsets.fromLTRB(13, 13, 10, 13),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: selected
+                    ? const [SpartanPalette.surfaceRaised, SpartanPalette.blue]
+                    : const [
+                        SpartanPalette.surfaceSoft,
+                        SpartanPalette.surface,
+                      ],
               ),
-              if (time.isNotEmpty || unread > 0 || pinned) ...[
+              borderRadius: cardRadius,
+              border: Border.all(
+                color: highlighted
+                    ? SpartanPalette.gold.withValues(alpha: .62)
+                    : SpartanPalette.line,
+                width: highlighted ? 1.1 : .7,
+              ),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x24000000),
+                  blurRadius: 12,
+                  offset: Offset(0, 5),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                avatar,
+                const SizedBox(width: 13),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w700,
+                          color: SpartanPalette.ink,
+                        ),
+                      ),
+                      const SizedBox(height: 5),
+                      Text(
+                        subtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          fontSize: 13,
+                          color: SpartanPalette.secondary,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
                 const SizedBox(width: 8),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.end,
+                  mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     if (time.isNotEmpty)
                       Text(
@@ -1173,40 +1227,43 @@ class _ChatListScreenState extends State<ChatListScreen> {
                           color: SpartanPalette.secondary,
                         ),
                       ),
-                    const SizedBox(height: 5),
+                    const SizedBox(height: 7),
                     if (unread > 0)
                       Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 6,
-                          vertical: 2,
-                        ),
+                        width: 8,
+                        height: 25,
                         decoration: BoxDecoration(
                           color: SpartanPalette.gold,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: Text(
-                          unread > 99 ? '99+' : '$unread',
-                          style: const TextStyle(
-                            color: SpartanPalette.onGold,
-                            fontSize: 11,
-                          ),
+                          borderRadius: BorderRadius.circular(6),
+                          boxShadow: [
+                            BoxShadow(
+                              color: SpartanPalette.gold.withValues(alpha: .35),
+                              blurRadius: 8,
+                            ),
+                          ],
                         ),
                       )
                     else if (pinned)
                       const Icon(
                         Icons.push_pin_outlined,
-                        size: 14,
-                        color: SpartanPalette.secondary,
+                        size: 15,
+                        color: SpartanPalette.gold,
+                      )
+                    else
+                      const Icon(
+                        Icons.chevron_right_rounded,
+                        size: 20,
+                        color: SpartanPalette.muted,
                       ),
                   ],
                 ),
               ],
-            ],
+            ),
           ),
         ),
       ),
-    ),
-  );
+    );
+  }
 
   Future<void> _showChatOptions(String user) async {
     final owner = SocketService.instance.currentUser ?? '';
@@ -1283,24 +1340,55 @@ class _ChatListScreenState extends State<ChatListScreen> {
           _selectedDesktopGroup == null,
       avatar: GestureDetector(
         onLongPress: () => _showAvatarPreview(user),
-        child: Stack(
-          children: [
-            _buildAvatar(user, radius: 24),
-            if (_isUserOnline(user))
-              Positioned(
-                right: 0,
-                bottom: 0,
-                child: Container(
-                  width: 10,
-                  height: 10,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF70C7A5),
-                    shape: BoxShape.circle,
-                    border: Border.all(color: SpartanPalette.surface, width: 2),
+        child: Container(
+          padding: const EdgeInsets.all(2.5),
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            border: Border.all(
+              color: _trustedUsers.contains(user)
+                  ? SpartanPalette.gold
+                  : _isUserOnline(user)
+                  ? SpartanPalette.online
+                  : SpartanPalette.line,
+              width: _trustedUsers.contains(user) || _isUserOnline(user)
+                  ? 2
+                  : 1,
+            ),
+            boxShadow: _trustedUsers.contains(user) || _isUserOnline(user)
+                ? [
+                    BoxShadow(
+                      color:
+                          (_trustedUsers.contains(user)
+                                  ? SpartanPalette.gold
+                                  : SpartanPalette.online)
+                              .withValues(alpha: .22),
+                      blurRadius: 10,
+                    ),
+                  ]
+                : const [],
+          ),
+          child: Stack(
+            children: [
+              _buildAvatar(user, radius: 23),
+              if (_isUserOnline(user))
+                Positioned(
+                  right: 0,
+                  bottom: 0,
+                  child: Container(
+                    width: 12,
+                    height: 12,
+                    decoration: BoxDecoration(
+                      color: SpartanPalette.online,
+                      shape: BoxShape.circle,
+                      border: Border.all(
+                        color: SpartanPalette.surfaceSoft,
+                        width: 2,
+                      ),
+                    ),
                   ),
                 ),
-              ),
-          ],
+            ],
+          ),
         ),
       ),
       onTap: () => _openChat(user),
@@ -1393,14 +1481,328 @@ class _ChatListScreenState extends State<ChatListScreen> {
     onTap: _openSaved,
   );
 
+  Future<void> _showPulseRequests() async {
+    final service = PulseService.instance;
+    service.markAllSeen();
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (sheetContext) => AnimatedBuilder(
+        animation: service,
+        builder: (context, _) {
+          final currentUser = SocketService.instance.currentUser ?? '';
+          final pulses = service.pulses;
+          return SafeArea(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                maxHeight: MediaQuery.sizeOf(context).height * .72,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 4, 12, 12),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.bolt_rounded,
+                          color: SpartanPalette.gold,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Запросы SPARTAN PULSE · ${pulses.length}',
+                            style: const TextStyle(
+                              fontSize: 19,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Закрыть',
+                          onPressed: () => Navigator.pop(sheetContext),
+                          icon: const Icon(Icons.close_rounded),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (pulses.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.fromLTRB(24, 24, 24, 40),
+                      child: Text(
+                        'Активных запросов пока нет',
+                        style: TextStyle(color: SpartanPalette.secondary),
+                      ),
+                    )
+                  else
+                    Flexible(
+                      child: ListView.separated(
+                        shrinkWrap: true,
+                        padding: const EdgeInsets.fromLTRB(12, 0, 12, 20),
+                        itemCount: pulses.length,
+                        separatorBuilder: (_, _) => const SizedBox(height: 8),
+                        itemBuilder: (context, index) {
+                          final pulse = pulses[index];
+                          final peer = pulse.peerFor(currentUser);
+                          final incoming =
+                              pulse.to == currentUser &&
+                              pulse.state == 'pending';
+                          final matched = pulse.state == 'matched';
+                          final accepted = pulse.state == 'accepted';
+                          final minutes = service.remainingMinutes(pulse);
+                          final status = matched
+                              ? 'Оба готовы · соединяем'
+                              : incoming
+                              ? 'Входящий запрос · ещё $minutes мин.'
+                              : accepted
+                              ? 'Готовность подтверждена'
+                              : 'Исходящий запрос · ещё $minutes мин.';
+                          return Material(
+                            color: SpartanPalette.canvas,
+                            borderRadius: BorderRadius.circular(16),
+                            child: Padding(
+                              padding: const EdgeInsets.all(12),
+                              child: Row(
+                                children: [
+                                  _buildAvatar(peer, radius: 24),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: InkWell(
+                                      onTap: () {
+                                        Navigator.pop(sheetContext);
+                                        _openChat(peer);
+                                      },
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            peer,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
+                                            style: const TextStyle(
+                                              fontWeight: FontWeight.w700,
+                                              fontSize: 16,
+                                            ),
+                                          ),
+                                          const SizedBox(height: 3),
+                                          Text(
+                                            status,
+                                            style: const TextStyle(
+                                              color: SpartanPalette.secondary,
+                                              fontSize: 12,
+                                            ),
+                                          ),
+                                          Text(
+                                            pulse.video
+                                                ? 'Видеозвонок'
+                                                : 'Аудиозвонок',
+                                            style: const TextStyle(
+                                              color: SpartanPalette.gold,
+                                              fontSize: 12,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                  if (incoming) ...[
+                                    IconButton(
+                                      tooltip: 'Не сейчас',
+                                      onPressed: () =>
+                                          service.declinePulse(pulse.id),
+                                      icon: const Icon(Icons.close_rounded),
+                                    ),
+                                    IconButton.filled(
+                                      tooltip: 'Я готов',
+                                      onPressed: () =>
+                                          service.acceptPulse(pulse.id),
+                                      style: IconButton.styleFrom(
+                                        backgroundColor: SpartanPalette.gold,
+                                        foregroundColor: SpartanPalette.onGold,
+                                      ),
+                                      icon: const Icon(Icons.check_rounded),
+                                    ),
+                                  ] else if (!matched)
+                                    IconButton(
+                                      tooltip: 'Отменить',
+                                      onPressed: () =>
+                                          service.cancelPulse(pulse.id),
+                                      icon: const Icon(Icons.close_rounded),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _pulseDock() => AnimatedBuilder(
+    animation: PulseService.instance,
+    builder: (context, _) {
+      final service = PulseService.instance;
+      final pulse = service.current;
+      final currentUser = SocketService.instance.currentUser ?? '';
+      if (pulse == null || currentUser.isEmpty) {
+        return const SizedBox.shrink();
+      }
+
+      final peer = pulse.peerFor(currentUser);
+      final incoming = service.phase == SpartanPulsePhase.incoming;
+      final matched = service.phase == SpartanPulsePhase.matched;
+      final minutes = service.remainingMinutes(pulse);
+      final stateText = matched
+          ? 'Оба готовы · звонок через ${service.countdownSeconds} сек.'
+          : incoming
+          ? 'Входящий · осталось $minutes мин.'
+          : 'Ждём готовность · осталось $minutes мин.';
+      final mode = pulse.video ? 'видеозвонок' : 'аудиозвонок';
+      final requestCount = service.requestCount;
+      final unreadCount = service.unreadCount;
+
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 0),
+        child: Material(
+          color: SpartanPalette.blue,
+          borderRadius: BorderRadius.circular(18),
+          child: InkWell(
+            key: const ValueKey('pulse-dock'),
+            onTap: _showPulseRequests,
+            borderRadius: BorderRadius.circular(18),
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(14, 12, 10, 12),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: SpartanPalette.gold),
+              ),
+              child: Row(
+                children: [
+                  Badge(
+                    isLabelVisible: requestCount > 0,
+                    label: Text(requestCount > 9 ? '9+' : '$requestCount'),
+                    backgroundColor: unreadCount > 0
+                        ? SpartanPalette.gold
+                        : SpartanPalette.secondary,
+                    textColor: SpartanPalette.onGold,
+                    child: Container(
+                      width: 42,
+                      height: 42,
+                      decoration: BoxDecoration(
+                        color: SpartanPalette.gold.withValues(alpha: .14),
+                        shape: BoxShape.circle,
+                      ),
+                      child: const Icon(
+                        Icons.bolt_rounded,
+                        color: SpartanPalette.gold,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 11),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'SPARTAN PULSE',
+                          style: TextStyle(
+                            color: SpartanPalette.gold,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: .7,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          '$peer · $mode',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: SpartanPalette.ink,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        Text(
+                          unreadCount > 0
+                              ? '$stateText · новых: $unreadCount'
+                              : '$stateText · запросов: $requestCount',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: SpartanPalette.secondary,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (incoming) ...[
+                    IconButton(
+                      tooltip: 'Не сейчас',
+                      onPressed: service.decline,
+                      icon: const Icon(
+                        Icons.close_rounded,
+                        color: SpartanPalette.secondary,
+                      ),
+                    ),
+                    IconButton.filled(
+                      tooltip: 'Я готов',
+                      onPressed: service.accept,
+                      style: IconButton.styleFrom(
+                        backgroundColor: SpartanPalette.gold,
+                        foregroundColor: SpartanPalette.onGold,
+                      ),
+                      icon: const Icon(Icons.check_rounded),
+                    ),
+                  ] else if (!matched)
+                    IconButton(
+                      tooltip: 'Отменить SPARTAN PULSE',
+                      onPressed: service.cancel,
+                      icon: const Icon(
+                        Icons.close_rounded,
+                        color: SpartanPalette.secondary,
+                      ),
+                    ),
+                  if (!incoming)
+                    const Icon(
+                      Icons.chevron_right_rounded,
+                      color: SpartanPalette.secondary,
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    },
+  );
+
   Widget _buildChatListPane() {
     final visible = _visibleChats;
     final query = _search.text.trim().toLowerCase();
+    final contactCount = _chats
+        .where((item) => !item.startsWith('group::'))
+        .length;
+    final eventCount = PulseService.instance.requestCount;
     final showSaved =
         _filter != 2 &&
         (query.isEmpty || 'сохранённое сохраненное заметки'.contains(query));
-    return ColoredBox(
-      color: SpartanPalette.surface,
+    return DecoratedBox(
+      decoration: const BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [SpartanPalette.canvasDeep, SpartanPalette.surface],
+        ),
+      ),
       child: SafeArea(
         bottom: false,
         child: Column(
@@ -1411,26 +1813,68 @@ class _ChatListScreenState extends State<ChatListScreen> {
                 children: [
                   const Expanded(child: SpartanBrand()),
                   IconButton(
-                    tooltip: 'Создать группу',
-                    onPressed: _openCreateGroup,
-                    icon: const Icon(Icons.group_add_outlined),
-                  ),
-                  IconButton(
                     tooltip: 'Обновить контакты',
                     onPressed: _refreshChats,
                     icon: const Icon(Icons.refresh_rounded),
                   ),
+                  if (MediaQuery.sizeOf(context).width < 900)
+                    IconButton(
+                      tooltip: 'Система',
+                      onPressed: () => _selectSection(2),
+                      icon: const Icon(Icons.tune_rounded),
+                    ),
                 ],
               ),
             ),
-            const Padding(
-              padding: EdgeInsets.fromLTRB(20, 2, 20, 14),
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: Text(
-                  'Чаты',
-                  style: TextStyle(fontSize: 26, fontWeight: FontWeight.w700),
-                ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 5, 20, 16),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  const Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'COMMAND DECK',
+                          style: TextStyle(
+                            fontSize: 25,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: .8,
+                          ),
+                        ),
+                        SizedBox(height: 3),
+                        Text(
+                          'ЦЕНТР СВЯЗИ',
+                          style: TextStyle(
+                            color: SpartanPalette.gold,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w700,
+                            letterSpacing: 2.1,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 10,
+                      vertical: 7,
+                    ),
+                    decoration: BoxDecoration(
+                      color: SpartanPalette.surfaceSoft,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: SpartanPalette.line),
+                    ),
+                    child: Text(
+                      'Люди: $contactCount · События: $eventCount',
+                      style: const TextStyle(
+                        color: SpartanPalette.secondary,
+                        fontSize: 10,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
             Padding(
@@ -1453,48 +1897,62 @@ class _ChatListScreenState extends State<ChatListScreen> {
                             setState(() {});
                           },
                         ),
-                  fillColor: SpartanPalette.canvas,
+                  fillColor: SpartanPalette.surfaceSoft,
                   isDense: true,
                   contentPadding: const EdgeInsets.symmetric(vertical: 13),
                   border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide.none,
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: const BorderSide(color: SpartanPalette.line),
                   ),
                   enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    borderSide: BorderSide.none,
+                    borderRadius: BorderRadius.circular(16),
+                    borderSide: const BorderSide(color: SpartanPalette.line),
                   ),
                 ),
               ),
             ),
             const SizedBox(height: 12),
-            Row(
-              children: List.generate(
-                3,
-                (index) => Expanded(
-                  child: InkWell(
-                    key: ValueKey('chat-filter-$index'),
-                    onTap: () => setState(() => _filter = index),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(vertical: 12),
-                      decoration: BoxDecoration(
-                        border: Border(
-                          bottom: BorderSide(
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: Container(
+                padding: const EdgeInsets.all(4),
+                decoration: BoxDecoration(
+                  color: SpartanPalette.canvasDeep.withValues(alpha: .58),
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: SpartanPalette.line),
+                ),
+                child: Row(
+                  children: List.generate(
+                    3,
+                    (index) => Expanded(
+                      child: InkWell(
+                        key: ValueKey('chat-filter-$index'),
+                        onTap: () => setState(() => _filter = index),
+                        borderRadius: BorderRadius.circular(14),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 180),
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          decoration: BoxDecoration(
                             color: _filter == index
-                                ? SpartanPalette.gold
-                                : SpartanPalette.line,
-                            width: _filter == index ? 2 : .5,
+                                ? SpartanPalette.gold.withValues(alpha: .16)
+                                : Colors.transparent,
+                            borderRadius: BorderRadius.circular(14),
+                            border: _filter == index
+                                ? Border.all(color: SpartanPalette.gold)
+                                : null,
                           ),
-                        ),
-                      ),
-                      child: Text(
-                        ['Все', 'Личные', 'Группы'][index],
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: _filter == index
-                              ? SpartanPalette.gold
-                              : SpartanPalette.secondary,
-                          fontSize: 14,
+                          child: Text(
+                            ['ОБЗОР', 'ЛЮДИ', 'КОМАНДЫ'][index],
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: _filter == index
+                                  ? SpartanPalette.gold
+                                  : SpartanPalette.secondary,
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: .7,
+                            ),
+                          ),
                         ),
                       ),
                     ),
@@ -1502,6 +1960,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                 ),
               ),
             ),
+            _pulseDock(),
             Expanded(
               child: _isLoading
                   ? const Center(child: CircularProgressIndicator())
@@ -1704,7 +2163,26 @@ class _ChatListScreenState extends State<ChatListScreen> {
     );
   }
 
-  Widget _railButton(int index, IconData icon, String label) => Padding(
+  Widget _pulseBadgeIcon(IconData icon, {Color? color}) => AnimatedBuilder(
+    animation: PulseService.instance,
+    builder: (context, _) {
+      final unread = PulseService.instance.unreadCount;
+      return Badge(
+        isLabelVisible: unread > 0,
+        label: Text(unread > 9 ? '9+' : '$unread'),
+        backgroundColor: SpartanPalette.gold,
+        textColor: SpartanPalette.onGold,
+        child: Icon(icon, color: color),
+      );
+    },
+  );
+
+  Widget _railButton(
+    int index,
+    IconData icon,
+    String label, {
+    bool pulseBadge = false,
+  }) => Padding(
     padding: const EdgeInsets.symmetric(vertical: 5),
     child: Tooltip(
       message: label,
@@ -1719,12 +2197,164 @@ class _ChatListScreenState extends State<ChatListScreen> {
             color: _section == index ? SpartanPalette.gold : Colors.transparent,
             borderRadius: BorderRadius.circular(13),
           ),
-          child: Icon(
-            icon,
-            color: _section == index
-                ? SpartanPalette.onGold
-                : SpartanPalette.ink,
+          child: pulseBadge
+              ? Center(
+                  child: _pulseBadgeIcon(
+                    icon,
+                    color: _section == index
+                        ? SpartanPalette.onGold
+                        : SpartanPalette.ink,
+                  ),
+                )
+              : Icon(
+                  icon,
+                  color: _section == index
+                      ? SpartanPalette.onGold
+                      : SpartanPalette.ink,
+                ),
+        ),
+      ),
+    ),
+  );
+
+  Future<void> _showCommandActions() async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 2, 12, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Padding(
+                padding: EdgeInsets.fromLTRB(12, 0, 12, 10),
+                child: Text(
+                  'SPARTAN COMMAND',
+                  style: TextStyle(
+                    color: SpartanPalette.gold,
+                    fontSize: 18,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 1,
+                  ),
+                ),
+              ),
+              ListTile(
+                leading: const Icon(
+                  Icons.bolt_rounded,
+                  color: SpartanPalette.gold,
+                ),
+                title: const Text('Запросы SPARTAN PULSE'),
+                subtitle: const Text('Созвоны, когда оба готовы'),
+                onTap: () => Navigator.pop(context, 'pulse'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.groups_rounded),
+                title: const Text('Создать команду'),
+                subtitle: const Text('Новый групповой чат'),
+                onTap: () => Navigator.pop(context, 'group'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.sync_rounded),
+                title: const Text('Обновить связь'),
+                subtitle: const Text('Синхронизировать контакты и события'),
+                onTap: () => Navigator.pop(context, 'refresh'),
+              ),
+              ListTile(
+                leading: const Icon(Icons.tune_rounded),
+                title: const Text('Система'),
+                subtitle: const Text('Настройки SPARTAN CHAT'),
+                onTap: () => Navigator.pop(context, 'settings'),
+              ),
+            ],
           ),
+        ),
+      ),
+    );
+    if (!mounted || action == null) return;
+    if (action == 'pulse') await _showPulseRequests();
+    if (action == 'group') await _openCreateGroup();
+    if (action == 'refresh') await _refreshChats();
+    if (action == 'settings') _selectSection(2);
+  }
+
+  Widget _mobileDeckButton(int index, IconData icon, String label) => Expanded(
+    child: InkWell(
+      key: ValueKey('mobile-command-$index'),
+      onTap: () => _selectSection(index),
+      borderRadius: BorderRadius.circular(18),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            _section == index && index == 1
+                ? _pulseBadgeIcon(icon, color: SpartanPalette.gold)
+                : Icon(
+                    icon,
+                    color: _section == index
+                        ? SpartanPalette.gold
+                        : SpartanPalette.secondary,
+                  ),
+            const SizedBox(height: 3),
+            Text(
+              label,
+              style: TextStyle(
+                color: _section == index
+                    ? SpartanPalette.gold
+                    : SpartanPalette.secondary,
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+                letterSpacing: .8,
+              ),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+
+  Widget _mobileCommandDock() => SafeArea(
+    top: false,
+    child: Padding(
+      padding: const EdgeInsets.fromLTRB(14, 4, 14, 10),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+        decoration: BoxDecoration(
+          color: SpartanPalette.rail,
+          borderRadius: BorderRadius.circular(28),
+          border: Border.all(color: SpartanPalette.line),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x55000000),
+              blurRadius: 18,
+              offset: Offset(0, 8),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            _mobileDeckButton(0, Icons.chat_bubble_outline_rounded, 'СВЯЗЬ'),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10),
+              child: IconButton.filled(
+                key: const ValueKey('spartan-command-button'),
+                tooltip: 'SPARTAN COMMAND',
+                onPressed: _showCommandActions,
+                style: IconButton.styleFrom(
+                  minimumSize: const Size(56, 56),
+                  backgroundColor: SpartanPalette.gold,
+                  foregroundColor: SpartanPalette.onGold,
+                  side: const BorderSide(color: Color(0xFFE3C87C), width: 1.5),
+                  shadowColor: SpartanPalette.gold,
+                  elevation: 7,
+                ),
+                icon: const Icon(Icons.bolt_rounded, size: 30),
+              ),
+            ),
+            _mobileDeckButton(1, Icons.call_outlined, 'ЗВОНКИ'),
+          ],
         ),
       ),
     ),
@@ -1764,7 +2394,12 @@ class _ChatListScreenState extends State<ChatListScreen> {
                       const SpartanBrand(compact: true),
                       const SizedBox(height: 34),
                       _railButton(0, Icons.chat_bubble_outline_rounded, 'Чаты'),
-                      _railButton(1, Icons.call_outlined, 'Звонки'),
+                      _railButton(
+                        1,
+                        Icons.call_outlined,
+                        'Звонки',
+                        pulseBadge: true,
+                      ),
                       const Spacer(),
                       _railButton(2, Icons.settings_outlined, 'Настройки'),
                       const SizedBox(height: 20),
@@ -1777,26 +2412,6 @@ class _ChatListScreenState extends State<ChatListScreen> {
           ],
         ),
       );
-    return Scaffold(
-      body: body,
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _section,
-        onDestinationSelected: _selectSection,
-        destinations: const [
-          NavigationDestination(
-            icon: Icon(Icons.chat_bubble_outline_rounded),
-            label: 'Чаты',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.call_outlined),
-            label: 'Звонки',
-          ),
-          NavigationDestination(
-            icon: Icon(Icons.settings_outlined),
-            label: 'Настройки',
-          ),
-        ],
-      ),
-    );
+    return Scaffold(body: body, bottomNavigationBar: _mobileCommandDock());
   }
 }

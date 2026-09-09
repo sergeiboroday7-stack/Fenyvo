@@ -793,40 +793,63 @@ class _ChatScreenState extends State<ChatScreen>
       }
     }
 
-    final avatarStack = Stack(
-      clipBehavior: Clip.none,
-      children: [
-        CircleAvatar(
-          radius: Platform.isWindows ? 22 : 20,
-          backgroundColor: SpartanPalette.surface,
-          backgroundImage: imageProvider,
-          child: imageProvider == null
-              ? Text(
-                  widget.targetUser.isNotEmpty
-                      ? widget.targetUser[0].toUpperCase()
-                      : '?',
-                  style: const TextStyle(
-                    color: _gold,
-                    fontWeight: FontWeight.bold,
+    final ringColor = _contactTrusted
+        ? SpartanPalette.gold
+        : _contactOnline
+        ? SpartanPalette.online
+        : SpartanPalette.line;
+    final avatarStack = Container(
+      padding: const EdgeInsets.all(2.5),
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(color: ringColor, width: 2),
+        boxShadow: (_contactTrusted || _contactOnline)
+            ? [
+                BoxShadow(
+                  color: ringColor.withValues(alpha: .24),
+                  blurRadius: 10,
+                ),
+              ]
+            : const [],
+      ),
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          CircleAvatar(
+            radius: Platform.isWindows ? 22 : 20,
+            backgroundColor: SpartanPalette.surface,
+            backgroundImage: imageProvider,
+            child: imageProvider == null
+                ? Text(
+                    widget.targetUser.isNotEmpty
+                        ? widget.targetUser[0].toUpperCase()
+                        : '?',
+                    style: const TextStyle(
+                      color: _gold,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  )
+                : null,
+          ),
+          if (_contactOnline)
+            Positioned(
+              right: -1,
+              bottom: -1,
+              child: Container(
+                width: Platform.isWindows ? 13 : 12,
+                height: Platform.isWindows ? 13 : 12,
+                decoration: BoxDecoration(
+                  color: SpartanPalette.online,
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: SpartanPalette.canvasDeep,
+                    width: 2,
                   ),
-                )
-              : null,
-        ),
-        if (_contactOnline)
-          Positioned(
-            right: -1,
-            bottom: -1,
-            child: Container(
-              width: Platform.isWindows ? 13 : 12,
-              height: Platform.isWindows ? 13 : 12,
-              decoration: BoxDecoration(
-                color: Colors.greenAccent,
-                shape: BoxShape.circle,
-                border: Border.all(color: SpartanPalette.surface, width: 2),
+                ),
               ),
             ),
-          ),
-      ],
+        ],
+      ),
     );
 
     if (!Platform.isWindows) {
@@ -4004,7 +4027,7 @@ class _ChatScreenState extends State<ChatScreen>
                   : null,
             ),
             child: Text(
-              label,
+              label.toUpperCase(),
               style: TextStyle(
                 color: _gold.withValues(alpha: 0.88),
                 fontSize: isWindowsDesktop ? 11 : 10.5,
@@ -4366,7 +4389,15 @@ class _ChatScreenState extends State<ChatScreen>
 
     if (backgroundPath == null || backgroundPath.isEmpty) {
       return const Positioned.fill(
-        child: ColoredBox(color: SpartanPalette.canvas),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [SpartanPalette.canvasDeep, SpartanPalette.canvas],
+            ),
+          ),
+        ),
       );
     }
 
@@ -8509,6 +8540,31 @@ class _ChatScreenState extends State<ChatScreen>
       replyTo = Map<String, dynamic>.from(rawReplyTo);
     }
 
+    final signalBorder = isPinnedHighlight
+        ? BorderSide(color: isMe ? SpartanPalette.ink : _gold, width: 2)
+        : isHovered
+        ? BorderSide(
+            color: isMe
+                ? SpartanPalette.ink.withValues(alpha: .30)
+                : _gold.withValues(alpha: .52),
+            width: .9,
+          )
+        : BorderSide(
+            color: isMe
+                ? _gold.withValues(alpha: .38)
+                : SpartanPalette.line.withValues(alpha: .88),
+            width: .75,
+          );
+    final signalShape = BeveledRectangleBorder(
+      borderRadius: BorderRadius.only(
+        topLeft: Radius.circular(isMe ? 13 : 5),
+        topRight: Radius.circular(isMe ? 5 : 13),
+        bottomRight: Radius.circular(isMe ? 13 : 5),
+        bottomLeft: Radius.circular(isMe ? 5 : 13),
+      ),
+      side: signalBorder,
+    );
+
     return Align(
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
       child: MouseRegion(
@@ -8567,37 +8623,26 @@ class _ChatScreenState extends State<ChatScreen>
                     vertical: 10,
                   ),
                   constraints: BoxConstraints(maxWidth: bubbleMaxWidth),
-                  decoration: BoxDecoration(
+                  decoration: ShapeDecoration(
                     gradient: isMe
                         ? const LinearGradient(
                             colors: [
+                              SpartanPalette.surfaceRaised,
                               SpartanPalette.blue,
-                              SpartanPalette.blueDeep,
                             ],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
                           )
                         : const LinearGradient(
                             colors: [
-                              SpartanPalette.surface,
+                              SpartanPalette.surfaceSoft,
                               SpartanPalette.surface,
                             ],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
                           ),
-                    borderRadius: BorderRadius.circular(16),
-                    border: isPinnedHighlight
-                        ? Border.all(
-                            color: isMe
-                                ? SpartanPalette.ink.withValues(alpha: 0.92)
-                                : _gold,
-                            width: 2.0,
-                          )
-                        : isHovered
-                        ? Border.all(
-                            color: isMe
-                                ? SpartanPalette.ink.withValues(alpha: 0.28)
-                                : _gold.withValues(alpha: 0.46),
-                            width: 0.8,
-                          )
-                        : null,
-                    boxShadow: [
+                    shape: signalShape,
+                    shadows: [
                       BoxShadow(
                         color: Colors.black.withValues(
                           alpha: isPinnedHighlight
@@ -8960,6 +9005,44 @@ class _ChatScreenState extends State<ChatScreen>
                     ],
                   ),
                 ),
+
+                if (!isMe)
+                  Positioned(
+                    left: -8,
+                    top: 22,
+                    child: Container(
+                      width: 9,
+                      height: 9,
+                      decoration: BoxDecoration(
+                        color: _gold,
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: SpartanPalette.canvasDeep,
+                          width: 2,
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: _gold.withValues(alpha: .30),
+                            blurRadius: 7,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+
+                if (isMe)
+                  Positioned(
+                    right: 2,
+                    top: 12,
+                    bottom: 12,
+                    child: Container(
+                      width: 3,
+                      decoration: BoxDecoration(
+                        color: _gold.withValues(alpha: .82),
+                        borderRadius: BorderRadius.circular(3),
+                      ),
+                    ),
+                  ),
 
                 Positioned(
                   bottom: -15,
@@ -9569,6 +9652,26 @@ class _ChatScreenState extends State<ChatScreen>
 
     return Stack(
       children: [
+        Positioned(
+          left: isWindowsDesktop ? 33 : 27,
+          top: 0,
+          bottom: 0,
+          child: Container(
+            width: 1.2,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Colors.transparent,
+                  SpartanPalette.line.withValues(alpha: .82),
+                  SpartanPalette.line.withValues(alpha: .82),
+                  Colors.transparent,
+                ],
+              ),
+            ),
+          ),
+        ),
         Positioned.fill(
           child: isWindowsDesktop
               ? ScrollbarTheme(
@@ -9669,22 +9772,32 @@ class _ChatScreenState extends State<ChatScreen>
           _buildTypingIndicator(),
           _buildComposerReplyPreview(),
           Container(
-            decoration: const BoxDecoration(
-              color: SpartanPalette.surface,
-              border: Border(
-                top: BorderSide(color: SpartanPalette.line, width: .5),
+            margin: const EdgeInsets.fromLTRB(10, 5, 10, 9),
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                colors: [SpartanPalette.surfaceSoft, SpartanPalette.rail],
               ),
+              borderRadius: BorderRadius.circular(30),
+              border: Border.all(color: SpartanPalette.line),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x4A000000),
+                  blurRadius: 16,
+                  offset: Offset(0, 7),
+                ),
+              ],
             ),
-            padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
+            padding: const EdgeInsets.fromLTRB(6, 5, 6, 5),
             child: SafeArea(
               top: false,
+              minimum: const EdgeInsets.only(bottom: 1),
               child: Center(
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(maxWidth: 920),
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      IconButton(
+                      IconButton.outlined(
                         tooltip: 'Вложение',
                         onPressed: _sendingPrivateMedia
                             ? null
@@ -9699,8 +9812,13 @@ class _ChatScreenState extends State<ChatScreen>
                               )
                             : const Icon(
                                 Icons.add_circle_outline_rounded,
-                                color: SpartanPalette.ink,
+                                color: SpartanPalette.gold,
                               ),
+                        style: IconButton.styleFrom(
+                          side: BorderSide(
+                            color: SpartanPalette.gold.withValues(alpha: .58),
+                          ),
+                        ),
                       ),
                       const SizedBox(width: 2),
                       Expanded(
@@ -9735,7 +9853,9 @@ class _ChatScreenState extends State<ChatScreen>
                             onChanged: _handleTextChanged,
                             decoration: InputDecoration(
                               hintText: 'Сообщение…',
-                              fillColor: SpartanPalette.canvas,
+                              fillColor: SpartanPalette.canvasDeep.withValues(
+                                alpha: .72,
+                              ),
                               filled: true,
                               suffixIcon: IconButton(
                                 tooltip: 'Смайлики',
@@ -9755,6 +9875,14 @@ class _ChatScreenState extends State<ChatScreen>
                                 borderRadius: BorderRadius.circular(26),
                                 borderSide: const BorderSide(
                                   color: SpartanPalette.line,
+                                ),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(26),
+                                borderSide: BorderSide(
+                                  color: SpartanPalette.gold.withValues(
+                                    alpha: .72,
+                                  ),
                                 ),
                               ),
                               contentPadding: const EdgeInsets.symmetric(
@@ -10168,7 +10296,7 @@ class _ChatScreenState extends State<ChatScreen>
         resizeToAvoidBottomInset: false,
         appBar: AppBar(
           automaticallyImplyLeading: Navigator.canPop(context),
-          toolbarHeight: Platform.isWindows ? 66 : kToolbarHeight,
+          toolbarHeight: Platform.isWindows ? 70 : 64,
           titleSpacing: Platform.isWindows ? 22 : 0,
           title: Row(
             children: [
@@ -10380,31 +10508,23 @@ class _ChatScreenState extends State<ChatScreen>
             ),
             const SizedBox(width: 4),
           ],
-          backgroundColor: SpartanPalette.canvas,
+          backgroundColor: SpartanPalette.canvasDeep,
           foregroundColor: SpartanPalette.ink,
           elevation: 0,
           shadowColor: Colors.transparent,
           surfaceTintColor: Colors.transparent,
-          shape: Platform.isWindows
-              ? Border(
-                  bottom: BorderSide(
-                    color:
-                        (_contactIsTyping
-                                ? _gold
-                                : _contactOnline
-                                ? _gold
-                                : _gold)
-                            .withValues(
-                              alpha: _contactIsTyping
-                                  ? 0.38
-                                  : _contactOnline
-                                  ? 0.28
-                                  : 0.22,
-                            ),
-                    width: _contactIsTyping ? 1.0 : 0.8,
-                  ),
-                )
-              : null,
+          shape: Border(
+            bottom: BorderSide(
+              color: _gold.withValues(
+                alpha: _contactIsTyping
+                    ? .46
+                    : _contactOnline
+                    ? .32
+                    : .22,
+              ),
+              width: _contactIsTyping ? 1.1 : .8,
+            ),
+          ),
         ),
         body: Stack(
           fit: StackFit.expand,

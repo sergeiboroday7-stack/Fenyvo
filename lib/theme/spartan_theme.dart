@@ -3,8 +3,11 @@ import 'package:flutter/services.dart';
 
 /// SPARTAN: midnight blue surfaces and restrained champagne-gold accents.
 abstract final class SpartanPalette {
+  static const canvasDeep = Color(0xFF081522);
   static const canvas = Color(0xFF122238);
   static const surface = Color(0xFF1A2D43);
+  static const surfaceRaised = Color(0xFF203A55);
+  static const surfaceSoft = Color(0xFF14283E);
   static const ink = Color(0xFFE5E9EF);
   static const secondary = Color(0xFFB0BFCE);
   static const muted = Color(0xFF9AACBC);
@@ -15,6 +18,7 @@ abstract final class SpartanPalette {
   static const onGold = Color(0xFF15263A);
   static const rail = Color(0xFF0D1B2B);
   static const mediaAccent = Color(0xFFFFFFFF);
+  static const online = Color(0xFF63E6B5);
 
   static ThemeData get blueGoldTheme {
     final scheme =
