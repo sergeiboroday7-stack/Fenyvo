@@ -89,9 +89,9 @@ SDK, кеши, временные файлы и APK в Git не входят. Л
 
 ## Среда и проверки разработчика
 
-Проверенная локальная среда: Flutter 3.47.1, Dart 3.13.1, Node.js 24.19.0,
+Проверенная локальная среда: Flutter 3.47.2, Dart 3.13.2, Node.js 24.19.0,
 Java 17. Android: compile/target SDK 36, min SDK 24, NDK 28.2.13676358,
-Gradle 8.14, Android Gradle Plugin 8.12.1.
+Gradle 9.1.0, Android Gradle Plugin 9.0.1.
 
 ```powershell
 flutter pub get
@@ -116,6 +116,10 @@ node --test test/call_signaling.test.cjs test/group_call_signaling.test.cjs
 проверенным. Перенос исходников не публикует готовый APK.
 
 Windows требует установленного C++-компилятора и инструментов сборки Flutter.
+Локальный NuGet CLI может находиться в `%LOCALAPPDATA%/NuGet/nuget.exe`; если
+он установлен, CMake использует его без повторной загрузки. Предупреждение
+MSVC LNK4078 для известной секции `.voltbl` предсобранных библиотек подавлено,
+при этом все цели продолжают использовать единый динамический MSVC runtime.
 Публикация исходников не является готовым установщиком Windows.
 Готовые сборки пока распространяются владельцем отдельно, не в исходниках.
 

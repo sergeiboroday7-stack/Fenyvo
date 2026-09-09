@@ -61,6 +61,14 @@ add_subdirectory(${FLUTTER_MANAGED_DIR})
 # Application build; see runner/CMakeLists.txt.
 add_subdirectory("runner")
 
+# Reuse the user-local NuGet CLI installed for SPARTAN builds. The
+# audioplayers Windows plugin otherwise downloads a temporary copy on every
+# fresh CMake configuration and prints a misleading warning.
+set(SPARTAN_NUGET "$ENV{LOCALAPPDATA}/NuGet/nuget.exe")
+if(EXISTS "${SPARTAN_NUGET}")
+  set(NUGET "${SPARTAN_NUGET}" CACHE FILEPATH "NuGet CLI" FORCE)
+endif()
+
 
 # Generated plugin build rules, which manage building the plugins and adding
 # them to the application.
