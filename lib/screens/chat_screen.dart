@@ -1139,9 +1139,29 @@ class _ChatScreenState extends State<ChatScreen>
 
         _messages.add(message);
       }
+
+      _sortMessagesChronologically();
     });
 
     _markIncomingMessagesRead();
+  }
+
+  void _sortMessagesChronologically() {
+    int compare(Map<String, dynamic> a, Map<String, dynamic> b) {
+      final aTime = DateTime.tryParse(a['time']?.toString() ?? '');
+      final bTime = DateTime.tryParse(b['time']?.toString() ?? '');
+      if (aTime != null && bTime != null) {
+        final byTime = aTime.compareTo(bTime);
+        if (byTime != 0) return byTime;
+      } else if (aTime != null) {
+        return -1;
+      } else if (bTime != null) {
+        return 1;
+      }
+      return (a['id']?.toString() ?? '').compareTo(b['id']?.toString() ?? '');
+    }
+
+    _messages.sort(compare);
   }
 
   // ========================================
@@ -1179,10 +1199,14 @@ class _ChatScreenState extends State<ChatScreen>
   int _messageStatusRank(String status) {
     switch (status) {
       case 'read':
-        return 3;
+        return 5;
       case 'delivered':
-        return 2;
+        return 4;
       case 'sent':
+        return 3;
+      case 'sending':
+        return 2;
+      case 'queued':
         return 1;
       default:
         return 0;
@@ -1874,6 +1898,31 @@ class _ChatScreenState extends State<ChatScreen>
       return;
     }
 
+    if (type == 'outbox_queued' || type == 'outbox_sending') {
+      final id = data['id']?.toString().trim() ?? '';
+      final to = data['to']?.toString().trim() ?? '';
+      if (id.isEmpty || to != widget.targetUser) return;
+      final status = type == 'outbox_queued' ? 'queued' : 'sending';
+      _addMessageIfNotExists({
+        'id': id,
+        'from': currentUser,
+        'to': to,
+        'text': data['text']?.toString() ?? '',
+        'time': data['time']?.toString() ?? DateTime.now().toIso8601String(),
+        'isMe': true,
+        'status': status,
+        'reactionUsers': <String>[],
+        if (data['replyTo'] is Map)
+          'replyTo': Map<String, dynamic>.from(data['replyTo'] as Map),
+        if (data['forwardedFrom'] != null)
+          'forwardedFrom': data['forwardedFrom'].toString(),
+        if (data['forwardComment'] != null)
+          'forwardComment': data['forwardComment'].toString(),
+      });
+      _updateMessageStatus(id, status);
+      return;
+    }
+
     if (type == 'message_sent') {
       final id = data['id']?.toString().trim() ?? '';
 
@@ -1888,6 +1937,9 @@ class _ChatScreenState extends State<ChatScreen>
       if (from != currentUser || to != widget.targetUser) {
         return;
       }
+
+      // Подтверждение сервера переводит локально queued/sending в sent.
+      _updateMessageStatus(id, 'sent');
 
       _addMessageIfNotExists({
         'id': id,
@@ -2068,6 +2120,7 @@ class _ChatScreenState extends State<ChatScreen>
 
     setState(() {
       _messages.add(newMessage);
+      _sortMessagesChronologically();
 
       if (shouldCountAsNew) {
         _newMessagesWhileScrolledUp++;
@@ -3497,20 +3550,9 @@ class _ChatScreenState extends State<ChatScreen>
       return;
     }
 
-    if (!SocketService.instance.isConnected) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            '\u041D\u0435\u0442 \u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u044F \u043A \u0441\u0435\u0440\u0432\u0435\u0440\u0443',
-          ),
-          backgroundColor: Colors.red,
-        ),
-      );
-
-      return;
-    }
-
     _stopTyping();
+
+    final wasConnected = SocketService.instance.isConnected;
 
     Map<String, dynamic>? replyTo;
 
@@ -3533,6 +3575,16 @@ class _ChatScreenState extends State<ChatScreen>
       text,
       replyTo: replyTo,
     );
+
+    if (!wasConnected && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Сообщение сохранено — отправим после восстановления связи',
+          ),
+        ),
+      );
+    }
 
     _messageController.clear();
 
@@ -4574,6 +4626,31 @@ class _ChatScreenState extends State<ChatScreen>
     final status = message['status']?.toString().trim() ?? 'sent';
 
     final isRead = status == 'read';
+
+    if (status == 'queued') {
+      return const Icon(
+        Icons.schedule_rounded,
+        size: 15,
+        color: SpartanPalette.secondary,
+        semanticLabel: 'Ожидает отправки',
+      );
+    }
+    if (status == 'sending') {
+      return const Icon(
+        Icons.sync_rounded,
+        size: 15,
+        color: SpartanPalette.secondary,
+        semanticLabel: 'Отправляется',
+      );
+    }
+    if (status == 'failed') {
+      return const Icon(
+        Icons.error_outline_rounded,
+        size: 15,
+        color: Colors.red,
+        semanticLabel: 'Не отправлено',
+      );
+    }
 
     return Icon(
       isRead || status == 'delivered'

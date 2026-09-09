@@ -55,6 +55,8 @@ class SocketService {
 
   bool _needsResyncAfterLogin = false;
 
+  bool _flushingOutbox = false;
+
   String? _serverUrl;
 
   String? _lastPassword;
@@ -261,6 +263,8 @@ class SocketService {
             _send('get_users', const {});
             print('🔄 RELAY: состояние после переподключения синхронизировано');
           }
+
+          await _flushOutbox();
         }
       }
 
@@ -462,6 +466,15 @@ class SocketService {
       // V621: медиа больше не декодируем в WebSocket-обработчике.
       // Сервер присылает только mediaId; загрузка выполняется лениво.
 
+      if (type == 'message_sent') {
+        final id = data['id']?.toString().trim() ?? '';
+        final user = currentUser?.trim() ?? '';
+        if (id.isNotEmpty && user.isNotEmpty) {
+          StorageService.removeOutboxMessage(user, id);
+          _notifyHandlers({'type': 'outbox_sent', 'data': data});
+        }
+      }
+
       // ======================================
       // ПЕРЕДАЁМ СОБЫТИЕ ЭКРАНАМ
       // ======================================
@@ -601,14 +614,14 @@ class SocketService {
   // ОТПРАВКА НА СЕРВЕР
   // ========================================
 
-  void _send(String type, Map<String, dynamic> data) {
+  bool _send(String type, Map<String, dynamic> data) {
     if (!_isConnected || _channel == null) {
       print(
         '⚠️ Нет подключения. '
         'Не отправлено: $type',
       );
 
-      return;
+      return false;
     }
 
     final message = {'type': type, 'data': data};
@@ -619,8 +632,39 @@ class SocketService {
       print('📤 Отправлено: $type');
 
       _channel!.sink.add(json);
+      return true;
     } catch (error) {
       print('❌ Ошибка отправки: $error');
+      return false;
+    }
+  }
+
+  Future<void> _flushOutbox() async {
+    final user = currentUser?.trim() ?? '';
+    if (_flushingOutbox || user.isEmpty || !_isConnected || _channel == null) {
+      return;
+    }
+    _flushingOutbox = true;
+    try {
+      final queued = StorageService.getOutboxMessages(user);
+      for (final item in queued) {
+        if (!_isConnected || _channel == null) break;
+        final id = item['id']?.toString().trim() ?? '';
+        final target = item['to']?.toString().trim() ?? '';
+        if (id.isEmpty || target.isEmpty) continue;
+        StorageService.updateOutboxStatus(user, id, 'sending');
+        _notifyHandlers({'type': 'outbox_sending', 'data': item});
+        final payload = Map<String, dynamic>.from(item)
+          ..remove('from')
+          ..remove('isMe')
+          ..remove('status');
+        if (!_send('message', payload)) {
+          StorageService.updateOutboxStatus(user, id, 'queued');
+          break;
+        }
+      }
+    } finally {
+      _flushingOutbox = false;
     }
   }
 
@@ -932,7 +976,7 @@ class SocketService {
   // СООБЩЕНИЕ
   // ========================================
 
-  void sendMessage(
+  String sendMessage(
     String to,
     String text, {
     Map<String, dynamic>? replyTo,
@@ -944,11 +988,12 @@ class SocketService {
     final messageText = text.trim();
 
     if (target.isEmpty || messageText.isEmpty) {
-      return;
+      return '';
     }
 
     final messageData = <String, dynamic>{
       'id': DateTime.now().microsecondsSinceEpoch.toString(),
+      'from': currentUser ?? '',
       'to': target,
       'text': messageText,
       'time': DateTime.now().toIso8601String(),
@@ -982,7 +1027,30 @@ class SocketService {
       messageData['forwardComment'] = comment;
     }
 
-    _send('message', messageData);
+    final user = currentUser?.trim() ?? '';
+    final connected = _isConnected && _channel != null;
+    if (user.isNotEmpty) {
+      messageData['status'] = connected ? 'sending' : 'queued';
+      messageData['isMe'] = true;
+      StorageService.saveOutboxMessage(user, messageData);
+      _notifyHandlers({
+        'type': connected ? 'outbox_sending' : 'outbox_queued',
+        'data': messageData,
+      });
+    }
+
+    final payload = Map<String, dynamic>.from(messageData)
+      ..remove('isMe')
+      ..remove('status');
+    if (!_send('message', payload) && user.isNotEmpty) {
+      StorageService.updateOutboxStatus(
+        user,
+        messageData['id'].toString(),
+        'queued',
+      );
+      _notifyHandlers({'type': 'outbox_queued', 'data': messageData});
+    }
+    return messageData['id'].toString();
   }
 
   // ========================================

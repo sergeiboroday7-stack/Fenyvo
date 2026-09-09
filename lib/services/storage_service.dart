@@ -8,6 +8,7 @@ class StorageService {
   static late Box _messagesBox;
   static late Box _avatarsBox;
   static late Box _unreadBox;
+  static late Box _outboxBox;
 
   static Future<void> init() async {
     await Hive.initFlutter();
@@ -17,6 +18,8 @@ class StorageService {
     _avatarsBox = await Hive.openBox('avatars');
 
     _unreadBox = await Hive.openBox('unread_messages');
+
+    _outboxBox = await Hive.openBox('spartan_outbox');
 
     await Hive.openBox('spartan_saved_messages');
     await Hive.openBox('spartan_call_history');
@@ -299,6 +302,68 @@ class StorageService {
     }
 
     savePinnedMessages(currentUser, targetUser, pinned);
+  }
+
+  // ========================================
+  // ИСХОДЯЩАЯ ОЧЕРЕДЬ ТЕКСТОВЫХ СООБЩЕНИЙ
+  // ========================================
+
+  static List<Map<String, dynamic>> getOutboxMessages(String currentUser) {
+    final user = currentUser.trim();
+    if (user.isEmpty) return <Map<String, dynamic>>[];
+    final raw = _outboxBox.get(user);
+    if (raw is! List) return <Map<String, dynamic>>[];
+    return raw
+        .whereType<Map>()
+        .map((item) => Map<String, dynamic>.from(item))
+        .where((item) => (item['id']?.toString().trim() ?? '').isNotEmpty)
+        .toList();
+  }
+
+  static void saveOutboxMessage(
+    String currentUser,
+    Map<String, dynamic> message,
+  ) {
+    final user = currentUser.trim();
+    final id = message['id']?.toString().trim() ?? '';
+    if (user.isEmpty || id.isEmpty) return;
+    final messages = getOutboxMessages(user)
+      ..removeWhere((item) => item['id']?.toString().trim() == id)
+      ..add(Map<String, dynamic>.from(message));
+    _outboxBox.put(user, messages);
+    print('📤 Сообщение добавлено в исходящую очередь: $id');
+  }
+
+  static void updateOutboxStatus(
+    String currentUser,
+    String messageId,
+    String status,
+  ) {
+    final user = currentUser.trim();
+    final id = messageId.trim();
+    if (user.isEmpty || id.isEmpty) return;
+    final messages = getOutboxMessages(user);
+    var changed = false;
+    for (final message in messages) {
+      if (message['id']?.toString().trim() == id) {
+        message['status'] = status;
+        changed = true;
+      }
+    }
+    if (changed) _outboxBox.put(user, messages);
+  }
+
+  static void removeOutboxMessage(String currentUser, String messageId) {
+    final user = currentUser.trim();
+    final id = messageId.trim();
+    if (user.isEmpty || id.isEmpty) return;
+    final messages = getOutboxMessages(user)
+      ..removeWhere((item) => item['id']?.toString().trim() == id);
+    if (messages.isEmpty) {
+      _outboxBox.delete(user);
+    } else {
+      _outboxBox.put(user, messages);
+    }
   }
 
   // ========================================
