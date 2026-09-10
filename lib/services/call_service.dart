@@ -25,6 +25,7 @@ class CallService extends ChangeNotifier {
   final RTCVideoRenderer remoteRenderer = RTCVideoRenderer();
   RTCPeerConnection? _peerConnection;
   MediaStream? _localStream;
+  MediaStream? _fallbackRemoteStream;
   Map<String, dynamic>? _pendingOffer;
   final List<Map<String, dynamic>> _pendingCandidates = [];
   final List<Map<String, dynamic>> _localCandidates = [];
@@ -381,12 +382,13 @@ class CallService extends ChangeNotifier {
         );
       }
     };
-    connection.onTrack = (event) {
+    connection.onAddStream = (stream) {
       if (!_isCurrent(id)) return;
-      if (event.streams.isNotEmpty)
-        remoteRenderer.srcObject = event.streams.first;
-      // onTrack may fire before ICE connects; it does not mean connected.
+      remoteRenderer.srcObject = stream;
       notifyListeners();
+    };
+    connection.onTrack = (event) {
+      unawaited(_attachRemoteTrack(id, event));
     };
     connection.onConnectionState = (state) {
       if (!_isCurrent(id)) return;
@@ -439,6 +441,40 @@ class CallService extends ChangeNotifier {
   Future<void> _initializeRenderers() async {
     await localRenderer.initialize();
     await remoteRenderer.initialize();
+  }
+
+  Future<void> _attachRemoteTrack(String id, RTCTrackEvent event) async {
+    if (!_isCurrent(id)) return;
+    MediaStream? stream = event.streams.isNotEmpty
+        ? event.streams.first
+        : _fallbackRemoteStream;
+    if (stream == null) {
+      try {
+        stream = await createLocalMediaStream('spartan_remote_$id');
+      } catch (error) {
+        debugPrint('Remote media stream could not be created: $error');
+        return;
+      }
+      if (!_isCurrent(id)) {
+        await _cleanupStep(stream.dispose());
+        return;
+      }
+      _fallbackRemoteStream = stream;
+    }
+    if (event.streams.isEmpty &&
+        !stream.getTracks().any((track) => track.id == event.track.id)) {
+      try {
+        await stream.addTrack(event.track);
+      } catch (error) {
+        debugPrint('Remote media track could not be attached: $error');
+        return;
+      }
+    }
+    if (!_isCurrent(id)) return;
+    event.track.enabled = true;
+    remoteRenderer.srcObject = stream;
+    // onTrack may fire before ICE connects; it does not mean connected.
+    notifyListeners();
   }
 
   void _flushLocalCandidates(String id) {
@@ -828,11 +864,14 @@ class CallService extends ChangeNotifier {
   Future<void> _releaseMedia() async {
     final connection = _peerConnection;
     final stream = _localStream;
+    final fallbackRemoteStream = _fallbackRemoteStream;
     _peerConnection = null;
     _localStream = null;
+    _fallbackRemoteStream = null;
     _mediaReady = false;
     if (connection != null) {
       connection.onIceCandidate = null;
+      connection.onAddStream = null;
       connection.onTrack = null;
       connection.onConnectionState = null;
     }
@@ -848,6 +887,9 @@ class CallService extends ChangeNotifier {
       await connection?.dispose();
     } catch (_) {
       /* Best effort. */
+    }
+    if (fallbackRemoteStream != null) {
+      await _cleanupStep(fallbackRemoteStream.dispose());
     }
     if (Platform.isAndroid && stream != null) {
       try {
