@@ -35,7 +35,9 @@ dependencies:
   record: 6.2.1
   video_player: ^2.14.0
   video_player_win: ^3.2.2
-  flutter_webrtc: 0.12.8
+  # 1.5+ applies the legacy Kotlin Gradle Plugin only when AGP built-in
+  # Kotlin is disabled, allowing the project to complete that migration later.
+  flutter_webrtc: 1.6.1
   flutter_callkit_incoming: ^3.1.5
   permission_handler: 11.3.1
 
