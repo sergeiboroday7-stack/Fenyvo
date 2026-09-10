@@ -1,24 +1,26 @@
 import 'theme/spartan_theme.dart';
 
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import 'services/socket_service.dart';
 import 'services/storage_service.dart';
+import 'services/app_language_service.dart';
 
 class SettingsScreen extends StatefulWidget {
   final String username;
   final VoidCallback onLogout;
-  final VoidCallback onDeleteAccount;
 
   const SettingsScreen({
     super.key,
     required this.username,
     required this.onLogout,
-    required this.onDeleteAccount,
   });
 
   @override
@@ -37,11 +39,50 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   int _selectedTextColor = 0xFFFFFFFF;
 
-  String _selectedMode = 'random';
+  void _showSupportDialog() {
+    final language = AppLanguageService.instance;
+    showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(language.text('supportSpartan')),
+        content: SizedBox(
+          width: 360,
+          height: 455,
+          child: _SupportPaymentPager(language: language),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text(language.text('close')),
+          ),
+        ],
+      ),
+    );
+  }
 
-  final List<String> _customStatuses = [];
-
-  final TextEditingController _newStatusController = TextEditingController();
+  Future<void> _showLanguagePicker() async {
+    final language = AppLanguageService.instance;
+    final selected = await showDialog<String>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: Text(language.text('language')),
+        children: AppLanguageService.languages
+            .map(
+              (item) => RadioListTile<String>(
+                value: item.code,
+                groupValue: language.code.value,
+                title: Text('${item.flag}  ${item.label}'),
+                onChanged: (value) => Navigator.pop(context, value),
+              ),
+            )
+            .toList(),
+      ),
+    );
+    if (selected != null) {
+      await language.select(selected);
+      if (mounted) setState(() {});
+    }
+  }
 
   @override
   void initState() {
@@ -51,14 +92,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _loadBackground();
     _loadBackgroundOpacity();
     _loadTextColor();
-    _loadStatuses();
-  }
-
-  @override
-  void dispose() {
-    _newStatusController.dispose();
-
-    super.dispose();
   }
 
   // ========================================
@@ -158,6 +191,43 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
       );
     }
+  }
+
+  Future<void> _showAvatarActions() async {
+    final language = AppLanguageService.instance;
+    final hasAvatar = _avatarPath?.isNotEmpty == true;
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.photo_library_outlined),
+              title: Text(language.text('changeAvatar')),
+              onTap: () => Navigator.pop(context, 'change'),
+            ),
+            if (hasAvatar)
+              ListTile(
+                leading: const Icon(Icons.delete_outline, color: Colors.red),
+                title: Text(
+                  language.text('deleteAvatar'),
+                  style: const TextStyle(color: Colors.red),
+                ),
+                onTap: () => Navigator.pop(context, 'delete'),
+              ),
+            ListTile(
+              leading: const Icon(Icons.close),
+              title: Text(language.text('cancel')),
+              onTap: () => Navigator.pop(context),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (action == 'change') await _pickAvatar();
+    if (action == 'delete') await _deleteAvatar();
   }
 
   // ========================================
@@ -434,13 +504,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Widget _buildAvatar() {
     if (_avatarPath != null && _avatarPath!.isNotEmpty) {
+      ImageProvider? avatarImage;
       final file = File(_avatarPath!);
 
       if (file.existsSync()) {
+        avatarImage = FileImage(file);
+      } else {
+        try {
+          final encoded = _avatarPath!.contains(',')
+              ? _avatarPath!.split(',').last
+              : _avatarPath!;
+          avatarImage = MemoryImage(base64Decode(encoded));
+        } catch (_) {
+          avatarImage = null;
+        }
+      }
+
+      if (avatarImage != null) {
         return CircleAvatar(
           radius: 48,
           backgroundColor: SpartanPalette.blue,
-          backgroundImage: FileImage(file),
+          backgroundImage: avatarImage,
         );
       }
     }
@@ -507,6 +591,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   // ========================================
 
   Widget _buildBackgroundPreview() {
+    final language = AppLanguageService.instance;
     final backgroundPath = _backgroundPath;
 
     if (backgroundPath == null || backgroundPath.isEmpty) {
@@ -522,15 +607,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
             colors: [SpartanPalette.surface, SpartanPalette.canvas],
           ),
         ),
-        child: const Center(
+        child: Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.local_fire_department, color: SpartanPalette.ink),
-              SizedBox(height: 5),
+              const Icon(
+                Icons.local_fire_department,
+                color: SpartanPalette.ink,
+              ),
+              const SizedBox(height: 5),
               Text(
-                'Сине-золотая тема',
-                style: TextStyle(
+                language.text('blueGoldTheme'),
+                style: const TextStyle(
                   color: SpartanPalette.ink,
                   fontSize: 12,
                   fontWeight: FontWeight.bold,
@@ -580,9 +668,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 color: SpartanPalette.surface.withValues(alpha: 0.65),
                 borderRadius: BorderRadius.circular(8),
               ),
-              child: const Text(
-                'Предпросмотр',
-                style: TextStyle(color: SpartanPalette.ink, fontSize: 11),
+              child: Text(
+                AppLanguageService.instance.text('preview'),
+                style: const TextStyle(color: SpartanPalette.ink, fontSize: 11),
               ),
             ),
           ),
@@ -612,10 +700,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
                 const SizedBox(width: 10),
 
-                const Expanded(
+                Expanded(
                   child: Text(
-                    'Видимость фона',
-                    style: TextStyle(
+                    AppLanguageService.instance.text('backgroundVisibility'),
+                    style: const TextStyle(
                       color: SpartanPalette.ink,
                       fontSize: 15,
                       fontWeight: FontWeight.w500,
@@ -651,102 +739,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
               },
             ),
 
-            const Text(
-              '0% — фон почти не виден, 100% — максимальная видимость.',
-              style: TextStyle(color: SpartanPalette.secondary, fontSize: 11),
+            Text(
+              AppLanguageService.instance.text('backgroundScale'),
+              style: const TextStyle(
+                color: SpartanPalette.secondary,
+                fontSize: 11,
+              ),
             ),
           ],
         ),
-      ),
-    );
-  }
-
-  // ========================================
-  // СТАТУСЫ
-  // ========================================
-
-  Widget _buildModeTile({
-    required String title,
-    required String value,
-    required String icon,
-  }) {
-    final isSelected = _selectedMode == value;
-
-    return ListTile(
-      leading: Text(icon, style: const TextStyle(fontSize: 24)),
-      title: Text(title, style: const TextStyle(color: SpartanPalette.ink)),
-      trailing: isSelected
-          ? const Icon(Icons.check_circle, color: SpartanPalette.ink)
-          : null,
-      onTap: () {
-        setState(() {
-          _selectedMode = value;
-        });
-      },
-    );
-  }
-
-  void _loadStatuses() {
-    // Пока статусы хранятся
-    // только во время работы приложения.
-  }
-
-  void _addCustomStatus() {
-    final text = _newStatusController.text.trim();
-
-    if (text.isEmpty) {
-      return;
-    }
-
-    setState(() {
-      _customStatuses.add(text);
-
-      _newStatusController.clear();
-    });
-  }
-
-  void _removeCustomStatus(int index) {
-    setState(() {
-      _customStatuses.removeAt(index);
-    });
-  }
-
-  // ========================================
-  // УДАЛЕНИЕ АККАУНТА
-  // ========================================
-
-  void _showDeleteAccountDialog() {
-    showDialog(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        backgroundColor: SpartanPalette.surface,
-        title: const Text(
-          'Удалить аккаунт?',
-          style: TextStyle(color: SpartanPalette.ink),
-        ),
-        content: const Text(
-          'Это действие необратимо. '
-          'Все данные будут удалены.',
-          style: TextStyle(color: SpartanPalette.secondary),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text(
-              'Отмена',
-              style: TextStyle(color: SpartanPalette.secondary),
-            ),
-          ),
-
-          TextButton(
-            onPressed: () {
-              Navigator.pop(dialogContext);
-
-              widget.onDeleteAccount();
-            },
-            child: const Text('Удалить', style: TextStyle(color: Colors.red)),
-          ),
-        ],
       ),
     );
   }
@@ -757,14 +758,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final language = AppLanguageService.instance;
+    String t(String key) => language.text(key);
     return Scaffold(
       backgroundColor: SpartanPalette.canvas,
 
       appBar: AppBar(
         backgroundColor: SpartanPalette.canvas,
-        title: const Text(
-          'НАСТРОЙКИ',
-          style: TextStyle(
+        title: Text(
+          t('settings'),
+          style: const TextStyle(
             color: SpartanPalette.ink,
             fontWeight: FontWeight.bold,
           ),
@@ -787,7 +790,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
             Center(
               child: GestureDetector(
-                onTap: _pickAvatar,
+                onTap: _showAvatarActions,
                 child: Stack(
                   clipBehavior: Clip.none,
                   children: [
@@ -841,43 +844,52 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
             const SizedBox(height: 4),
 
-            const Center(
+            Center(
               child: Text(
-                'Нажмите на фото, чтобы изменить',
-                style: TextStyle(color: SpartanPalette.secondary, fontSize: 12),
+                t('changePhoto'),
+                style: const TextStyle(
+                  color: SpartanPalette.secondary,
+                  fontSize: 12,
+                ),
               ),
             ),
 
-            if (_avatarPath != null && _avatarPath!.isNotEmpty)
-              Center(
-                child: TextButton.icon(
-                  onPressed: _deleteAvatar,
-                  icon: const Icon(Icons.delete_outline, color: Colors.red),
-                  label: const Text(
-                    'Удалить аватарку',
-                    style: TextStyle(color: Colors.red),
-                  ),
-                ),
+            _buildSection(t('supportSection'), [
+              _SpartanSupportTile(
+                title: t('supportSpartan'),
+                subtitle: t('supportSubtitle'),
+                onTap: _showSupportDialog,
               ),
+            ]),
+
+            _buildSection(t('languageSection'), [
+              _buildSectionTile(
+                icon: Icons.language_rounded,
+                title: t('language'),
+                subtitle: AppLanguageService.languages
+                    .firstWhere(
+                      (item) =>
+                          item.code == AppLanguageService.instance.code.value,
+                    )
+                    .label,
+                onTap: _showLanguagePicker,
+              ),
+            ]),
 
             const SizedBox(height: 12),
 
             // =================================
             // ВНЕШНИЙ ВИД
             // =================================
-            _buildSection('ВНЕШНИЙ ВИД', [
-              const ListTile(
-                leading: Icon(Icons.light_mode_outlined),
-                title: Text('SPARTAN · BLUE GOLD'),
-                subtitle: Text(
-                  'Глубокий синий фон и спокойные золотые акценты',
-                ),
+            _buildSection(t('appearance'), [
+              ListTile(
+                leading: const Icon(Icons.light_mode_outlined),
+                title: const Text('SPARTAN · BLUE GOLD'),
+                subtitle: Text(t('themeSubtitle')),
               ),
               SwitchListTile.adaptive(
-                title: const Text('Показывать фото на фоне чата'),
-                subtitle: const Text(
-                  'Выключено — спокойный синий фон. Сохранённое фото не удаляется.',
-                ),
+                title: Text(t('wallpaperToggle')),
+                subtitle: Text(t('wallpaperToggleSubtitle')),
                 value: _lightWallpaperEnabled,
                 onChanged: (value) async {
                   await StorageService.setLightWallpaperEnabled(value);
@@ -886,10 +898,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               _buildSectionTile(
                 icon: Icons.wallpaper,
-                title: 'Фон переписки',
+                title: t('chatBackground'),
                 subtitle: _backgroundPath == null
-                    ? 'Сине-золотая тема'
-                    : 'Фото из галереи',
+                    ? t('blueGoldTheme')
+                    : t('galleryPhoto'),
                 onTap: _pickBackground,
               ),
 
@@ -906,8 +918,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               if (_backgroundPath != null)
                 _buildSectionTile(
                   icon: Icons.restart_alt,
-                  title: 'Стандартный фон',
-                  subtitle: 'Вернуть синий фон',
+                  title: t('defaultBackground'),
+                  subtitle: t('restoreBlueBackground'),
                   onTap: _removeBackground,
                   iconColor: SpartanPalette.ink,
                   titleColor: SpartanPalette.ink,
@@ -915,113 +927,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
               _buildSectionTile(
                 icon: Icons.format_color_text,
-                title: 'Цвет текста',
-                subtitle: 'Выберите цвет сообщений',
+                title: t('textColor'),
+                subtitle: t('chooseTextColor'),
                 onTap: _showTextColorPicker,
               ),
             ]),
-
-            // =================================
-            // СТАТУСЫ
-            // =================================
-            _buildSection('СТАТУСЫ', [
-              _buildModeTile(
-                title: 'Случайные статусы',
-                value: 'random',
-                icon: '🎲',
-              ),
-              _buildModeTile(
-                title: 'Статусы по дням',
-                value: 'day',
-                icon: '📅',
-              ),
-              _buildModeTile(
-                title: 'Свои статусы',
-                value: 'custom',
-                icon: '✏️',
-              ),
-            ]),
-
-            if (_selectedMode == 'custom')
-              _buildSection('МОИ СТАТУСЫ', [
-                ..._customStatuses.asMap().entries.map((entry) {
-                  return ListTile(
-                    leading: const Icon(
-                      Icons.format_quote,
-                      color: SpartanPalette.ink,
-                    ),
-                    title: Text(
-                      entry.value,
-                      style: const TextStyle(color: SpartanPalette.ink),
-                    ),
-                    trailing: IconButton(
-                      icon: const Icon(Icons.close, color: Colors.red),
-                      onPressed: () => _removeCustomStatus(entry.key),
-                    ),
-                  );
-                }),
-
-                Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: TextField(
-                          controller: _newStatusController,
-                          style: const TextStyle(color: SpartanPalette.ink),
-                          decoration: InputDecoration(
-                            hintText: 'Новый статус...',
-                            hintStyle: const TextStyle(
-                              color: SpartanPalette.secondary,
-                            ),
-                            enabledBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(30),
-                              borderSide: const BorderSide(
-                                color: SpartanPalette.surface,
-                              ),
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(30),
-                              borderSide: const BorderSide(
-                                color: SpartanPalette.ink,
-                              ),
-                            ),
-                          ),
-                          onSubmitted: (_) => _addCustomStatus(),
-                        ),
-                      ),
-
-                      const SizedBox(width: 8),
-
-                      Container(
-                        decoration: const BoxDecoration(
-                          shape: BoxShape.circle,
-                          gradient: LinearGradient(
-                            colors: [
-                              SpartanPalette.blue,
-                              SpartanPalette.blueDeep,
-                            ],
-                          ),
-                        ),
-                        child: IconButton(
-                          icon: const Icon(
-                            Icons.add,
-                            color: SpartanPalette.ink,
-                          ),
-                          onPressed: _addCustomStatus,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ]),
 
             const Divider(color: SpartanPalette.ink, height: 30),
 
             // =================================
             // АККАУНТ
             // =================================
-            _buildSection('АККАУНТ', [
+            _buildSection(t('account'), [
               ListTile(
                 leading: const Icon(Icons.person, color: SpartanPalette.ink),
                 title: Text(
@@ -1031,32 +948,325 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     fontWeight: FontWeight.bold,
                   ),
                 ),
-                subtitle: const Text(
-                  'Текущий аккаунт',
-                  style: TextStyle(color: SpartanPalette.secondary),
+                subtitle: Text(
+                  t('currentAccount'),
+                  style: const TextStyle(color: SpartanPalette.secondary),
                 ),
               ),
 
               ListTile(
                 leading: const Icon(Icons.exit_to_app, color: Colors.red),
-                title: const Text('Выйти', style: TextStyle(color: Colors.red)),
+                title: Text(
+                  t('logout'),
+                  style: const TextStyle(color: Colors.red),
+                ),
                 onTap: () {
                   widget.onLogout();
                 },
-              ),
-
-              ListTile(
-                leading: const Icon(Icons.delete_forever, color: Colors.red),
-                title: const Text(
-                  'Удалить аккаунт',
-                  style: TextStyle(color: Colors.red),
-                ),
-                onTap: _showDeleteAccountDialog,
               ),
             ]),
 
             const SizedBox(height: 30),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _SupportPaymentPager extends StatefulWidget {
+  const _SupportPaymentPager({required this.language});
+
+  final AppLanguageService language;
+
+  @override
+  State<_SupportPaymentPager> createState() => _SupportPaymentPagerState();
+}
+
+class _SupportPaymentPagerState extends State<_SupportPaymentPager> {
+  static final Uri _monobankUri = Uri.parse(
+    'https://send.monobank.ua/jar/Aejkjg4K1k',
+  );
+  final PageController _controller = PageController();
+  int _page = 0;
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    String t(String key) => widget.language.text(key);
+
+    return Column(
+      children: [
+        Expanded(
+          child: PageView(
+            controller: _controller,
+            onPageChanged: (value) => setState(() => _page = value),
+            children: [
+              _paymentPage(
+                title: 'PayPal · 1/2',
+                child: Column(
+                  children: [
+                    Text(t('supportInstruction'), textAlign: TextAlign.center),
+                    const SizedBox(height: 10),
+                    Expanded(
+                      child: Image.asset(
+                        'assets/images/paypal_qr.png',
+                        fit: BoxFit.contain,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    const SelectableText(
+                      'sergeiboroday7@gmail.com',
+                      style: TextStyle(fontWeight: FontWeight.w600),
+                    ),
+                    TextButton.icon(
+                      onPressed: () async {
+                        await Clipboard.setData(
+                          const ClipboardData(text: 'sergeiboroday7@gmail.com'),
+                        );
+                      },
+                      icon: const Icon(Icons.copy),
+                      label: Text(t('copyEmail')),
+                    ),
+                  ],
+                ),
+              ),
+              _paymentPage(
+                title: 'Monobank · 2/2',
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Container(
+                      width: 92,
+                      height: 92,
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: const Color(0xFF091B2D),
+                        border: Border.all(
+                          color: SpartanPalette.gold,
+                          width: 2,
+                        ),
+                      ),
+                      child: Image.asset('assets/images/spartan_brand.png'),
+                    ),
+                    const SizedBox(height: 22),
+                    Text(
+                      t('monobankInstruction'),
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(fontSize: 16),
+                    ),
+                    const SizedBox(height: 18),
+                    SelectableText(
+                      _monobankUri.toString(),
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        color: SpartanPalette.secondary,
+                        fontSize: 12,
+                      ),
+                    ),
+                    const SizedBox(height: 22),
+                    FilledButton.icon(
+                      style: FilledButton.styleFrom(
+                        backgroundColor: SpartanPalette.gold,
+                        foregroundColor: const Color(0xFF091B2D),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 22,
+                          vertical: 14,
+                        ),
+                      ),
+                      onPressed: () async {
+                        await launchUrl(
+                          _monobankUri,
+                          mode: LaunchMode.externalApplication,
+                        );
+                      },
+                      icon: const Icon(Icons.account_balance_rounded),
+                      label: Text(t('openMonobank')),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: List.generate(
+            2,
+            (index) => AnimatedContainer(
+              duration: const Duration(milliseconds: 220),
+              width: _page == index ? 24 : 8,
+              height: 8,
+              margin: const EdgeInsets.symmetric(horizontal: 4),
+              decoration: BoxDecoration(
+                color: _page == index
+                    ? SpartanPalette.gold
+                    : SpartanPalette.secondary.withValues(alpha: 0.35),
+                borderRadius: BorderRadius.circular(20),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          _page == 0 ? t('swipeForMonobank') : t('monobankSecondPage'),
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            color: SpartanPalette.secondary,
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _paymentPage({required String title, required Widget child}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Column(
+        children: [
+          Text(
+            title,
+            style: const TextStyle(
+              color: SpartanPalette.gold,
+              fontSize: 17,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Expanded(child: child),
+        ],
+      ),
+    );
+  }
+}
+
+class _SpartanSupportTile extends StatefulWidget {
+  const _SpartanSupportTile({
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  final String title;
+  final String subtitle;
+  final VoidCallback onTap;
+
+  @override
+  State<_SpartanSupportTile> createState() => _SpartanSupportTileState();
+}
+
+class _SpartanSupportTileState extends State<_SpartanSupportTile>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1700),
+  )..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: widget.onTap,
+          child: Ink(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(20),
+              gradient: const LinearGradient(
+                colors: [Color(0xFF263D57), Color(0xFF162B43)],
+              ),
+              border: Border.all(color: SpartanPalette.gold, width: 1.2),
+              boxShadow: const [
+                BoxShadow(
+                  color: Color(0x44D4AF37),
+                  blurRadius: 18,
+                  offset: Offset(0, 8),
+                ),
+              ],
+            ),
+            child: Row(
+              children: [
+                AnimatedBuilder(
+                  animation: _controller,
+                  builder: (context, child) => Transform.scale(
+                    scale: 0.96 + (_controller.value * 0.08),
+                    child: Container(
+                      width: 62,
+                      height: 62,
+                      padding: const EdgeInsets.all(6),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: const Color(0xFF091B2D),
+                        border: Border.all(
+                          color: SpartanPalette.gold.withValues(
+                            alpha: 0.55 + (_controller.value * 0.45),
+                          ),
+                          width: 2,
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: SpartanPalette.gold.withValues(
+                              alpha: 0.12 + (_controller.value * 0.25),
+                            ),
+                            blurRadius: 10 + (_controller.value * 12),
+                          ),
+                        ],
+                      ),
+                      child: child,
+                    ),
+                  ),
+                  child: Image.asset('assets/images/spartan_brand.png'),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        widget.title,
+                        style: const TextStyle(
+                          color: SpartanPalette.ink,
+                          fontSize: 17,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        widget.subtitle,
+                        style: const TextStyle(
+                          color: SpartanPalette.secondary,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const Icon(
+                  Icons.arrow_forward_ios_rounded,
+                  color: SpartanPalette.gold,
+                  size: 18,
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );

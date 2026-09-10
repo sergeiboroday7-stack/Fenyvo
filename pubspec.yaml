@@ -2,13 +2,15 @@ name: spartan_chat_final
 description: Spartan Chat messenger
 publish_to: "none"
 
-version: 1.6.2+4118
+version: 1.6.3+4131
 
 environment:
   sdk: ">=3.13.0 <4.0.0"
 
 dependencies:
   flutter:
+    sdk: flutter
+  flutter_localizations:
     sdk: flutter
 
   cupertino_icons: ^1.0.9
@@ -18,6 +20,7 @@ dependencies:
   file_picker: ^10.3.3
   public_file_saver: ^1.1.0
   web_socket_channel: ^3.0.3
+  url_launcher: ^6.3.2
 
   hive: ^2.2.3
   hive_flutter: ^1.1.0

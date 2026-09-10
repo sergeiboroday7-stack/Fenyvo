@@ -19,6 +19,7 @@ import '../services/socket_service.dart';
 import '../services/notification_service.dart';
 import '../services/firebase_messaging_service.dart';
 import '../services/storage_service.dart';
+import '../services/app_language_service.dart';
 import '../settings_screen.dart';
 import 'auth_screen.dart';
 import 'chat_screen.dart';
@@ -46,6 +47,14 @@ class _ChatListScreenState extends State<ChatListScreen> {
   Map<String, dynamic>? _selectedDesktopGroup;
 
   String? _selectedDesktopUser;
+
+  String _tr(String key, [Map<String, Object> values = const {}]) {
+    var result = AppLanguageService.instance.text(key);
+    for (final entry in values.entries) {
+      result = result.replaceAll('{${entry.key}}', entry.value.toString());
+    }
+    return result;
+  }
 
   // ========================================
   // КЭШ АВАТАРОК
@@ -844,7 +853,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text('Чат с $user удалён'),
+        content: Text(_tr('chatDeleted', {'user': user})),
         backgroundColor: Colors.red,
         duration: const Duration(seconds: 1),
       ),
@@ -1111,13 +1120,13 @@ class _ChatListScreenState extends State<ChatListScreen> {
 
   Widget _buildGroupTile(Map<String, dynamic> group) {
     final id = group['id']?.toString() ?? '';
-    final name = group['name']?.toString() ?? 'Группа';
+    final name = group['name']?.toString() ?? _tr('group');
     final preview = group['lastMessage']?.toString() ?? '';
     final members = group['members'];
     return _conversationTile(
       title: name,
       subtitle: preview.isEmpty
-          ? '${members is List ? members.length : 0} участников'
+          ? _tr('memberCount', {'count': members is List ? members.length : 0})
           : preview,
       avatar: const CircleAvatar(
         radius: 24,
@@ -1277,12 +1286,12 @@ class _ChatListScreenState extends State<ChatListScreen> {
           children: [
             ListTile(
               leading: const Icon(Icons.push_pin_outlined),
-              title: Text(pinned ? 'Открепить чат' : 'Закрепить чат'),
+              title: Text(pinned ? _tr('unpinChat') : _tr('pinChat')),
               onTap: () => Navigator.pop(context, 'pin'),
             ),
             ListTile(
               leading: const Icon(Icons.delete_outline),
-              title: const Text('Удалить локальную историю'),
+              title: Text(_tr('deleteLocalHistory')),
               onTap: () => Navigator.pop(context, 'delete'),
             ),
           ],
@@ -1298,16 +1307,16 @@ class _ChatListScreenState extends State<ChatListScreen> {
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
-          title: Text('Удалить чат с $user?'),
-          content: const Text('История удалится только на этом устройстве.'),
+          title: Text(_tr('deleteChatQuestion', {'user': user})),
+          content: Text(_tr('localHistoryWarning')),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text('Отмена'),
+              child: Text(_tr('cancel')),
             ),
             TextButton(
               onPressed: () => Navigator.pop(context, true),
-              child: const Text('Удалить'),
+              child: Text(_tr('delete')),
             ),
           ],
         ),
@@ -1329,7 +1338,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
     return _conversationTile(
       title: user,
       subtitle: _typingUsers.contains(user)
-          ? 'печатает…'
+          ? _tr('typing')
           : _getLastMessage(user),
       time: _getLastMessageTime(user),
       unread: _getUnreadCount(user),
@@ -1470,8 +1479,8 @@ class _ChatListScreenState extends State<ChatListScreen> {
   }
 
   Widget _savedTile() => _conversationTile(
-    title: 'Сохранённое',
-    subtitle: 'Заметки и сообщения · на устройстве',
+    title: _tr('saved'),
+    subtitle: _tr('savedSubtitle'),
     avatar: const CircleAvatar(
       radius: 24,
       backgroundColor: SpartanPalette.blue,
@@ -1792,9 +1801,10 @@ class _ChatListScreenState extends State<ChatListScreen> {
         .where((item) => !item.startsWith('group::'))
         .length;
     final eventCount = PulseService.instance.requestCount;
+    final savedSearchText = '${_tr('saved')} ${_tr('savedSearchTerms')}'
+        .toLowerCase();
     final showSaved =
-        _filter != 2 &&
-        (query.isEmpty || 'сохранённое сохраненное заметки'.contains(query));
+        _filter != 2 && (query.isEmpty || savedSearchText.contains(query));
     return DecoratedBox(
       decoration: const BoxDecoration(
         gradient: LinearGradient(
@@ -1813,13 +1823,13 @@ class _ChatListScreenState extends State<ChatListScreen> {
                 children: [
                   const Expanded(child: SpartanBrand()),
                   IconButton(
-                    tooltip: 'Обновить контакты',
+                    tooltip: _tr('refreshContacts'),
                     onPressed: _refreshChats,
                     icon: const Icon(Icons.refresh_rounded),
                   ),
                   if (MediaQuery.sizeOf(context).width < 900)
                     IconButton(
-                      tooltip: 'Система',
+                      tooltip: _tr('system'),
                       onPressed: () => _selectSection(2),
                       icon: const Icon(Icons.tune_rounded),
                     ),
@@ -1831,11 +1841,11 @@ class _ChatListScreenState extends State<ChatListScreen> {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  const Expanded(
+                  Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
+                        const Text(
                           'COMMAND DECK',
                           style: TextStyle(
                             fontSize: 25,
@@ -1843,10 +1853,10 @@ class _ChatListScreenState extends State<ChatListScreen> {
                             letterSpacing: .8,
                           ),
                         ),
-                        SizedBox(height: 3),
+                        const SizedBox(height: 3),
                         Text(
-                          'ЦЕНТР СВЯЗИ',
-                          style: TextStyle(
+                          _tr('commandCenter'),
+                          style: const TextStyle(
                             color: SpartanPalette.gold,
                             fontSize: 10,
                             fontWeight: FontWeight.w700,
@@ -1870,16 +1880,19 @@ class _ChatListScreenState extends State<ChatListScreen> {
                           ? SpartanPalette.gold
                           : Colors.redAccent;
                       final label = connected
-                          ? 'СВЯЗЬ'
+                          ? _tr('connectedShort')
                           : connecting
-                          ? 'ПОДКЛЮЧЕНИЕ'
-                          : 'НЕТ СВЯЗИ';
+                          ? _tr('connectingShort')
+                          : _tr('offlineShort');
                       return Tooltip(
                         message: connected
-                            ? 'Сервер подключён · Люди: $contactCount · События: $eventCount'
+                            ? _tr('serverConnectedDetails', {
+                                'people': contactCount,
+                                'events': eventCount,
+                              })
                             : connecting
-                            ? 'Восстанавливаем соединение с сервером'
-                            : 'Сервер недоступен. Переподключение выполняется автоматически',
+                            ? _tr('serverReconnecting')
+                            : _tr('serverUnavailable'),
                         child: Container(
                           padding: const EdgeInsets.symmetric(
                             horizontal: 9,
@@ -1946,12 +1959,12 @@ class _ChatListScreenState extends State<ChatListScreen> {
                 onChanged: (_) => setState(() {}),
                 onTap: _loadOnlineUsers,
                 decoration: InputDecoration(
-                  hintText: 'Поиск контактов и чатов',
+                  hintText: _tr('searchContactsChats'),
                   prefixIcon: const Icon(Icons.search_rounded),
                   suffixIcon: _search.text.isEmpty
                       ? null
                       : IconButton(
-                          tooltip: 'Очистить поиск',
+                          tooltip: _tr('clearSearch'),
                           icon: const Icon(Icons.close),
                           onPressed: () {
                             _search.clear();
@@ -2003,7 +2016,11 @@ class _ChatListScreenState extends State<ChatListScreen> {
                                 : null,
                           ),
                           child: Text(
-                            ['ОБЗОР', 'ЛЮДИ', 'КОМАНДЫ'][index],
+                            [
+                              _tr('overview'),
+                              _tr('people'),
+                              _tr('teams'),
+                            ][index],
                             textAlign: TextAlign.center,
                             style: TextStyle(
                               color: _filter == index
@@ -2041,9 +2058,9 @@ class _ChatListScreenState extends State<ChatListScreen> {
                               child: Text(
                                 query.isEmpty
                                     ? (_filter == 2
-                                          ? 'Пока нет групп. Создайте первую.'
-                                          : 'Здесь появятся ваши чаты и контакты онлайн.')
-                                    : 'Ничего не найдено. Поиск по существующим чатам и контактам онлайн.',
+                                          ? _tr('noGroups')
+                                          : _tr('noChats'))
+                                    : _tr('nothingFound'),
                                 textAlign: TextAlign.center,
                                 style: const TextStyle(
                                   color: SpartanPalette.secondary,
@@ -2074,7 +2091,6 @@ class _ChatListScreenState extends State<ChatListScreen> {
   Widget _settings() => SettingsScreen(
     username: SocketService.instance.currentUser ?? '',
     onLogout: _logout,
-    onDeleteAccount: () {},
   );
 
   void _dial(String user, bool video) {
@@ -2207,17 +2223,17 @@ class _ChatListScreenState extends State<ChatListScreen> {
         key: ValueKey('desktop_chat_$_selectedDesktopUser'),
         targetUser: _selectedDesktopUser!,
       );
-    return const Center(
+    return Center(
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          SpartanBrand(),
-          SizedBox(height: 20),
-          Text('Выберите чат', style: TextStyle(fontSize: 22)),
-          SizedBox(height: 8),
+          const SpartanBrand(),
+          const SizedBox(height: 20),
+          Text(_tr('selectChat'), style: const TextStyle(fontSize: 22)),
+          const SizedBox(height: 8),
           Text(
-            'Сообщения, фото и звонки — рядом',
-            style: TextStyle(color: SpartanPalette.secondary),
+            _tr('selectChatSubtitle'),
+            style: const TextStyle(color: SpartanPalette.secondary),
           ),
         ],
       ),
@@ -2306,26 +2322,26 @@ class _ChatListScreenState extends State<ChatListScreen> {
                   Icons.bolt_rounded,
                   color: SpartanPalette.gold,
                 ),
-                title: const Text('Запросы SPARTAN PULSE'),
-                subtitle: const Text('Созвоны, когда оба готовы'),
+                title: Text(_tr('pulseRequests')),
+                subtitle: Text(_tr('pulseSubtitle')),
                 onTap: () => Navigator.pop(context, 'pulse'),
               ),
               ListTile(
                 leading: const Icon(Icons.groups_rounded),
-                title: const Text('Создать команду'),
-                subtitle: const Text('Новый групповой чат'),
+                title: Text(_tr('createTeam')),
+                subtitle: Text(_tr('newGroupChat')),
                 onTap: () => Navigator.pop(context, 'group'),
               ),
               ListTile(
                 leading: const Icon(Icons.sync_rounded),
-                title: const Text('Обновить связь'),
-                subtitle: const Text('Синхронизировать контакты и события'),
+                title: Text(_tr('refreshConnection')),
+                subtitle: Text(_tr('syncContactsEvents')),
                 onTap: () => Navigator.pop(context, 'refresh'),
               ),
               ListTile(
                 leading: const Icon(Icons.tune_rounded),
-                title: const Text('Система'),
-                subtitle: const Text('Настройки SPARTAN CHAT'),
+                title: Text(_tr('system')),
+                subtitle: Text(_tr('spartanSettings')),
                 onTap: () => Navigator.pop(context, 'settings'),
               ),
             ],
@@ -2376,50 +2392,60 @@ class _ChatListScreenState extends State<ChatListScreen> {
     ),
   );
 
-  Widget _mobileCommandDock() => SafeArea(
-    top: false,
-    child: Padding(
-      padding: const EdgeInsets.fromLTRB(14, 4, 14, 10),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
-        decoration: BoxDecoration(
-          color: SpartanPalette.rail,
-          borderRadius: BorderRadius.circular(28),
-          border: Border.all(color: SpartanPalette.line),
-          boxShadow: const [
-            BoxShadow(
-              color: Color(0x55000000),
-              blurRadius: 18,
-              offset: Offset(0, 8),
-            ),
-          ],
-        ),
-        child: Row(
-          children: [
-            _mobileDeckButton(0, Icons.chat_bubble_outline_rounded, 'СВЯЗЬ'),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-              child: IconButton.filled(
-                key: const ValueKey('spartan-command-button'),
-                tooltip: 'SPARTAN COMMAND',
-                onPressed: _showCommandActions,
-                style: IconButton.styleFrom(
-                  minimumSize: const Size(56, 56),
-                  backgroundColor: SpartanPalette.gold,
-                  foregroundColor: SpartanPalette.onGold,
-                  side: const BorderSide(color: Color(0xFFE3C87C), width: 1.5),
-                  shadowColor: SpartanPalette.gold,
-                  elevation: 7,
-                ),
-                icon: const Icon(Icons.bolt_rounded, size: 30),
+  Widget _mobileCommandDock() {
+    final language = AppLanguageService.instance;
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 4, 14, 10),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+          decoration: BoxDecoration(
+            color: SpartanPalette.rail,
+            borderRadius: BorderRadius.circular(28),
+            border: Border.all(color: SpartanPalette.line),
+            boxShadow: const [
+              BoxShadow(
+                color: Color(0x55000000),
+                blurRadius: 18,
+                offset: Offset(0, 8),
               ),
-            ),
-            _mobileDeckButton(1, Icons.call_outlined, 'ЗВОНКИ'),
-          ],
+            ],
+          ),
+          child: Row(
+            children: [
+              _mobileDeckButton(
+                0,
+                Icons.chat_bubble_outline_rounded,
+                language.text('connection'),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                child: IconButton.filled(
+                  key: const ValueKey('spartan-command-button'),
+                  tooltip: 'SPARTAN COMMAND',
+                  onPressed: _showCommandActions,
+                  style: IconButton.styleFrom(
+                    minimumSize: const Size(56, 56),
+                    backgroundColor: SpartanPalette.gold,
+                    foregroundColor: SpartanPalette.onGold,
+                    side: const BorderSide(
+                      color: Color(0xFFE3C87C),
+                      width: 1.5,
+                    ),
+                    shadowColor: SpartanPalette.gold,
+                    elevation: 7,
+                  ),
+                  icon: const Icon(Icons.bolt_rounded, size: 30),
+                ),
+              ),
+              _mobileDeckButton(1, Icons.call_outlined, language.text('calls')),
+            ],
+          ),
         ),
       ),
-    ),
-  );
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -2454,15 +2480,23 @@ class _ChatListScreenState extends State<ChatListScreen> {
                       const SizedBox(height: 22),
                       const SpartanBrand(compact: true),
                       const SizedBox(height: 34),
-                      _railButton(0, Icons.chat_bubble_outline_rounded, 'Чаты'),
+                      _railButton(
+                        0,
+                        Icons.chat_bubble_outline_rounded,
+                        AppLanguageService.instance.text('chats'),
+                      ),
                       _railButton(
                         1,
                         Icons.call_outlined,
-                        'Звонки',
+                        AppLanguageService.instance.text('calls'),
                         pulseBadge: true,
                       ),
                       const Spacer(),
-                      _railButton(2, Icons.settings_outlined, 'Настройки'),
+                      _railButton(
+                        2,
+                        Icons.settings_outlined,
+                        AppLanguageService.instance.text('settingsNav'),
+                      ),
                       const SizedBox(height: 20),
                     ],
                   ),

@@ -31,6 +31,19 @@ class SpartanPulse {
   final int? acceptedAt;
   final int? startsAt;
 
+  SpartanPulse copyWith({String? state, int? acceptedAt, int? startsAt}) =>
+      SpartanPulse(
+        id: id,
+        from: from,
+        to: to,
+        video: video,
+        createdAt: createdAt,
+        expiresAt: expiresAt,
+        state: state ?? this.state,
+        acceptedAt: acceptedAt ?? this.acceptedAt,
+        startsAt: startsAt ?? this.startsAt,
+      );
+
   String peerFor(String currentUser) => from == currentUser ? to : from;
 
   int get windowMinutes =>
@@ -125,10 +138,25 @@ class PulseService extends ChangeNotifier {
 
   SpartanPulsePhase phase = SpartanPulsePhase.idle;
   SpartanPulse? current;
+  final List<SpartanPulse> _pulses = <SpartanPulse>[];
+  final Set<String> _seenIncomingIds = <String>{};
   String? notice;
   int noticeSerial = 0;
 
   bool get hasPulse => phase != SpartanPulsePhase.idle && current != null;
+  List<SpartanPulse> get pulses => List<SpartanPulse>.unmodifiable(_pulses);
+  int get requestCount => _pulses.length;
+  int get unreadCount {
+    final user = _currentUser();
+    return _pulses
+        .where(
+          (pulse) =>
+              pulse.to == user &&
+              pulse.state == 'pending' &&
+              !_seenIncomingIds.contains(pulse.id),
+        )
+        .length;
+  }
 
   int get countdownSeconds {
     final startsAt = current?.startsAt;
@@ -136,6 +164,12 @@ class PulseService extends ChangeNotifier {
     final remaining = startsAt - _now();
     if (remaining <= 0) return 0;
     return (remaining / 1000).ceil();
+  }
+
+  int remainingMinutes(SpartanPulse pulse) {
+    final remaining = pulse.expiresAt - _now();
+    if (remaining <= 0) return 0;
+    return (remaining / Duration.millisecondsPerMinute).ceil();
   }
 
   SpartanPulse? activeFor(String peer) {
@@ -180,10 +214,23 @@ class PulseService extends ChangeNotifier {
   void accept() {
     final pulse = current;
     if (pulse == null || phase != SpartanPulsePhase.incoming) return;
+    acceptPulse(pulse.id);
+  }
+
+  void acceptPulse(String pulseId) {
+    final pulse = _pulseById(pulseId);
+    if (pulse == null ||
+        pulse.to != _currentUser() ||
+        pulse.state != 'pending') {
+      return;
+    }
     _send('pulse_accept', {
       'pulseId': pulse.id,
       'requestId': 'accept-${_now()}',
     });
+    _seenIncomingIds.add(pulse.id);
+    _upsertPulse(pulse.copyWith(state: 'accepted', acceptedAt: _now()));
+    current = _pulseById(pulse.id);
     phase = SpartanPulsePhase.outgoing;
     _showNotice('Готовность подтверждена. Ищем общий момент…');
     notifyListeners();
@@ -192,24 +239,46 @@ class PulseService extends ChangeNotifier {
   void decline() {
     final pulse = current;
     if (pulse == null) return;
-    _cancelTimers();
+    declinePulse(pulse.id);
+  }
+
+  void declinePulse(String pulseId) {
+    final pulse = _pulseById(pulseId);
+    if (pulse == null || pulse.to != _currentUser()) return;
     _send('pulse_decline', {
       'pulseId': pulse.id,
       'requestId': 'decline-${_now()}',
     });
-    _clear();
+    _seenIncomingIds.add(pulse.id);
+    _removePulse(pulse.id);
   }
 
   void cancel() {
     final pulse = current;
     if (pulse == null) return;
-    _cancelTimers();
+    cancelPulse(pulse.id);
+  }
+
+  void cancelPulse(String pulseId) {
+    final pulse = _pulseById(pulseId);
+    if (pulse == null) return;
     _send('pulse_cancel', {
       'pulseId': pulse.id,
       'requestId': 'cancel-${_now()}',
     });
-    _clear();
+    _removePulse(pulse.id);
     _showNotice('SPARTAN PULSE отменён');
+  }
+
+  void markAllSeen() {
+    final before = unreadCount;
+    final user = _currentUser();
+    _seenIncomingIds.addAll(
+      _pulses
+          .where((pulse) => pulse.to == user && pulse.state == 'pending')
+          .map((pulse) => pulse.id),
+    );
+    if (before != 0) notifyListeners();
   }
 
   void sync() {
@@ -260,6 +329,7 @@ class PulseService extends ChangeNotifier {
   void _handleSync(Map<String, dynamic> data) {
     final raw = data['pulses'];
     if (raw is! List || raw.isEmpty) {
+      _pulses.clear();
       if (phase != SpartanPulsePhase.matched) _clear();
       return;
     }
@@ -278,6 +348,12 @@ class PulseService extends ChangeNotifier {
                 ? byPriority
                 : right.createdAt.compareTo(left.createdAt);
           });
+    _pulses
+      ..clear()
+      ..addAll(pulses);
+    _seenIncomingIds.removeWhere(
+      (id) => !_pulses.any((pulse) => pulse.id == id),
+    );
     if (pulses.isEmpty) {
       _clear();
     } else if (pulses.first.state == 'matched') {
@@ -289,17 +365,23 @@ class PulseService extends ChangeNotifier {
 
   void _applyPulse(SpartanPulse pulse, {bool incoming = false}) {
     _cancelTimers();
+    _upsertPulse(pulse);
     current = pulse;
     final user = _currentUser();
     phase = incoming || (pulse.to == user && pulse.state == 'pending')
         ? SpartanPulsePhase.incoming
         : SpartanPulsePhase.outgoing;
+    _tickTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+      if (_pulses.isNotEmpty) notifyListeners();
+    });
     notifyListeners();
   }
 
   void _applyMatch(SpartanPulse pulse) {
     if (current?.id == pulse.id && phase == SpartanPulsePhase.matched) return;
     _cancelTimers();
+    _upsertPulse(pulse);
+    _seenIncomingIds.add(pulse.id);
     current = pulse;
     phase = SpartanPulsePhase.matched;
     final startsAt = pulse.startsAt ?? _now() + 4000;
@@ -327,11 +409,12 @@ class PulseService extends ChangeNotifier {
 
   void _handleClosed(Map<String, dynamic> data) {
     final id = data['pulseId']?.toString() ?? '';
-    if (current?.id != id) return;
-    final peer = current!.peerFor(_currentUser());
+    final pulse = _pulseById(id);
+    if (pulse == null) return;
+    final peer = pulse.peerFor(_currentUser());
     final reason = data['reason']?.toString() ?? '';
     _cancelTimers();
-    _clear();
+    _removePulse(id);
     switch (reason) {
       case 'declined':
         _showNotice('$peer сейчас не готов к звонку');
@@ -362,6 +445,70 @@ class PulseService extends ChangeNotifier {
     current = null;
     phase = SpartanPulsePhase.idle;
     notifyListeners();
+  }
+
+  SpartanPulse? _pulseById(String id) {
+    for (final pulse in _pulses) {
+      if (pulse.id == id) return pulse;
+    }
+    return null;
+  }
+
+  void _upsertPulse(SpartanPulse pulse) {
+    final index = _pulses.indexWhere((item) => item.id == pulse.id);
+    if (index == -1) {
+      _pulses.add(pulse);
+    } else {
+      _pulses[index] = pulse;
+    }
+    _sortPulses();
+  }
+
+  void _removePulse(String id) {
+    final wasCurrent = current?.id == id;
+    _pulses.removeWhere((pulse) => pulse.id == id);
+    _seenIncomingIds.remove(id);
+    if (wasCurrent) {
+      _cancelTimers();
+      if (_pulses.isEmpty) {
+        _clear();
+      } else {
+        final next = _pulses.first;
+        current = next;
+        phase = _phaseFor(next);
+        if (phase != SpartanPulsePhase.matched) {
+          _tickTimer = Timer.periodic(const Duration(seconds: 30), (_) {
+            if (_pulses.isNotEmpty) notifyListeners();
+          });
+        }
+        notifyListeners();
+      }
+    } else {
+      notifyListeners();
+    }
+  }
+
+  SpartanPulsePhase _phaseFor(SpartanPulse pulse) {
+    if (pulse.state == 'matched') return SpartanPulsePhase.matched;
+    return pulse.to == _currentUser() && pulse.state == 'pending'
+        ? SpartanPulsePhase.incoming
+        : SpartanPulsePhase.outgoing;
+  }
+
+  void _sortPulses() {
+    final user = _currentUser();
+    int priority(SpartanPulse pulse) {
+      if (pulse.state == 'matched') return 0;
+      if (pulse.to == user && pulse.state == 'pending') return 1;
+      return 2;
+    }
+
+    _pulses.sort((left, right) {
+      final byPriority = priority(left).compareTo(priority(right));
+      return byPriority != 0
+          ? byPriority
+          : right.createdAt.compareTo(left.createdAt);
+    });
   }
 
   @override

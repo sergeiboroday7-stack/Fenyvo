@@ -48,6 +48,7 @@ class SocketService {
   bool _manualDisconnect = false;
 
   Timer? _reconnectTimer;
+  Timer? _heartbeatTimer;
 
   bool _isReconnecting = false;
 
@@ -177,6 +178,13 @@ class SocketService {
       );
 
       _isConnected = true;
+
+      // Keep mobile WebSocket connections alive during quiet call periods.
+      // Some Android vendors/NATs silently expire an otherwise idle socket.
+      _heartbeatTimer?.cancel();
+      _heartbeatTimer = Timer.periodic(const Duration(seconds: 20), (_) {
+        if (_isConnected && _channel != null) _send('ping', const {});
+      });
 
       connectionPhase.value = SpartanConnectionPhase.authenticating;
 
@@ -525,6 +533,8 @@ class SocketService {
   // ========================================
 
   void _handleDisconnect({required String reason}) {
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = null;
     _isConnected = false;
     _authenticated = false;
 
@@ -1591,6 +1601,8 @@ class SocketService {
 
     _reconnectTimer?.cancel();
     _reconnectTimer = null;
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = null;
 
     _isReconnecting = false;
 

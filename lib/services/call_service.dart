@@ -388,6 +388,11 @@ class CallService extends ChangeNotifier {
       notifyListeners();
     };
     connection.onTrack = (event) {
+      // Android flutter_webrtc can dispatch onTrack alongside onAddStream;
+      // handling both paths may race inside the native peer connection and
+      // abort the process when the first video frame is rendered. The Android
+      // stream callback already contains the negotiated audio/video tracks.
+      if (Platform.isAndroid) return;
       unawaited(_attachRemoteTrack(id, event));
     };
     connection.onConnectionState = (state) {
@@ -445,6 +450,14 @@ class CallService extends ChangeNotifier {
 
   Future<void> _attachRemoteTrack(String id, RTCTrackEvent event) async {
     if (!_isCurrent(id)) return;
+    // On Android, manually inserting a remote track into a synthetic stream
+    // can trigger a native libwebrtc SIGABRT. The negotiated stream is
+    // delivered by onTrack/onAddStream in the normal path; keep the fallback
+    // for desktop builds where older WebRTC versions may omit event.streams.
+    if (event.streams.isEmpty && Platform.isAndroid) {
+      debugPrint('Remote Android track arrived without a MediaStream');
+      return;
+    }
     MediaStream? stream = event.streams.isNotEmpty
         ? event.streams.first
         : _fallbackRemoteStream;

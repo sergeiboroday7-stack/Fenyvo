@@ -4,8 +4,10 @@ import 'dart:io';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'services/storage_service.dart';
+import 'services/app_language_service.dart';
 import 'services/notification_service.dart';
 import 'services/firebase_messaging_service.dart';
 import 'services/call_service.dart';
@@ -29,6 +31,7 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await StorageService.init();
+  await AppLanguageService.instance.initialize();
 
   AppVisibility.instance.initialize();
   await NotificationService.instance.initialize();
@@ -55,16 +58,28 @@ class SpartanChatApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      navigatorKey: spartanNavigatorKey,
-      scaffoldMessengerKey: spartanMessengerKey,
-      title: 'SPARTAN CHAT',
-      debugShowCheckedModeBanner: false,
-      theme: SpartanPalette.blueGoldTheme,
-      builder: (context, child) {
-        return CallNavigationHost(child: child ?? const SizedBox.shrink());
-      },
-      home: const SplashScreen(),
+    return ValueListenableBuilder<String>(
+      valueListenable: AppLanguageService.instance.code,
+      builder: (context, _, _) => MaterialApp(
+        navigatorKey: spartanNavigatorKey,
+        scaffoldMessengerKey: spartanMessengerKey,
+        title: 'SPARTAN CHAT',
+        debugShowCheckedModeBanner: false,
+        theme: SpartanPalette.blueGoldTheme,
+        locale: AppLanguageService.instance.locale,
+        supportedLocales: AppLanguageService.languages
+            .where((language) => language.code != 'system')
+            .map((language) => Locale(language.code)),
+        localizationsDelegates: const [
+          GlobalMaterialLocalizations.delegate,
+          GlobalWidgetsLocalizations.delegate,
+          GlobalCupertinoLocalizations.delegate,
+        ],
+        builder: (context, child) {
+          return CallNavigationHost(child: child ?? const SizedBox.shrink());
+        },
+        home: const SplashScreen(),
+      ),
     );
   }
 }

@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/socket_service.dart';
+import '../services/app_language_service.dart';
 import 'chat_list_screen.dart';
 
 const String serverIp = '192.168.0.117';
@@ -452,6 +453,7 @@ class _AuthScreenState extends State<AuthScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final language = AppLanguageService.instance;
     return Scaffold(
       backgroundColor: SpartanPalette.canvas,
       resizeToAvoidBottomInset: true,
@@ -532,8 +534,8 @@ class _AuthScreenState extends State<AuthScreen> {
 
                       Text(
                         _isRegisterMode
-                            ? 'СОЗДАНИЕ АККАУНТА'
-                            : 'ДОБРО ПОЖАЛОВАТЬ',
+                            ? language.text('create')
+                            : language.text('welcome'),
                         textAlign: TextAlign.center,
                         style: const TextStyle(
                           color: SpartanPalette.secondary,
@@ -568,7 +570,9 @@ class _AuthScreenState extends State<AuthScreen> {
                         child: Column(
                           children: [
                             Text(
-                              _isRegisterMode ? 'Регистрация' : 'Вход',
+                              _isRegisterMode
+                                  ? language.text('register')
+                                  : language.text('login'),
                               style: const TextStyle(
                                 color: SpartanPalette.ink,
                                 fontSize: 22,
@@ -577,6 +581,38 @@ class _AuthScreenState extends State<AuthScreen> {
                             ),
 
                             const SizedBox(height: 20),
+
+                            if (_isRegisterMode) ...[
+                              DropdownButtonFormField<String>(
+                                initialValue: language.code.value,
+                                decoration: _inputDecoration(
+                                  hint: language.text('language'),
+                                  icon: Icons.language_rounded,
+                                ),
+                                dropdownColor: SpartanPalette.surface,
+                                style: const TextStyle(
+                                  color: SpartanPalette.ink,
+                                ),
+                                items: AppLanguageService.languages
+                                    .map(
+                                      (item) => DropdownMenuItem<String>(
+                                        value: item.code,
+                                        child: Text(
+                                          '${item.flag}  ${item.label}',
+                                        ),
+                                      ),
+                                    )
+                                    .toList(),
+                                onChanged: _isLoading
+                                    ? null
+                                    : (value) {
+                                        if (value != null) {
+                                          unawaited(language.select(value));
+                                        }
+                                      },
+                              ),
+                              const SizedBox(height: 13),
+                            ],
 
                             TextField(
                               controller: _usernameController,
@@ -619,7 +655,7 @@ class _AuthScreenState extends State<AuthScreen> {
                                     keyboardType: TextInputType.number,
                                     textInputAction: TextInputAction.next,
                                     decoration: _inputDecoration(
-                                      hint: 'IP сервера',
+                                      hint: language.text('server'),
                                       icon: Icons.dns_outlined,
                                     ),
                                   ),
@@ -639,7 +675,7 @@ class _AuthScreenState extends State<AuthScreen> {
                                     keyboardType: TextInputType.number,
                                     textInputAction: TextInputAction.done,
                                     decoration: _inputDecoration(
-                                      hint: 'Порт',
+                                      hint: language.text('port'),
                                       icon: Icons.settings_ethernet,
                                     ),
                                     onSubmitted: (_) {
@@ -724,8 +760,8 @@ class _AuthScreenState extends State<AuthScreen> {
                                       ),
                                       child: Text(
                                         _isRegisterMode
-                                            ? 'ЗАРЕГИСТРИРОВАТЬСЯ'
-                                            : 'ВОЙТИ',
+                                            ? language.text('registerButton')
+                                            : language.text('loginButton'),
                                         style: const TextStyle(
                                           fontWeight: FontWeight.w900,
                                           letterSpacing: 0.8,
