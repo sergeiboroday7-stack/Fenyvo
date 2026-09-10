@@ -20,6 +20,10 @@ class CallScreen extends StatefulWidget {
 
 class _CallScreenState extends State<CallScreen> {
   String? _windowCallId;
+  Offset? _videoPreviewPosition;
+  bool _localVideoIsPrimary = false;
+  bool _controlsVisible = true;
+
   @override
   void initState() {
     super.initState();
@@ -49,6 +53,45 @@ class _CallScreenState extends State<CallScreen> {
 
   static const Color _gold = Color(0xFFD4AF37);
 
+  Offset _resolvePreviewPosition(BoxConstraints constraints, Size previewSize) {
+    const margin = 14.0;
+    final maxX = (constraints.maxWidth - previewSize.width - margin)
+        .clamp(margin, double.infinity)
+        .toDouble();
+    final reservedBottom = _controlsVisible ? 132.0 : margin;
+    final maxY = (constraints.maxHeight - previewSize.height - reservedBottom)
+        .clamp(margin, double.infinity)
+        .toDouble();
+    final preferred = _videoPreviewPosition ?? Offset(maxX, 92);
+    return Offset(
+      preferred.dx.clamp(margin, maxX).toDouble(),
+      preferred.dy.clamp(margin, maxY).toDouble(),
+    );
+  }
+
+  void _moveVideoPreview(
+    DragUpdateDetails details,
+    BoxConstraints constraints,
+    Size previewSize,
+  ) {
+    final current = _resolvePreviewPosition(constraints, previewSize);
+    setState(() {
+      _videoPreviewPosition = current + details.delta;
+    });
+  }
+
+  void _swapVideoSurfaces() {
+    setState(() {
+      _localVideoIsPrimary = !_localVideoIsPrimary;
+    });
+  }
+
+  void _toggleFullscreenVideo() {
+    setState(() {
+      _controlsVisible = !_controlsVisible;
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final service = CallService.instance;
@@ -72,94 +115,146 @@ class _CallScreenState extends State<CallScreen> {
           child: Scaffold(
             backgroundColor: const Color(0xFF050505),
             body: SafeArea(
-              child: Stack(
-                fit: StackFit.expand,
-                children: [
-                  if (hasRemoteVideo)
-                    RTCVideoView(
-                      service.remoteRenderer,
-                      objectFit:
-                          RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
-                    )
-                  else
-                    _buildAudioBackground(service),
-                  DecoratedBox(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          Colors.black.withValues(alpha: 0.72),
-                          Colors.transparent,
-                          Colors.black.withValues(alpha: 0.82),
-                        ],
-                        stops: const [0, 0.45, 1],
-                      ),
-                    ),
-                  ),
-                  if (hasLocalVideo && service.phase != CallPhase.incoming)
-                    Positioned(
-                      top: 92,
-                      right: 18,
-                      child: Container(
-                        width: 128,
-                        height: 180,
-                        clipBehavior: Clip.antiAlias,
-                        decoration: BoxDecoration(
-                          color: Colors.black,
-                          borderRadius: BorderRadius.circular(18),
-                          border: Border.all(
-                            color: _gold.withValues(alpha: 0.78),
-                            width: 1.2,
-                          ),
-                          boxShadow: const [
-                            BoxShadow(color: Colors.black54, blurRadius: 18),
-                          ],
-                        ),
-                        child: service.cameraEnabled
-                            ? RTCVideoView(
-                                service.localRenderer,
-                                mirror: true,
-                                objectFit: RTCVideoViewObjectFit
-                                    .RTCVideoViewObjectFitCover,
-                              )
-                            : const Center(
-                                child: Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    Icon(
-                                      Icons.videocam_off_rounded,
-                                      color: _gold,
-                                      size: 32,
-                                    ),
-                                    SizedBox(height: 8),
-                                    Text(
-                                      'Камера\nвыключена',
-                                      textAlign: TextAlign.center,
-                                      style: TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 12,
-                                      ),
-                                    ),
-                                  ],
-                                ),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final canSwapVideo = hasRemoteVideo && hasLocalVideo;
+                  final localIsPrimary = _localVideoIsPrimary && canSwapVideo;
+                  final hasPrimaryVideo = hasRemoteVideo || localIsPrimary;
+                  final previewWidth = constraints.maxWidth < 600
+                      ? 112.0
+                      : 144.0;
+                  final previewSize = Size(previewWidth, previewWidth * 1.4);
+                  final previewPosition = _resolvePreviewPosition(
+                    constraints,
+                    previewSize,
+                  );
+                  final showPreview =
+                      service.phase != CallPhase.incoming &&
+                      (localIsPrimary ? hasRemoteVideo : hasLocalVideo);
+
+                  return GestureDetector(
+                    behavior: HitTestBehavior.opaque,
+                    onDoubleTap: hasPrimaryVideo
+                        ? _toggleFullscreenVideo
+                        : null,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        if (localIsPrimary)
+                          RTCVideoView(
+                            service.localRenderer,
+                            mirror: true,
+                            objectFit: RTCVideoViewObjectFit
+                                .RTCVideoViewObjectFitCover,
+                          )
+                        else if (hasRemoteVideo)
+                          RTCVideoView(
+                            service.remoteRenderer,
+                            objectFit: RTCVideoViewObjectFit
+                                .RTCVideoViewObjectFitCover,
+                          )
+                        else
+                          _buildAudioBackground(service),
+                        if (_controlsVisible)
+                          DecoratedBox(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                colors: [
+                                  Colors.black.withValues(alpha: 0.72),
+                                  Colors.transparent,
+                                  Colors.black.withValues(alpha: 0.82),
+                                ],
+                                stops: const [0, 0.45, 1],
                               ),
-                      ),
+                            ),
+                          ),
+                        if (showPreview)
+                          Positioned(
+                            left: previewPosition.dx,
+                            top: previewPosition.dy,
+                            child: GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onPanUpdate: (details) => _moveVideoPreview(
+                                details,
+                                constraints,
+                                previewSize,
+                              ),
+                              onTap: canSwapVideo ? _swapVideoSurfaces : null,
+                              child: _buildVideoPreview(
+                                service: service,
+                                size: previewSize,
+                                showLocalVideo: !localIsPrimary,
+                              ),
+                            ),
+                          ),
+                        if (_controlsVisible)
+                          Positioned(
+                            top: 18,
+                            left: 20,
+                            right: 20,
+                            bottom: 28,
+                            child: _buildContent(
+                              peer,
+                              service,
+                              hasPrimaryVideo,
+                            ),
+                          ),
+                      ],
                     ),
-                  // Controls must remain above local video, even in landscape.
-                  Positioned(
-                    top: 18,
-                    left: 20,
-                    right: 20,
-                    bottom: 28,
-                    child: _buildContent(peer, service, hasRemoteVideo),
-                  ),
-                ],
+                  );
+                },
               ),
             ),
           ),
         );
       },
+    );
+  }
+
+  Widget _buildVideoPreview({
+    required CallService service,
+    required Size size,
+    required bool showLocalVideo,
+  }) {
+    final cameraIsOff = showLocalVideo && !service.cameraEnabled;
+    return Semantics(
+      button: true,
+      label: showLocalVideo
+          ? 'Ваше видео. Перетащите или нажмите, чтобы увеличить.'
+          : 'Видео собеседника. Перетащите или нажмите, чтобы увеличить.',
+      child: Container(
+        width: size.width,
+        height: size.height,
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(
+          color: Colors.black,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: _gold.withValues(alpha: 0.82), width: 1.2),
+          boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 18)],
+        ),
+        child: cameraIsOff
+            ? const Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.videocam_off_rounded, color: _gold, size: 32),
+                    SizedBox(height: 8),
+                    Text(
+                      'Камера\nвыключена',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.white, fontSize: 12),
+                    ),
+                  ],
+                ),
+              )
+            : RTCVideoView(
+                showLocalVideo ? service.localRenderer : service.remoteRenderer,
+                mirror: showLocalVideo,
+                objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+              ),
+      ),
     );
   }
 
