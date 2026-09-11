@@ -33,7 +33,7 @@ android {
         minSdk = 24
         targetSdkVersion 36
 
-        versionCode 4131
+        versionCode 4132
         versionName "1.6.3"
     }
 

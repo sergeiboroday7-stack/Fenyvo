@@ -24,6 +24,15 @@ import '../services/storage_service.dart';
 import '../services/media_cache_service.dart';
 import '../services/download_service.dart';
 import '../services/media_transfer_service.dart';
+import '../services/app_language_service.dart';
+
+String _chatText(String key, [Map<String, Object> values = const {}]) {
+  var result = AppLanguageService.instance.text(key);
+  for (final entry in values.entries) {
+    result = result.replaceAll('{${entry.key}}', entry.value.toString());
+  }
+  return result;
+}
 
 class _InlinePrivateVideo extends StatefulWidget {
   final Uint8List? bytes;
@@ -214,7 +223,7 @@ class _InlinePrivateVideoState extends State<_InlinePrivateVideo> {
         height: 90,
         child: Center(
           child: Text(
-            '🎥 Видео недоступно',
+            '🎥 ${_chatText('videoUnavailable')}',
             style: const TextStyle(color: SpartanPalette.ink),
           ),
         ),
@@ -307,7 +316,7 @@ class _InlinePrivateVideoState extends State<_InlinePrivateVideo> {
                   ),
                 ),
                 IconButton(
-                  tooltip: 'На весь экран',
+                  tooltip: _chatText('fullScreen'),
                   visualDensity: VisualDensity.compact,
                   onPressed: () => unawaited(_openFullScreen()),
                   icon: const Icon(
@@ -316,7 +325,7 @@ class _InlinePrivateVideoState extends State<_InlinePrivateVideo> {
                   ),
                 ),
                 IconButton(
-                  tooltip: 'Скачать',
+                  tooltip: _chatText('download'),
                   visualDensity: VisualDensity.compact,
                   onPressed: widget.onDownload,
                   icon: Icon(Icons.download_rounded, color: widget.gold),
@@ -394,7 +403,7 @@ class _PrivateVideoFullScreenState extends State<_PrivateVideoFullScreen> {
         ),
         actions: [
           IconButton(
-            tooltip: 'Скачать',
+            tooltip: _chatText('download'),
             onPressed: widget.onDownload,
             icon: Icon(Icons.download_rounded, color: widget.gold),
           ),
@@ -605,6 +614,7 @@ class _ChatScreenState extends State<ChatScreen>
   @override
   void initState() {
     super.initState();
+    AppLanguageService.instance.code.addListener(_refreshLanguage);
     _draftKey =
         '${SocketService.instance.currentUser ?? ''}::${widget.targetUser}';
     _messageController.text = _drafts[_draftKey] ?? '';
@@ -685,6 +695,7 @@ class _ChatScreenState extends State<ChatScreen>
 
   @override
   void dispose() {
+    AppLanguageService.instance.code.removeListener(_refreshLanguage);
     SocketService.instance.clearActiveChatUser(widget.targetUser);
 
     if (_typingSent) {
@@ -733,6 +744,10 @@ class _ChatScreenState extends State<ChatScreen>
     unawaited(_voicePlayer.dispose());
 
     super.dispose();
+  }
+
+  void _refreshLanguage() {
+    if (mounted) setState(() {});
   }
 
   // ========================================
@@ -913,13 +928,13 @@ class _ChatScreenState extends State<ChatScreen>
 
   String _formatContactStatus() {
     if (_contactOnline) {
-      return '\u0432 \u0441\u0435\u0442\u0438';
+      return _chatText('online');
     }
 
     final lastSeen = _contactLastSeen;
 
     if (lastSeen == null) {
-      return '\u043D\u0435 \u0432 \u0441\u0435\u0442\u0438';
+      return _chatText('offline');
     }
 
     final local = lastSeen.toLocal();
@@ -937,11 +952,11 @@ class _ChatScreenState extends State<ChatScreen>
         '${local.minute.toString().padLeft(2, '0')}';
 
     if (difference == 0) {
-      return '\u0431\u044B\u043B(\u0430) \u0432 \u0441\u0435\u0442\u0438 \u0441\u0435\u0433\u043E\u0434\u043D\u044F \u0432 $time';
+      return _chatText('lastSeenToday', {'time': time});
     }
 
     if (difference == 1) {
-      return '\u0431\u044B\u043B(\u0430) \u0432 \u0441\u0435\u0442\u0438 \u0432\u0447\u0435\u0440\u0430 \u0432 $time';
+      return _chatText('lastSeenYesterday', {'time': time});
     }
 
     final date =
@@ -949,7 +964,7 @@ class _ChatScreenState extends State<ChatScreen>
         '${local.month.toString().padLeft(2, '0')}.'
         '${local.year}';
 
-    return '\u0431\u044B\u043B(\u0430) \u0432 \u0441\u0435\u0442\u0438 $date \u0432 $time';
+    return _chatText('lastSeenDate', {'date': date, 'time': time});
   }
 
   // ========================================
@@ -2242,9 +2257,21 @@ class _ChatScreenState extends State<ChatScreen>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              item(Icons.photo_library_outlined, 'Фото', _pickPrivateImage),
-              item(Icons.video_library_outlined, 'Видео', _pickPrivateVideo),
-              item(Icons.attach_file_rounded, 'Файл', _pickPrivateFile),
+              item(
+                Icons.photo_library_outlined,
+                _chatText('photo'),
+                _pickPrivateImage,
+              ),
+              item(
+                Icons.video_library_outlined,
+                _chatText('video'),
+                _pickPrivateVideo,
+              ),
+              item(
+                Icons.attach_file_rounded,
+                _chatText('file'),
+                _pickPrivateFile,
+              ),
             ],
           ),
         );
@@ -2264,7 +2291,7 @@ class _ChatScreenState extends State<ChatScreen>
         final picked = result.files.single;
         final path = picked.path?.trim() ?? '';
         if (path.isEmpty) {
-          _privateMediaSnack('Не удалось получить путь к фото');
+          _privateMediaSnack(_chatText('photoPathError'));
           return;
         }
         await _sendPrivateMediaFile(
@@ -2272,7 +2299,7 @@ class _ChatScreenState extends State<ChatScreen>
           path: path,
           fileName: picked.name,
           mimeType: _privateMimeFromName(picked.name, 'image/jpeg'),
-          text: '📷 Фото',
+          text: '📷 ${_chatText('photo')}',
           maxBytes: 20 * 1024 * 1024,
         );
         return;
@@ -2288,11 +2315,11 @@ class _ChatScreenState extends State<ChatScreen>
         path: picked.path,
         fileName: _privateBasename(picked.path),
         mimeType: _privateMimeFromName(picked.path, 'image/jpeg'),
-        text: '📷 Фото',
+        text: '📷 ${_chatText('photo')}',
         maxBytes: 20 * 1024 * 1024,
       );
     } catch (error) {
-      _privateMediaSnack('Не удалось выбрать фото: $error');
+      _privateMediaSnack(_chatText('photoPickError', {'error': error}));
     }
   }
 
@@ -2308,7 +2335,7 @@ class _ChatScreenState extends State<ChatScreen>
         final picked = result.files.single;
         final path = picked.path?.trim() ?? '';
         if (path.isEmpty) {
-          _privateMediaSnack('Не удалось получить путь к видео');
+          _privateMediaSnack(_chatText('videoPathError'));
           return;
         }
         await _sendPrivateMediaFile(
@@ -2316,7 +2343,7 @@ class _ChatScreenState extends State<ChatScreen>
           path: path,
           fileName: picked.name,
           mimeType: _privateMimeFromName(picked.name, 'video/mp4'),
-          text: '🎥 Видео',
+          text: '🎥 ${_chatText('video')}',
           maxBytes: 1024 * 1024 * 1024,
         );
         return;
@@ -2331,11 +2358,11 @@ class _ChatScreenState extends State<ChatScreen>
         path: picked.path,
         fileName: _privateBasename(picked.path),
         mimeType: _privateMimeFromName(picked.path, 'video/mp4'),
-        text: '🎥 Видео',
+        text: '🎥 ${_chatText('video')}',
         maxBytes: 1024 * 1024 * 1024,
       );
     } catch (error) {
-      _privateMediaSnack('Не удалось выбрать видео: $error');
+      _privateMediaSnack(_chatText('videoPickError', {'error': error}));
     }
   }
 
@@ -2349,7 +2376,7 @@ class _ChatScreenState extends State<ChatScreen>
       final picked = result.files.single;
       final path = picked.path?.trim() ?? '';
       if (path.isEmpty) {
-        _privateMediaSnack('Не удалось получить путь к файлу');
+        _privateMediaSnack(_chatText('filePathError'));
         return;
       }
       final name = picked.name.trim().isEmpty ? 'file.bin' : picked.name.trim();
@@ -2360,11 +2387,11 @@ class _ChatScreenState extends State<ChatScreen>
         path: path,
         fileName: name,
         mimeType: mime,
-        text: isVideo ? '🎥 Видео' : '📎 $name',
+        text: isVideo ? '🎥 ${_chatText('video')}' : '📎 $name',
         maxBytes: isVideo ? 1024 * 1024 * 1024 : 512 * 1024 * 1024,
       );
     } catch (error) {
-      _privateMediaSnack('Не удалось выбрать файл: $error');
+      _privateMediaSnack(_chatText('filePickError', {'error': error}));
     }
   }
 
@@ -2377,11 +2404,11 @@ class _ChatScreenState extends State<ChatScreen>
     required int maxBytes,
   }) async {
     if (!SocketService.instance.isConnected) {
-      _privateMediaSnack('Нет соединения с сервером');
+      _privateMediaSnack(_chatText('noServerConnection'));
       return;
     }
     if (!MediaTransferService.isReady) {
-      _privateMediaSnack('Медиа-сервер не готов. Перезайдите в аккаунт.');
+      _privateMediaSnack(_chatText('mediaServerNotReady'));
       return;
     }
     if (mounted) setState(() => _sendingPrivateMedia = true);
@@ -2407,7 +2434,7 @@ class _ChatScreenState extends State<ChatScreen>
         setState(() => _replyToMessage = null);
       }
     } catch (error) {
-      _privateMediaSnack('Не удалось отправить файл: $error');
+      _privateMediaSnack(_chatText('fileSendError', {'error': error}));
     } finally {
       if (mounted) setState(() => _sendingPrivateMedia = false);
     }
@@ -2429,7 +2456,7 @@ class _ChatScreenState extends State<ChatScreen>
   Future<void> _savePrivateAttachment(Map<String, dynamic> message) async {
     final bytes = await MediaCacheService.readBytes(message);
     if (bytes == null || bytes.isEmpty) {
-      _privateMediaSnack('Вложение повреждено');
+      _privateMediaSnack(_chatText('attachmentDamaged'));
       return;
     }
 
@@ -2445,9 +2472,9 @@ class _ChatScreenState extends State<ChatScreen>
         fileName: original,
         mimeType: mime,
       );
-      _privateMediaSnack('Сохранено в Spartan Chat: $savedPath');
+      _privateMediaSnack(_chatText('savedToSpartan', {'path': savedPath}));
     } catch (error) {
-      _privateMediaSnack('Не удалось сохранить файл: $error');
+      _privateMediaSnack(_chatText('fileSaveError', {'error': error}));
     }
   }
 
@@ -2458,7 +2485,7 @@ class _ChatScreenState extends State<ChatScreen>
     if (path == null &&
         (bytes == null || bytes.isEmpty) &&
         networkUrl == null) {
-      _privateMediaSnack('Фото повреждено');
+      _privateMediaSnack(_chatText('photoDamaged'));
       return;
     }
 
@@ -2504,14 +2531,14 @@ class _ChatScreenState extends State<ChatScreen>
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     IconButton.filled(
-                      tooltip: 'Скачать',
+                      tooltip: _chatText('download'),
                       onPressed: () =>
                           unawaited(_savePrivateAttachment(message)),
                       icon: const Icon(Icons.download_rounded),
                     ),
                     const SizedBox(width: 6),
                     IconButton.filled(
-                      tooltip: 'Закрыть',
+                      tooltip: _chatText('close'),
                       onPressed: () => Navigator.of(dialogContext).pop(),
                       icon: const Icon(Icons.close_rounded),
                     ),
@@ -2539,7 +2566,7 @@ class _ChatScreenState extends State<ChatScreen>
           (bytes == null || bytes.isEmpty) &&
           networkUrl == null) {
         return Text(
-          '📷 Фото недоступно',
+          '📷 ${_chatText('photoUnavailable')}',
           style: TextStyle(
             color: isMe ? SpartanPalette.ink : SpartanPalette.ink,
           ),
@@ -2606,7 +2633,7 @@ class _ChatScreenState extends State<ChatScreen>
               color: SpartanPalette.surface.withValues(alpha: 0.68),
               shape: const CircleBorder(),
               child: IconButton(
-                tooltip: 'Скачать',
+                tooltip: _chatText('download'),
                 visualDensity: VisualDensity.compact,
                 onPressed: () => unawaited(_savePrivateAttachment(message)),
                 icon: const Icon(
@@ -2626,7 +2653,7 @@ class _ChatScreenState extends State<ChatScreen>
           (bytes == null || bytes.isEmpty) &&
           networkUrl == null) {
         return Text(
-          '🎥 Видео недоступно',
+          '🎥 ${_chatText('videoUnavailable')}',
           style: TextStyle(
             color: isMe ? SpartanPalette.ink : SpartanPalette.ink,
           ),
@@ -3544,9 +3571,8 @@ class _ChatScreenState extends State<ChatScreen>
     }
 
     if (_contactBlocked) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Сначала разблокируйте контакт')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(_chatText('unblockFirst'))));
       return;
     }
 
@@ -3577,13 +3603,8 @@ class _ChatScreenState extends State<ChatScreen>
     );
 
     if (!wasConnected && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Сообщение сохранено — отправим после восстановления связи',
-          ),
-        ),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(_chatText('messageQueued'))));
     }
 
     _messageController.clear();
@@ -4001,36 +4022,14 @@ class _ChatScreenState extends State<ChatScreen>
     final difference = today.difference(messageDay).inDays;
 
     if (difference == 0) {
-      return '\u0421\u0435\u0433\u043E\u0434\u043D\u044F';
+      return _chatText('today');
     }
 
     if (difference == 1) {
-      return '\u0412\u0447\u0435\u0440\u0430';
+      return _chatText('yesterday');
     }
 
-    const months = <String>[
-      '',
-      '\u044F\u043D\u0432\u0430\u0440\u044F',
-      '\u0444\u0435\u0432\u0440\u0430\u043B\u044F',
-      '\u043C\u0430\u0440\u0442\u0430',
-      '\u0430\u043F\u0440\u0435\u043B\u044F',
-      '\u043C\u0430\u044F',
-      '\u0438\u044E\u043D\u044F',
-      '\u0438\u044E\u043B\u044F',
-      '\u0430\u0432\u0433\u0443\u0441\u0442\u0430',
-      '\u0441\u0435\u043D\u0442\u044F\u0431\u0440\u044F',
-      '\u043E\u043A\u0442\u044F\u0431\u0440\u044F',
-      '\u043D\u043E\u044F\u0431\u0440\u044F',
-      '\u0434\u0435\u043A\u0430\u0431\u0440\u044F',
-    ];
-
-    final month = months[date.month];
-
-    if (date.year == now.year) {
-      return '${date.day} $month';
-    }
-
-    return '${date.day} $month ${date.year}';
+    return MaterialLocalizations.of(context).formatMediumDate(date);
   }
 
   Widget _buildMessageDateSeparator(dynamic timeData) {
@@ -4152,8 +4151,8 @@ class _ChatScreenState extends State<ChatScreen>
 
     if (!wasPinned && pinnedCount >= 10) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('В личном чате можно закрепить до 10 сообщений'),
+        SnackBar(
+          content: Text(_chatText('pinLimit')),
           backgroundColor: SpartanPalette.surface,
         ),
       );
@@ -4398,7 +4397,8 @@ class _ChatScreenState extends State<ChatScreen>
                           child: Padding(
                             padding: const EdgeInsets.symmetric(vertical: 12),
                             child: Text(
-                              message['text']?.toString() ?? 'Сообщение',
+                              message['text']?.toString() ??
+                                  _chatText('message'),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
@@ -4410,7 +4410,7 @@ class _ChatScreenState extends State<ChatScreen>
                         ),
                       ),
                       IconButton(
-                        tooltip: 'Открепить',
+                        tooltip: _chatText('unpin'),
                         constraints: const BoxConstraints(
                           minWidth: 40,
                           minHeight: 40,
@@ -4628,27 +4628,27 @@ class _ChatScreenState extends State<ChatScreen>
     final isRead = status == 'read';
 
     if (status == 'queued') {
-      return const Icon(
+      return Icon(
         Icons.schedule_rounded,
         size: 15,
         color: SpartanPalette.secondary,
-        semanticLabel: 'Ожидает отправки',
+        semanticLabel: _chatText('waitingToSend'),
       );
     }
     if (status == 'sending') {
-      return const Icon(
+      return Icon(
         Icons.sync_rounded,
         size: 15,
         color: SpartanPalette.secondary,
-        semanticLabel: 'Отправляется',
+        semanticLabel: _chatText('sending'),
       );
     }
     if (status == 'failed') {
-      return const Icon(
+      return Icon(
         Icons.error_outline_rounded,
         size: 15,
         color: Colors.red,
-        semanticLabel: 'Не отправлено',
+        semanticLabel: _chatText('notSent'),
       );
     }
 
@@ -4659,10 +4659,10 @@ class _ChatScreenState extends State<ChatScreen>
       size: 15,
       color: isRead ? SpartanPalette.gold : SpartanPalette.secondary,
       semanticLabel: isRead
-          ? 'Прочитано'
+          ? _chatText('read')
           : status == 'delivered'
-          ? 'Доставлено'
-          : 'Отправлено',
+          ? _chatText('delivered')
+          : _chatText('sent'),
     );
   }
 
@@ -5472,11 +5472,11 @@ class _ChatScreenState extends State<ChatScreen>
                                 ),
                               ),
                               const SizedBox(width: 12),
-                              const Expanded(
+                              Expanded(
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text(
+                                    const Text(
                                       'SPARTAN AI',
                                       style: TextStyle(
                                         color: SpartanPalette.ink,
@@ -5484,10 +5484,10 @@ class _ChatScreenState extends State<ChatScreen>
                                         fontWeight: FontWeight.w800,
                                       ),
                                     ),
-                                    SizedBox(height: 2),
+                                    const SizedBox(height: 2),
                                     Text(
-                                      '\u041F\u043E\u043B\u043D\u043E\u0446\u0435\u043D\u043D\u044B\u0439 \u0418\u0418-\u043F\u043E\u043C\u043E\u0449\u043D\u0438\u043A Spartan Chat',
-                                      style: TextStyle(
+                                      _chatText('aiAssistantSubtitle'),
+                                      style: const TextStyle(
                                         color: SpartanPalette.secondary,
                                         fontSize: 12,
                                       ),
@@ -5496,7 +5496,7 @@ class _ChatScreenState extends State<ChatScreen>
                                 ),
                               ),
                               IconButton(
-                                tooltip: '\u041E\u0447\u0438\u0441\u0442\u0438\u0442\u044C \u0438\u0441\u0442\u043E\u0440\u0438\u044E',
+                                tooltip: _chatText('clearHistory'),
                                 onPressed: isLoading
                                     ? null
                                     : () {
@@ -5534,20 +5534,20 @@ class _ChatScreenState extends State<ChatScreen>
                                           size: 42,
                                         ),
                                         const SizedBox(height: 14),
-                                        const Text(
-                                          '\u0421\u043F\u0440\u043E\u0441\u0438 SPARTAN AI \u043E \u0447\u0451\u043C \u0443\u0433\u043E\u0434\u043D\u043E',
+                                        Text(
+                                          _chatText('askAiAnything'),
                                           textAlign: TextAlign.center,
-                                          style: TextStyle(
+                                          style: const TextStyle(
                                             color: SpartanPalette.ink,
                                             fontSize: 18,
                                             fontWeight: FontWeight.w700,
                                           ),
                                         ),
                                         const SizedBox(height: 8),
-                                        const Text(
-                                          '\u041E\u043D \u0437\u043D\u0430\u0435\u0442 \u043E \u0444\u0443\u043D\u043A\u0446\u0438\u044F\u0445 Spartan Chat, \u043C\u043E\u0436\u0435\u0442 \u043E\u0431\u044A\u044F\u0441\u043D\u044F\u0442\u044C, \u043F\u0438\u0441\u0430\u0442\u044C \u0442\u0435\u043A\u0441\u0442\u044B \u0438 \u043F\u043E\u043C\u043E\u0433\u0430\u0442\u044C \u0441 \u0438\u0434\u0435\u044F\u043C\u0438.',
+                                        Text(
+                                          _chatText('aiEmptyDescription'),
                                           textAlign: TextAlign.center,
-                                          style: TextStyle(
+                                          style: const TextStyle(
                                             color: SpartanPalette.secondary,
                                             fontSize: 13,
                                             height: 1.4,
@@ -5642,7 +5642,7 @@ class _ChatScreenState extends State<ChatScreen>
                                     color: SpartanPalette.ink,
                                   ),
                                   decoration: InputDecoration(
-                                    hintText: '\u041D\u0430\u043F\u0438\u0448\u0438 \u0432\u043E\u043F\u0440\u043E\u0441...',
+                                    hintText: _chatText('askQuestionHint'),
                                     hintStyle: const TextStyle(
                                       color: SpartanPalette.muted,
                                     ),
@@ -5693,11 +5693,11 @@ class _ChatScreenState extends State<ChatScreen>
                             ],
                           ),
                         ),
-                        const Padding(
-                          padding: EdgeInsets.only(bottom: 10),
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
                           child: Text(
-                            '\u0418\u0418 \u043C\u043E\u0436\u0435\u0442 \u043E\u0448\u0438\u0431\u0430\u0442\u044C\u0441\u044F. \u0412\u0430\u0436\u043D\u044B\u0435 \u0434\u0430\u043D\u043D\u044B\u0435 \u043B\u0443\u0447\u0448\u0435 \u043F\u0440\u043E\u0432\u0435\u0440\u044F\u0442\u044C.',
-                            style: TextStyle(
+                            _chatText('aiDisclaimer'),
+                            style: const TextStyle(
                               color: SpartanPalette.muted,
                               fontSize: 10,
                             ),
@@ -6179,10 +6179,8 @@ class _ChatScreenState extends State<ChatScreen>
     if (!SocketService.instance.isConnected) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              '\u0414\u043B\u044F \u043D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 SPARTAN AI \u043D\u0443\u0436\u0435\u043D \u0438\u043D\u0442\u0435\u0440\u043D\u0435\u0442',
-            ),
+          SnackBar(
+            content: Text(_chatText('aiInternetRequired')),
             backgroundColor: Colors.red,
           ),
         );
@@ -6191,11 +6189,42 @@ class _ChatScreenState extends State<ChatScreen>
       return;
     }
 
-    final goalController = TextEditingController(text: _autoReplyGoal);
-    final promptController = TextEditingController(text: _autoReplyPrompt);
+    const legacyGoal =
+        '\u041F\u043E\u0434\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0442\u044C \u043F\u043E\u043B\u0435\u0437\u043D\u044B\u0439, \u0443\u0432\u0430\u0436\u0438\u0442\u0435\u043B\u044C\u043D\u044B\u0439 \u0434\u0438\u0430\u043B\u043E\u0433 \u0438 \u043F\u043E\u043C\u043E\u0433\u0430\u0442\u044C \u043F\u0440\u0438\u0439\u0442\u0438 \u043A \u043D\u0443\u0436\u043D\u043E\u043C\u0443 \u0440\u0435\u0437\u0443\u043B\u044C\u0442\u0430\u0442\u0443.';
+    const legacyPrompt =
+        '\u041E\u0442\u0432\u0435\u0447\u0430\u0439 \u043A\u043E\u0440\u043E\u0442\u043A\u043E, \u0435\u0441\u0442\u0435\u0441\u0442\u0432\u0435\u043D\u043D\u043E \u0438 \u0434\u0440\u0443\u0436\u0435\u043B\u044E\u0431\u043D\u043E. \u041E\u0442\u0432\u0435\u0447\u0430\u0439 \u043D\u0430 \u044F\u0437\u044B\u043A\u0435 \u0441\u043E\u0431\u0435\u0441\u0435\u0434\u043D\u0438\u043A\u0430. \u041D\u0435 \u0434\u043E\u0431\u0430\u0432\u043B\u044F\u0439 \u043F\u043E\u044F\u0441\u043D\u0435\u043D\u0438\u0439 \u043E\u0442 \u0441\u0435\u0431\u044F.';
+    const legacyPromptWithEverything =
+        '\u041E\u0442\u0432\u0435\u0447\u0430\u0439 \u043A\u043E\u0440\u043E\u0442\u043A\u043E, \u0435\u0441\u0442\u0435\u0441\u0442\u0432\u0435\u043D\u043D\u043E \u0438 \u0434\u0440\u0443\u0436\u0435\u043B\u044E\u0431\u043D\u043E. \u041E\u0442\u0432\u0435\u0447\u0430\u0439 \u043D\u0430 \u044F\u0437\u044B\u043A\u0435 \u0441\u043E\u0431\u0435\u0441\u0435\u0434\u043D\u0438\u043A\u0430. \u041D\u0435 \u0434\u043E\u0431\u0430\u0432\u043B\u044F\u0439 \u043F\u043E\u044F\u0441\u043D\u0435\u043D\u0438\u0439 \u043E\u0442 \u0441\u0435\u0431\u044F. \u0413\u043E\u0432\u043E\u0440\u0438 \u043E\u0431\u043E \u0432\u0441\u0451\u043C.';
+    const legacyBoundaries =
+        '\u041D\u0435 \u0434\u0430\u0432\u0438, \u043D\u0435 \u0443\u0433\u0440\u043E\u0436\u0430\u0439, \u043D\u0435 \u043E\u0431\u043C\u0430\u043D\u044B\u0432\u0430\u0439 \u0438 \u043D\u0435 \u043C\u0430\u043D\u0438\u043F\u0443\u043B\u0438\u0440\u0443\u0439. \u0423\u0432\u0430\u0436\u0430\u0439 \u043E\u0442\u043A\u0430\u0437 \u0438 \u043F\u0440\u043E\u0441\u044C\u0431\u0443 \u043F\u0440\u0435\u043A\u0440\u0430\u0442\u0438\u0442\u044C \u043E\u0431\u0449\u0435\u043D\u0438\u0435.';
+    final goalController = TextEditingController(
+      text:
+          (_autoReplyGoal == legacyGoal ||
+              (_autoReplyGoal.startsWith(
+                    '\u041F\u043E\u0434\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0442\u044C \u043F\u043E\u043B\u0435\u0437\u043D\u044B\u0439',
+                  ) &&
+                  _autoReplyGoal.length < 220))
+          ? _chatText('autoGoalDefault')
+          : _autoReplyGoal,
+    );
+    final promptController = TextEditingController(
+      text:
+          (_autoReplyPrompt == legacyPrompt ||
+              _autoReplyPrompt == legacyPromptWithEverything ||
+              (_autoReplyPrompt.startsWith(
+                    '\u041E\u0442\u0432\u0435\u0447\u0430\u0439 \u043A\u043E\u0440\u043E\u0442\u043A\u043E',
+                  ) &&
+                  _autoReplyPrompt.contains(
+                    '\u044F\u0437\u044B\u043A\u0435 \u0441\u043E\u0431\u0435\u0441\u0435\u0434\u043D\u0438\u043A\u0430',
+                  )))
+          ? _chatText('autoPromptDefault')
+          : _autoReplyPrompt,
+    );
     final contextController = TextEditingController(text: _autoReplyContext);
     final boundariesController = TextEditingController(
-      text: _autoReplyBoundaries,
+      text: _autoReplyBoundaries == legacyBoundaries
+          ? _chatText('autoBoundariesDefault')
+          : _autoReplyBoundaries,
     );
 
     var enabled = _autoReplyEnabled;
@@ -6295,9 +6324,9 @@ class _ChatScreenState extends State<ChatScreen>
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Text(
-                                  'SPARTAN AI \u2014 \u0430\u0432\u0442\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435',
-                                  style: TextStyle(
+                                Text(
+                                  _chatText('aiAutoTitle'),
+                                  style: const TextStyle(
                                     color: SpartanPalette.ink,
                                     fontSize: 18,
                                     fontWeight: FontWeight.w800,
@@ -6305,7 +6334,9 @@ class _ChatScreenState extends State<ChatScreen>
                                 ),
                                 const SizedBox(height: 3),
                                 Text(
-                                  '\u041E\u0442\u0434\u0435\u043B\u044C\u043D\u0430\u044F AI-\u0441\u0435\u0441\u0441\u0438\u044F \u0434\u043B\u044F ${widget.targetUser}',
+                                  _chatText('aiSeparateSession', {
+                                    'user': widget.targetUser,
+                                  }),
                                   style: const TextStyle(
                                     color: SpartanPalette.secondary,
                                     fontSize: 12,
@@ -6360,16 +6391,16 @@ class _ChatScreenState extends State<ChatScreen>
                           },
                           title: Text(
                             enabled
-                                ? '\u0410\u0432\u0442\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435 \u0432\u043A\u043B\u044E\u0447\u0435\u043D\u043E'
-                                : '\u0410\u0432\u0442\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435 \u0432\u044B\u043A\u043B\u044E\u0447\u0435\u043D\u043E',
+                                ? _chatText('autoReplyEnabled')
+                                : _chatText('autoReplyDisabled'),
                             style: const TextStyle(
                               color: SpartanPalette.ink,
                               fontWeight: FontWeight.w700,
                             ),
                           ),
-                          subtitle: const Text(
-                            'SPARTAN AI \u043F\u043E\u043C\u043D\u0438\u0442 \u043A\u043E\u043D\u0442\u0435\u043A\u0441\u0442 \u044D\u0442\u043E\u0433\u043E \u0434\u0438\u0430\u043B\u043E\u0433\u0430 \u0438 \u043E\u0442\u0432\u0435\u0447\u0430\u0435\u0442 \u043F\u043E \u0437\u0430\u0434\u0430\u043D\u043D\u043E\u0439 \u0446\u0435\u043B\u0438.',
-                            style: TextStyle(
+                          subtitle: Text(
+                            _chatText('autoReplyDescription'),
+                            style: const TextStyle(
                               color: SpartanPalette.secondary,
                               fontSize: 12,
                             ),
@@ -6377,9 +6408,7 @@ class _ChatScreenState extends State<ChatScreen>
                         ),
                       ),
                       const SizedBox(height: 18),
-                      buildLabel(
-                        '\u0420\u0435\u0436\u0438\u043C \u0443\u0447\u0430\u0441\u0442\u0438\u044F SPARTAN AI',
-                      ),
+                      buildLabel(_chatText('aiParticipationMode')),
                       Wrap(
                         spacing: 8,
                         runSpacing: 8,
@@ -6387,19 +6416,21 @@ class _ChatScreenState extends State<ChatScreen>
                             <Map<String, String>>[
                               {
                                 'id': 'auto',
-                                'label': '\u26A1 \u0410\u0432\u0442\u043E',
+                                'label': '\u26A1 ${_chatText('modeAuto')}',
                               },
                               {
                                 'id': 'suggest',
-                                'label': '\u{1F4A1} \u0421\u043E\u0432\u0435\u0442\u043E\u0432\u0430\u0442\u044C',
+                                'label':
+                                    '\u{1F4A1} ${_chatText('modeSuggest')}',
                               },
                               {
                                 'id': 'idle',
-                                'label': '\u23F3 \u0415\u0441\u043B\u0438 \u044F \u043C\u043E\u043B\u0447\u0443',
+                                'label': '\u23F3 ${_chatText('modeIdle')}',
                               },
                               {
                                 'id': 'until_goal',
-                                'label': '\u{1F3AF} \u0414\u043E \u0446\u0435\u043B\u0438',
+                                'label':
+                                    '\u{1F3AF} ${_chatText('modeUntilGoal')}',
                               },
                             ].map((item) {
                               final id = item['id']!;
@@ -6431,12 +6462,12 @@ class _ChatScreenState extends State<ChatScreen>
                       const SizedBox(height: 10),
                       Text(
                         mode == 'suggest'
-                            ? '\u{1F4A1} AI \u043D\u0435 \u043F\u0438\u0448\u0435\u0442 \u0441\u043E\u0431\u0435\u0441\u0435\u0434\u043D\u0438\u043A\u0443. \u041E\u043D \u043F\u0440\u0435\u0434\u043B\u0430\u0433\u0430\u0435\u0442 \u0442\u0435\u0431\u0435 \u0433\u043E\u0442\u043E\u0432\u044B\u0439 \u043E\u0442\u0432\u0435\u0442, \u0430 \u0442\u044B \u0440\u0435\u0448\u0430\u0435\u0448\u044C, \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u044F\u0442\u044C \u043B\u0438 \u0435\u0433\u043E.'
+                            ? '\u{1F4A1} ${_chatText('modeSuggestDescription')}'
                             : mode == 'idle'
-                            ? '\u23F3 AI \u0432\u0441\u0442\u0443\u043F\u0438\u0442 \u0432 \u0434\u0438\u0430\u043B\u043E\u0433, \u0442\u043E\u043B\u044C\u043A\u043E \u0435\u0441\u043B\u0438 \u0442\u044B \u0441\u0430\u043C \u043D\u0435 \u043E\u0442\u0432\u0435\u0442\u0438\u0448\u044C \u0437\u0430 \u0432\u044B\u0431\u0440\u0430\u043D\u043D\u043E\u0435 \u0432\u0440\u0435\u043C\u044F.'
+                            ? '\u23F3 ${_chatText('modeIdleDescription')}'
                             : mode == 'until_goal'
-                            ? '\u{1F3AF} AI \u043E\u0442\u0432\u0435\u0447\u0430\u0435\u0442 \u0441\u0430\u043C \u0438 \u043E\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u0441\u044F, \u043A\u043E\u0433\u0434\u0430 \u0446\u0435\u043B\u044C \u044F\u0432\u043D\u043E \u0434\u043E\u0441\u0442\u0438\u0433\u043D\u0443\u0442\u0430.'
-                            : '\u26A1 AI \u0430\u0432\u0442\u043E\u043C\u0430\u0442\u0438\u0447\u0435\u0441\u043A\u0438 \u043E\u0442\u0432\u0435\u0447\u0430\u0435\u0442 \u043D\u0430 \u043D\u043E\u0432\u044B\u0435 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F \u043F\u043E \u0442\u0432\u043E\u0435\u0439 \u0446\u0435\u043B\u0438 \u0438 \u0441\u0442\u0438\u043B\u044E.',
+                            ? '\u{1F3AF} ${_chatText('modeUntilGoalDescription')}'
+                            : '\u26A1 ${_chatText('modeAutoDescription')}',
                         style: const TextStyle(
                           color: SpartanPalette.secondary,
                           fontSize: 12,
@@ -6445,17 +6476,17 @@ class _ChatScreenState extends State<ChatScreen>
                       ),
                       if (mode == 'idle') ...[
                         const SizedBox(height: 14),
-                        buildLabel(
-                          '\u0427\u0435\u0440\u0435\u0437 \u0441\u043A\u043E\u043B\u044C\u043A\u043E \u0432\u0441\u0442\u0443\u043F\u0430\u0442\u044C, \u0435\u0441\u043B\u0438 \u044F \u043D\u0435 \u043E\u0442\u0432\u0435\u0447\u0430\u044E',
-                        ),
+                        buildLabel(_chatText('idleDelayLabel')),
                         Wrap(
                           spacing: 8,
                           runSpacing: 8,
                           children: <int>[30, 60, 120, 300].map((seconds) {
                             final selected = idleSeconds == seconds;
                             final label = seconds < 60
-                                ? '$seconds \u0441\u0435\u043A.'
-                                : '${seconds ~/ 60} \u043C\u0438\u043D.';
+                                ? _chatText('secondsShort', {'count': seconds})
+                                : _chatText('minutesShort', {
+                                    'count': seconds ~/ 60,
+                                  });
 
                             return ChoiceChip(
                               label: Text(label),
@@ -6482,9 +6513,7 @@ class _ChatScreenState extends State<ChatScreen>
                         ),
                       ],
                       const SizedBox(height: 18),
-                      buildLabel(
-                        '\u0426\u0435\u043B\u044C \u043E\u0431\u0449\u0435\u043D\u0438\u044F \u2014 \u043A \u0447\u0435\u043C\u0443 \u0445\u043E\u0447\u0435\u0448\u044C \u043F\u0440\u0438\u0439\u0442\u0438',
-                      ),
+                      buildLabel(_chatText('conversationGoal')),
                       TextField(
                         controller: goalController,
                         maxLength: 500,
@@ -6492,13 +6521,11 @@ class _ChatScreenState extends State<ChatScreen>
                         maxLines: 5,
                         style: const TextStyle(color: SpartanPalette.ink),
                         decoration: inputDecoration(
-                          '\u041D\u0430\u043F\u0440\u0438\u043C\u0435\u0440: \u0434\u043E\u0433\u043E\u0432\u043E\u0440\u0438\u0442\u044C\u0441\u044F \u043E \u0432\u0441\u0442\u0440\u0435\u0447\u0435, \u0432\u044B\u044F\u0441\u043D\u0438\u0442\u044C \u0434\u0435\u0442\u0430\u043B\u0438, \u043F\u043E\u0434\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0442\u044C \u043A\u043E\u043D\u0442\u0430\u043A\u0442',
+                          _chatText('conversationGoalHint'),
                         ),
                       ),
                       const SizedBox(height: 6),
-                      buildLabel(
-                        '\u0421\u0442\u0438\u043B\u044C \u043E\u0431\u0449\u0435\u043D\u0438\u044F',
-                      ),
+                      buildLabel(_chatText('conversationStyle')),
                       TextField(
                         controller: promptController,
                         maxLength: 600,
@@ -6506,27 +6533,21 @@ class _ChatScreenState extends State<ChatScreen>
                         maxLines: 5,
                         style: const TextStyle(color: SpartanPalette.ink),
                         decoration: inputDecoration(
-                          '\u041D\u0430\u043F\u0440\u0438\u043C\u0435\u0440: \u043A\u043E\u0440\u043E\u0442\u043A\u043E, \u0441\u043F\u043E\u043A\u043E\u0439\u043D\u043E, \u0434\u0440\u0443\u0436\u0435\u043B\u044E\u0431\u043D\u043E, \u0441 \u043B\u0451\u0433\u043A\u0438\u043C \u044E\u043C\u043E\u0440\u043E\u043C',
+                          _chatText('conversationStyleHint'),
                         ),
                       ),
                       const SizedBox(height: 6),
-                      buildLabel(
-                        '\u041A\u043E\u043D\u0442\u0435\u043A\u0441\u0442 \u0434\u043B\u044F AI',
-                      ),
+                      buildLabel(_chatText('aiContext')),
                       TextField(
                         controller: contextController,
                         maxLength: 800,
                         minLines: 2,
                         maxLines: 6,
                         style: const TextStyle(color: SpartanPalette.ink),
-                        decoration: inputDecoration(
-                          '\u0427\u0442\u043E AI \u0434\u043E\u043B\u0436\u0435\u043D \u0437\u043D\u0430\u0442\u044C \u043E \u0441\u0438\u0442\u0443\u0430\u0446\u0438\u0438, \u0434\u043E\u0433\u043E\u0432\u043E\u0440\u0451\u043D\u043D\u043E\u0441\u0442\u044F\u0445 \u0438\u043B\u0438 \u0432\u0430\u0436\u043D\u044B\u0445 \u0444\u0430\u043A\u0442\u0430\u0445',
-                        ),
+                        decoration: inputDecoration(_chatText('aiContextHint')),
                       ),
                       const SizedBox(height: 6),
-                      buildLabel(
-                        '\u041E\u0433\u0440\u0430\u043D\u0438\u0447\u0435\u043D\u0438\u044F \u2014 \u0447\u0435\u0433\u043E \u043D\u0435 \u0434\u0435\u043B\u0430\u0442\u044C',
-                      ),
+                      buildLabel(_chatText('aiBoundaries')),
                       TextField(
                         controller: boundariesController,
                         maxLength: 500,
@@ -6534,13 +6555,11 @@ class _ChatScreenState extends State<ChatScreen>
                         maxLines: 5,
                         style: const TextStyle(color: SpartanPalette.ink),
                         decoration: inputDecoration(
-                          '\u041D\u0430\u043F\u0440\u0438\u043C\u0435\u0440: \u043D\u0435 \u043E\u0431\u0435\u0449\u0430\u0442\u044C \u0434\u0435\u043D\u044C\u0433\u0438, \u043D\u0435 \u043E\u0431\u0441\u0443\u0436\u0434\u0430\u0442\u044C \u043B\u0438\u0447\u043D\u044B\u0435 \u0434\u0430\u043D\u043D\u044B\u0435, \u043F\u0440\u0438 \u043A\u043E\u043D\u0444\u043B\u0438\u043A\u0442\u0435 \u043D\u0435 \u0441\u043F\u043E\u0440\u0438\u0442\u044C',
+                          _chatText('aiBoundariesHint'),
                         ),
                       ),
                       const SizedBox(height: 8),
-                      buildLabel(
-                        '\u0417\u0430\u0434\u0435\u0440\u0436\u043A\u0430 \u043F\u0435\u0440\u0435\u0434 \u043E\u0442\u0432\u0435\u0442\u043E\u043C',
-                      ),
+                      buildLabel(_chatText('replyDelay')),
                       Wrap(
                         spacing: 8,
                         runSpacing: 8,
@@ -6548,7 +6567,9 @@ class _ChatScreenState extends State<ChatScreen>
                           final selected = delaySeconds == seconds;
 
                           return ChoiceChip(
-                            label: Text('$seconds \u0441\u0435\u043A.'),
+                            label: Text(
+                              _chatText('secondsShort', {'count': seconds}),
+                            ),
                             selected: selected,
                             onSelected: (_) {
                               setSheetState(() {
@@ -6580,19 +6601,19 @@ class _ChatScreenState extends State<ChatScreen>
                             color: _gold.withValues(alpha: 0.20),
                           ),
                         ),
-                        child: const Row(
+                        child: Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Icon(
+                            const Icon(
                               Icons.info_outline_rounded,
                               color: _gold,
                               size: 18,
                             ),
-                            SizedBox(width: 9),
+                            const SizedBox(width: 9),
                             Expanded(
                               child: Text(
-                                'AI \u043F\u043E\u043C\u043D\u0438\u0442 \u043F\u043E\u0441\u043B\u0435\u0434\u043D\u0438\u0435 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F \u0442\u043E\u043B\u044C\u043A\u043E \u044D\u0442\u043E\u0433\u043E \u0434\u0438\u0430\u043B\u043E\u0433\u0430. \u0415\u0441\u043B\u0438 \u0441\u043E\u0431\u0435\u0441\u0435\u0434\u043D\u0438\u043A \u043F\u0440\u0438\u0441\u044B\u043B\u0430\u0435\u0442 \u043D\u0435\u0441\u043A\u043E\u043B\u044C\u043A\u043E SMS \u043F\u043E\u0434\u0440\u044F\u0434, SPARTAN AI \u043E\u0431\u044A\u0435\u0434\u0438\u043D\u0438\u0442 \u0438\u0445 \u0432 \u043E\u0434\u0438\u043D \u043E\u0442\u0432\u0435\u0442. AI-\u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F \u043F\u043E\u043C\u0435\u0447\u0430\u044E\u0442\u0441\u044F \u0437\u043D\u0430\u0447\u043A\u043E\u043C \u0432 \u0447\u0430\u0442\u0435.',
-                                style: TextStyle(
+                                _chatText('autoReplyMemoryInfo'),
+                                style: const TextStyle(
                                   color: SpartanPalette.secondary,
                                   fontSize: 12,
                                   height: 1.35,
@@ -6617,9 +6638,7 @@ class _ChatScreenState extends State<ChatScreen>
                             padding: const EdgeInsets.symmetric(vertical: 12),
                           ),
                           icon: const Icon(Icons.restart_alt_rounded),
-                          label: const Text(
-                            '\u041D\u0430\u0447\u0430\u0442\u044C AI-\u0434\u0438\u0430\u043B\u043E\u0433 \u0437\u0430\u043D\u043E\u0432\u043E',
-                          ),
+                          label: Text(_chatText('restartAiDialog')),
                         ),
                       ),
                       const SizedBox(height: 12),
@@ -6633,15 +6652,15 @@ class _ChatScreenState extends State<ChatScreen>
                             var boundaries = boundariesController.text.trim();
 
                             if (goal.isEmpty) {
-                              goal = '\u041F\u043E\u0434\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0442\u044C \u043F\u043E\u043B\u0435\u0437\u043D\u044B\u0439, \u0443\u0432\u0430\u0436\u0438\u0442\u0435\u043B\u044C\u043D\u044B\u0439 \u0434\u0438\u0430\u043B\u043E\u0433 \u0438 \u043F\u043E\u043C\u043E\u0433\u0430\u0442\u044C \u043F\u0440\u0438\u0439\u0442\u0438 \u043A \u043D\u0443\u0436\u043D\u043E\u043C\u0443 \u0440\u0435\u0437\u0443\u043B\u044C\u0442\u0430\u0442\u0443.';
+                              goal = _chatText('autoGoalDefault');
                             }
 
                             if (prompt.isEmpty) {
-                              prompt = '\u041E\u0442\u0432\u0435\u0447\u0430\u0439 \u043A\u043E\u0440\u043E\u0442\u043A\u043E, \u0435\u0441\u0442\u0435\u0441\u0442\u0432\u0435\u043D\u043D\u043E \u0438 \u0434\u0440\u0443\u0436\u0435\u043B\u044E\u0431\u043D\u043E. \u041E\u0442\u0432\u0435\u0447\u0430\u0439 \u043D\u0430 \u044F\u0437\u044B\u043A\u0435 \u0441\u043E\u0431\u0435\u0441\u0435\u0434\u043D\u0438\u043A\u0430.';
+                              prompt = _chatText('autoPromptDefault');
                             }
 
                             if (boundaries.isEmpty) {
-                              boundaries = '\u041D\u0435 \u0434\u0430\u0432\u0438, \u043D\u0435 \u0443\u0433\u0440\u043E\u0436\u0430\u0439, \u043D\u0435 \u043E\u0431\u043C\u0430\u043D\u044B\u0432\u0430\u0439 \u0438 \u043D\u0435 \u043C\u0430\u043D\u0438\u043F\u0443\u043B\u0438\u0440\u0443\u0439. \u0423\u0432\u0430\u0436\u0430\u0439 \u043E\u0442\u043A\u0430\u0437 \u0438 \u043F\u0440\u043E\u0441\u044C\u0431\u0443 \u043F\u0440\u0435\u043A\u0440\u0430\u0442\u0438\u0442\u044C \u043E\u0431\u0449\u0435\u043D\u0438\u0435.';
+                              boundaries = _chatText('autoBoundariesDefault');
                             }
 
                             SocketService.instance.setAutoReplySettings(
@@ -6681,9 +6700,9 @@ class _ChatScreenState extends State<ChatScreen>
                             ),
                           ),
                           icon: const Icon(Icons.save_rounded),
-                          label: const Text(
-                            '\u0421\u043E\u0445\u0440\u0430\u043D\u0438\u0442\u044C \u0446\u0435\u043B\u044C \u0438 \u0437\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u044C',
-                            style: TextStyle(fontWeight: FontWeight.w900),
+                          label: Text(
+                            _chatText('saveGoalAndStart'),
+                            style: const TextStyle(fontWeight: FontWeight.w900),
                           ),
                         ),
                       ),
@@ -8004,39 +8023,39 @@ class _ChatScreenState extends State<ChatScreen>
         _buildDesktopMessageContextItem(
           value: 'save',
           icon: Icons.bookmark_add_outlined,
-          label: 'Сохранить',
+          label: _chatText('save'),
         ),
         _buildDesktopMessageContextItem(
           value: 'reply',
           icon: Icons.reply_rounded,
-          label: '\u041E\u0442\u0432\u0435\u0442\u0438\u0442\u044C',
+          label: _chatText('reply'),
         ),
         _buildDesktopMessageContextItem(
           value: 'copy',
           icon: Icons.copy_rounded,
-          label: '\u041A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C',
+          label: _chatText('copy'),
         ),
         _buildDesktopMessageContextItem(
           value: 'forward',
           icon: Icons.forward_rounded,
-          label: '\u041F\u0435\u0440\u0435\u0441\u043B\u0430\u0442\u044C',
+          label: _chatText('forward'),
         ),
         if (isMe && forwardedFrom.isEmpty)
           _buildDesktopMessageContextItem(
             value: 'edit',
             icon: Icons.edit_rounded,
-            label: '\u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C',
+            label: _chatText('edit'),
           ),
         const PopupMenuDivider(height: 8),
         _buildDesktopMessageContextItem(
           value: 'heart',
           icon: Icons.favorite_rounded,
-          label: '\u0420\u0435\u0430\u043A\u0446\u0438\u044F \u2764\uFE0F',
+          label: '${_chatText('reaction')} ❤️',
         ),
         _buildDesktopMessageContextItem(
           value: 'translate',
           icon: Icons.translate_rounded,
-          label: '\u041F\u0435\u0440\u0435\u0432\u0435\u0441\u0442\u0438',
+          label: _chatText('translate'),
         ),
         _buildDesktopMessageContextItem(
           value: 'chatgpt',
@@ -8046,22 +8065,20 @@ class _ChatScreenState extends State<ChatScreen>
         _buildDesktopMessageContextItem(
           value: 'pin',
           icon: isPinned ? Icons.push_pin_outlined : Icons.push_pin_rounded,
-          label: isPinned
-              ? '\u041E\u0442\u043A\u0440\u0435\u043F\u0438\u0442\u044C'
-              : '\u0417\u0430\u043A\u0440\u0435\u043F\u0438\u0442\u044C',
+          label: isPinned ? _chatText('unpin') : _chatText('pin'),
         ),
         const PopupMenuDivider(height: 8),
         if (isMe)
           _buildDesktopMessageContextItem(
             value: 'delete_everyone',
             icon: Icons.delete_sweep_rounded,
-            label: '\u0423\u0434\u0430\u043B\u0438\u0442\u044C \u0431\u0435\u0437 \u0441\u043B\u0435\u0434\u043E\u0432',
+            label: _chatText('deleteForEveryone'),
             danger: true,
           ),
         _buildDesktopMessageContextItem(
           value: 'delete_me',
           icon: Icons.delete_rounded,
-          label: '\u0423\u0434\u0430\u043B\u0438\u0442\u044C',
+          label: _chatText('delete'),
           danger: true,
         ),
       ],
@@ -8130,18 +8147,13 @@ class _ChatScreenState extends State<ChatScreen>
         origin: widget.targetUser,
       );
       if (mounted)
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Добавлено в «Сохранённое»')),
-        );
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(_chatText('addedToSaved'))));
     } catch (_) {
       if (mounted)
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Не удалось сохранить. Проверьте, что вложение загружено.',
-            ),
-          ),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(_chatText('saveMessageError'))));
     }
   }
 
@@ -8300,8 +8312,8 @@ class _ChatScreenState extends State<ChatScreen>
                           children: [
                             _buildMessageMenuItem(
                               icon: Icons.bookmark_add_outlined,
-                              title: 'Сохранить',
-                              subtitle: 'Копия на этом устройстве',
+                              title: _chatText('save'),
+                              subtitle: _chatText('localCopy'),
                               onTap: () {
                                 closeAndRun(
                                   () => unawaited(_saveToSaved(message)),
@@ -8310,8 +8322,8 @@ class _ChatScreenState extends State<ChatScreen>
                             ),
                             _buildMessageMenuItem(
                               icon: Icons.reply_rounded,
-                              title: '\u041E\u0442\u0432\u0435\u0442\u0438\u0442\u044C',
-                              subtitle: '\u041E\u0442\u0432\u0435\u0442\u0438\u0442\u044C \u043D\u0430 \u044D\u0442\u043E \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435',
+                              title: _chatText('reply'),
+                              subtitle: _chatText('replySubtitle'),
                               onTap: () {
                                 closeAndRun(() {
                                   _startReply(message);
@@ -8327,8 +8339,8 @@ class _ChatScreenState extends State<ChatScreen>
 
                             _buildMessageMenuItem(
                               icon: Icons.copy_rounded,
-                              title: '\u041A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C',
-                              subtitle: '\u0421\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u0442\u0435\u043A\u0441\u0442 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F',
+                              title: _chatText('copy'),
+                              subtitle: _chatText('copySubtitle'),
                               onTap: () {
                                 Navigator.of(dialogContext).pop();
 
@@ -8344,8 +8356,8 @@ class _ChatScreenState extends State<ChatScreen>
 
                             _buildMessageMenuItem(
                               icon: Icons.forward_rounded,
-                              title: '\u041F\u0435\u0440\u0435\u0441\u043B\u0430\u0442\u044C',
-                              subtitle: '\u041E\u0442\u043F\u0440\u0430\u0432\u0438\u0442\u044C \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435 \u0434\u0440\u0443\u0433\u043E\u043C\u0443',
+                              title: _chatText('forward'),
+                              subtitle: _chatText('forwardSubtitle'),
                               onTap: () {
                                 closeAndRun(() {
                                   unawaited(_forwardMessage(message));
@@ -8366,8 +8378,8 @@ class _ChatScreenState extends State<ChatScreen>
                               ),
                               _buildMessageMenuItem(
                                 icon: Icons.edit_rounded,
-                                title: '\u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C',
-                                subtitle: '\u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0441\u0432\u043E\u0451 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435',
+                                title: _chatText('edit'),
+                                subtitle: _chatText('editSubtitle'),
                                 onTap: () {
                                   closeAndRun(() {
                                     unawaited(_editMessage(message));
@@ -8384,8 +8396,8 @@ class _ChatScreenState extends State<ChatScreen>
 
                             _buildMessageMenuItem(
                               icon: Icons.translate_rounded,
-                              title: '\u041F\u0435\u0440\u0435\u0432\u0435\u0441\u0442\u0438',
-                              subtitle: '\u041F\u0435\u0440\u0435\u0432\u0435\u0441\u0442\u0438 \u0442\u0435\u043A\u0441\u0442 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F',
+                              title: _chatText('translate'),
+                              subtitle: _chatText('translateSubtitle'),
                               onTap: () {
                                 Navigator.of(dialogContext).pop();
 
@@ -8411,7 +8423,7 @@ class _ChatScreenState extends State<ChatScreen>
                             _buildMessageMenuItem(
                               icon: Icons.auto_awesome_rounded,
                               title: 'ChatGPT',
-                              subtitle: '\u0420\u0430\u0431\u043E\u0442\u0430 \u0441 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435\u043C \u0447\u0435\u0440\u0435\u0437 ChatGPT',
+                              subtitle: _chatText('chatGptSubtitle'),
                               onTap: () {
                                 Navigator.of(dialogContext).pop();
 
@@ -8439,11 +8451,11 @@ class _ChatScreenState extends State<ChatScreen>
                                   ? Icons.push_pin_outlined
                                   : Icons.push_pin_rounded,
                               title: isPinned
-                                  ? '\u041E\u0442\u043A\u0440\u0435\u043F\u0438\u0442\u044C'
-                                  : '\u0417\u0430\u043A\u0440\u0435\u043F\u0438\u0442\u044C',
+                                  ? _chatText('unpin')
+                                  : _chatText('pin'),
                               subtitle: isPinned
-                                  ? '\u0423\u0431\u0440\u0430\u0442\u044C \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435 \u0438\u0437 \u0437\u0430\u043A\u0440\u0435\u043F\u043B\u0451\u043D\u043D\u044B\u0445'
-                                  : '\u0417\u0430\u043A\u0440\u0435\u043F\u0438\u0442\u044C \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435 \u0432 \u0447\u0430\u0442\u0435',
+                                  ? _chatText('unpinSubtitle')
+                                  : _chatText('pinSubtitle'),
                               onTap: () {
                                 closeAndRun(() {
                                   _togglePinnedMessage(message);
@@ -8459,8 +8471,10 @@ class _ChatScreenState extends State<ChatScreen>
                               ),
                               _buildMessageMenuItem(
                                 icon: Icons.delete_sweep_rounded,
-                                title: '\u0423\u0434\u0430\u043B\u0438\u0442\u044C \u0431\u0435\u0437 \u0441\u043B\u0435\u0434\u043E\u0432',
-                                subtitle: '\u0423\u0434\u0430\u043B\u0438\u0442\u044C \u0434\u043B\u044F \u0432\u0441\u0435\u0445',
+                                title: _chatText('deleteForEveryone'),
+                                subtitle: _chatText(
+                                  'deleteForEveryoneSubtitle',
+                                ),
                                 danger: true,
                                 onTap: () {
                                   closeAndRun(() {
@@ -8481,9 +8495,8 @@ class _ChatScreenState extends State<ChatScreen>
 
                             _buildMessageMenuItem(
                               icon: Icons.delete_rounded,
-                              title:
-                                  '\u0423\u0434\u0430\u043B\u0438\u0442\u044C',
-                              subtitle: '\u0423\u0434\u0430\u043B\u0438\u0442\u044C \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435',
+                              title: _chatText('delete'),
+                              subtitle: _chatText('deleteMessageSubtitle'),
                               danger: true,
                               onTap: () {
                                 closeAndRun(() {
@@ -9392,9 +9405,8 @@ class _ChatScreenState extends State<ChatScreen>
     });
     if (blocked) _saveMessages();
     if (changed) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('SPARTAN TRUST синхронизирован')),
-      );
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(_chatText('trustSynced'))));
     }
   }
 
@@ -9402,18 +9414,14 @@ class _ChatScreenState extends State<ChatScreen>
     await showDialog<void>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Row(
+        title: Row(
           children: [
-            Icon(Icons.shield_rounded, color: SpartanPalette.gold),
-            SizedBox(width: 10),
-            Expanded(child: Text('Что такое SPARTAN TRUST?')),
+            const Icon(Icons.shield_rounded, color: SpartanPalette.gold),
+            const SizedBox(width: 10),
+            Expanded(child: Text(_chatText('whatIsTrust'))),
           ],
         ),
-        content: const Text(
-          'TRUST управляет безопасностью контакта. Доверие добавляет '
-          'золотую отметку, блокировка останавливает личные сообщения, '
-          'звонки и PULSE, а жалоба сохраняет причину.',
-        ),
+        content: Text(_chatText('trustExplanation')),
         actions: [
           TextButton(
             onPressed: () async {
@@ -9423,7 +9431,7 @@ class _ChatScreenState extends State<ChatScreen>
               if (dialogContext.mounted) Navigator.pop(dialogContext);
             },
             child: Text(
-              firstTime ? 'Понятно, больше не показывать' : 'Понятно',
+              firstTime ? _chatText('gotItDontShow') : _chatText('gotIt'),
             ),
           ),
         ],
@@ -9463,7 +9471,7 @@ class _ChatScreenState extends State<ChatScreen>
                     ),
                   ),
                   IconButton(
-                    tooltip: 'Что такое TRUST?',
+                    tooltip: _chatText('whatIsTrust'),
                     onPressed: () => unawaited(_showTrustExplanation()),
                     icon: const Icon(Icons.info_outline_rounded),
                   ),
@@ -9493,10 +9501,10 @@ class _ChatScreenState extends State<ChatScreen>
                 ),
                 title: Text(
                   _contactTrusted
-                      ? 'Убрать из доверенных'
-                      : 'Добавить в доверенные',
+                      ? _chatText('removeTrusted')
+                      : _chatText('addTrusted'),
                 ),
-                subtitle: const Text('Показать золотую отметку доверия'),
+                subtitle: Text(_chatText('trustBadgeSubtitle')),
                 onTap: () => Navigator.pop(sheetContext, 'trust'),
               ),
               ListTile(
@@ -9508,10 +9516,10 @@ class _ChatScreenState extends State<ChatScreen>
                 ),
                 title: Text(
                   _contactBlocked
-                      ? 'Разблокировать контакт'
-                      : 'Заблокировать контакт',
+                      ? _chatText('unblockContact')
+                      : _chatText('blockContact'),
                 ),
-                subtitle: const Text('Остановить личную связь без уведомления'),
+                subtitle: Text(_chatText('blockSubtitle')),
                 onTap: () => Navigator.pop(sheetContext, 'block'),
               ),
               ListTile(
@@ -9520,9 +9528,11 @@ class _ChatScreenState extends State<ChatScreen>
                   color: SpartanPalette.gold,
                 ),
                 title: Text(
-                  _contactReported ? 'Жалоба отправлена' : 'Пожаловаться',
+                  _contactReported
+                      ? _chatText('reportSent')
+                      : _chatText('report'),
                 ),
-                subtitle: const Text('Сохранить категорию нарушения'),
+                subtitle: Text(_chatText('reportSubtitle')),
                 enabled: !_contactReported,
                 onTap: _contactReported
                     ? null
@@ -9556,24 +9566,25 @@ class _ChatScreenState extends State<ChatScreen>
       final reason = await showDialog<String>(
         context: context,
         builder: (dialogContext) => AlertDialog(
-          title: const Text('Причина жалобы'),
-          content: const Text('Выберите наиболее подходящую причину.'),
+          title: Text(_chatText('reportReason')),
+          content: Text(_chatText('chooseReportReason')),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(dialogContext, 'Мошенничество'),
-              child: const Text('Мошенничество'),
+              onPressed: () => Navigator.pop(dialogContext, _chatText('fraud')),
+              child: Text(_chatText('fraud')),
             ),
             TextButton(
-              onPressed: () => Navigator.pop(dialogContext, 'Спам'),
-              child: const Text('Спам'),
+              onPressed: () => Navigator.pop(dialogContext, _chatText('spam')),
+              child: Text(_chatText('spam')),
             ),
             TextButton(
-              onPressed: () => Navigator.pop(dialogContext, 'Угрозы'),
-              child: const Text('Угрозы'),
+              onPressed: () =>
+                  Navigator.pop(dialogContext, _chatText('threats')),
+              child: Text(_chatText('threats')),
             ),
             TextButton(
-              onPressed: () => Navigator.pop(dialogContext, 'Другое'),
-              child: const Text('Другое'),
+              onPressed: () => Navigator.pop(dialogContext, _chatText('other')),
+              child: Text(_chatText('other')),
             ),
           ],
         ),
@@ -9589,12 +9600,12 @@ class _ChatScreenState extends State<ChatScreen>
         duration: const Duration(seconds: 3),
         content: Text(
           action == 'report'
-              ? 'Жалоба сохранена на устройстве'
+              ? _chatText('reportSaved')
               : action == 'block'
               ? (_contactBlocked
-                    ? 'Контакт заблокирован'
-                    : 'Контакт разблокирован')
-              : 'Настройка контакта сохранена',
+                    ? _chatText('contactBlocked')
+                    : _chatText('contactUnblocked'))
+              : _chatText('contactSettingSaved'),
         ),
       ),
     );
@@ -9625,9 +9636,12 @@ class _ChatScreenState extends State<ChatScreen>
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'SPARTAN SHIELD · проверьте сообщение',
-                    style: TextStyle(color: _gold, fontWeight: FontWeight.w800),
+                  Text(
+                    _chatText('shieldCheckMessage'),
+                    style: const TextStyle(
+                      color: _gold,
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
                   const SizedBox(height: 3),
                   Text(
@@ -9640,9 +9654,9 @@ class _ChatScreenState extends State<ChatScreen>
                     ),
                   ),
                   const SizedBox(height: 6),
-                  const Text(
-                    'Анализ выполнен на устройстве',
-                    style: TextStyle(
+                  Text(
+                    _chatText('analysisOnDevice'),
+                    style: const TextStyle(
                       color: SpartanPalette.secondary,
                       fontSize: 11,
                     ),
@@ -9654,13 +9668,13 @@ class _ChatScreenState extends State<ChatScreen>
                       minimumSize: const Size(0, 30),
                       tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     ),
-                    child: const Text('Проверить контакт'),
+                    child: Text(_chatText('checkContact')),
                   ),
                 ],
               ),
             ),
             IconButton(
-              tooltip: 'Скрыть предупреждение',
+              tooltip: _chatText('hideWarning'),
               onPressed: () => setState(
                 () => _dismissedShieldFingerprint = finding.fingerprint,
               ),
@@ -9689,20 +9703,17 @@ class _ChatScreenState extends State<ChatScreen>
           children: [
             const Icon(Icons.block_rounded, color: SpartanPalette.secondary),
             const SizedBox(width: 10),
-            const Expanded(
-              child: Text('Контакт заблокирован. Новые сообщения скрыты.'),
-            ),
+            Expanded(child: Text(_chatText('blockedBanner'))),
             TextButton(
               onPressed: () => unawaited(
                 _openTrustActions(
-                  const ShieldAssessment(
-                    reason:
-                        'Управляйте доверием и безопасностью этого контакта.',
+                  ShieldAssessment(
+                    reason: _chatText('trustManageReason'),
                     level: 'info',
                   ),
                 ),
               ),
-              child: const Text('Изменить'),
+              child: Text(_chatText('edit')),
             ),
           ],
         ),
@@ -9712,10 +9723,10 @@ class _ChatScreenState extends State<ChatScreen>
 
   Widget _buildMessages() {
     if (_messages.isEmpty) {
-      return const Center(
+      return Center(
         child: Text(
-          '\u041D\u0435\u0442 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0439',
-          style: TextStyle(
+          _chatText('noMessages'),
+          style: const TextStyle(
             color: SpartanPalette.secondary,
             fontSize: 16,
             fontWeight: FontWeight.w500,
@@ -9875,7 +9886,7 @@ class _ChatScreenState extends State<ChatScreen>
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
                       IconButton.outlined(
-                        tooltip: 'Вложение',
+                        tooltip: _chatText('attachment'),
                         onPressed: _sendingPrivateMedia
                             ? null
                             : () => unawaited(_showPrivateAttachmentMenu()),
@@ -9929,13 +9940,13 @@ class _ChatScreenState extends State<ChatScreen>
                             textInputAction: TextInputAction.newline,
                             onChanged: _handleTextChanged,
                             decoration: InputDecoration(
-                              hintText: 'Сообщение…',
+                              hintText: _chatText('messageHint'),
                               fillColor: SpartanPalette.canvasDeep.withValues(
                                 alpha: .72,
                               ),
                               filled: true,
                               suffixIcon: IconButton(
-                                tooltip: 'Смайлики',
+                                tooltip: _chatText('emoji'),
                                 onPressed: _openComposerEmoji,
                                 icon: const Icon(
                                   Icons.emoji_emotions_outlined,
@@ -9979,8 +9990,8 @@ class _ChatScreenState extends State<ChatScreen>
                           height: 48,
                           child: IconButton.filled(
                             tooltip: Platform.isWindows
-                                ? 'Отправить — Enter'
-                                : 'Отправить',
+                                ? _chatText('sendEnter')
+                                : _chatText('send'),
                             onPressed: _sendMessage,
                             style: IconButton.styleFrom(
                               backgroundColor: SpartanPalette.gold,
@@ -10123,11 +10134,11 @@ class _ChatScreenState extends State<ChatScreen>
                                 ),
                               ),
                               const SizedBox(width: 14),
-                              const Expanded(
+                              Expanded(
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text(
+                                    const Text(
                                       'SPARTAN PULSE',
                                       style: TextStyle(
                                         color: SpartanPalette.gold,
@@ -10137,8 +10148,8 @@ class _ChatScreenState extends State<ChatScreen>
                                       ),
                                     ),
                                     Text(
-                                      'Созвон без дозвона',
-                                      style: TextStyle(
+                                      _chatText('pulseTagline'),
+                                      style: const TextStyle(
                                         color: SpartanPalette.secondary,
                                       ),
                                     ),
@@ -10174,10 +10185,16 @@ class _ChatScreenState extends State<ChatScreen>
                                   const SizedBox(height: 10),
                                   Text(
                                     matched
-                                        ? 'Оба готовы · ${service.countdownSeconds}'
+                                        ? _chatText('bothReadyCountdown', {
+                                            'seconds': service.countdownSeconds,
+                                          })
                                         : incoming
-                                        ? '${widget.targetUser} ждёт вашего решения'
-                                        : 'Ждём готовность ${widget.targetUser}',
+                                        ? _chatText('awaitsDecision', {
+                                            'user': widget.targetUser,
+                                          })
+                                        : _chatText('waitingForReady', {
+                                            'user': widget.targetUser,
+                                          }),
                                     textAlign: TextAlign.center,
                                     style: const TextStyle(
                                       color: SpartanPalette.ink,
@@ -10188,8 +10205,8 @@ class _ChatScreenState extends State<ChatScreen>
                                   const SizedBox(height: 6),
                                   Text(
                                     active.video
-                                        ? 'Видеозвонок'
-                                        : 'Аудиозвонок',
+                                        ? _chatText('videoCall')
+                                        : _chatText('audioCall'),
                                     style: const TextStyle(
                                       color: SpartanPalette.secondary,
                                     ),
@@ -10207,7 +10224,7 @@ class _ChatScreenState extends State<ChatScreen>
                                         service.decline();
                                         Navigator.of(sheetContext).pop();
                                       },
-                                      child: const Text('Не сейчас'),
+                                      child: Text(_chatText('notNow')),
                                     ),
                                   ),
                                   const SizedBox(width: 12),
@@ -10218,7 +10235,7 @@ class _ChatScreenState extends State<ChatScreen>
                                         Navigator.of(sheetContext).pop();
                                       },
                                       icon: const Icon(Icons.check_rounded),
-                                      label: const Text('Я готов'),
+                                      label: Text(_chatText('imReady')),
                                     ),
                                   ),
                                 ],
@@ -10230,12 +10247,13 @@ class _ChatScreenState extends State<ChatScreen>
                                   Navigator.of(sheetContext).pop();
                                 },
                                 icon: const Icon(Icons.close_rounded),
-                                label: const Text('Отменить SPARTAN PULSE'),
+                                label: Text(_chatText('cancelPulse')),
                               ),
                           ] else ...[
                             Text(
-                              'Сообщить ${widget.targetUser}, что вы готовы поговорить. '
-                              'Звонок начнётся только после взаимного согласия.',
+                              _chatText('pulseInviteExplanation', {
+                                'user': widget.targetUser,
+                              }),
                               style: const TextStyle(
                                 color: SpartanPalette.secondary,
                                 height: 1.4,
@@ -10247,7 +10265,7 @@ class _ChatScreenState extends State<ChatScreen>
                                 modeButton(
                                   selected: !video,
                                   icon: Icons.call_rounded,
-                                  label: 'Аудио',
+                                  label: _chatText('audio'),
                                   onPressed: () =>
                                       setSheetState(() => video = false),
                                 ),
@@ -10255,16 +10273,16 @@ class _ChatScreenState extends State<ChatScreen>
                                 modeButton(
                                   selected: video,
                                   icon: Icons.videocam_rounded,
-                                  label: 'Видео',
+                                  label: _chatText('video'),
                                   onPressed: () =>
                                       setSheetState(() => video = true),
                                 ),
                               ],
                             ),
                             const SizedBox(height: 18),
-                            const Text(
-                              'Я свободен в течение',
-                              style: TextStyle(
+                            Text(
+                              _chatText('freeFor'),
+                              style: const TextStyle(
                                 color: SpartanPalette.ink,
                                 fontWeight: FontWeight.w700,
                               ),
@@ -10274,10 +10292,10 @@ class _ChatScreenState extends State<ChatScreen>
                               spacing: 8,
                               runSpacing: 8,
                               children: [
-                                for (final option in const {
-                                  15: '15 минут',
-                                  60: '1 час',
-                                  240: '4 часа',
+                                for (final option in {
+                                  15: _chatText('minutes15'),
+                                  60: _chatText('hour1'),
+                                  240: _chatText('hours4'),
                                 }.entries)
                                   ChoiceChip(
                                     label: Text(option.value),
@@ -10315,13 +10333,13 @@ class _ChatScreenState extends State<ChatScreen>
                                 Navigator.of(sheetContext).pop();
                               },
                               icon: const Icon(Icons.bolt_rounded),
-                              label: const Text('ПОЗВАТЬ, КОГДА ОБА СВОБОДНЫ'),
+                              label: Text(_chatText('inviteWhenFree')),
                             ),
                             const SizedBox(height: 10),
-                            const Text(
-                              'Точный статус занятости не раскрывается. Видно только взаимную готовность.',
+                            Text(
+                              _chatText('pulsePrivacy'),
                               textAlign: TextAlign.center,
-                              style: TextStyle(
+                              style: const TextStyle(
                                 color: SpartanPalette.muted,
                                 fontSize: 12,
                               ),
@@ -10342,15 +10360,16 @@ class _ChatScreenState extends State<ChatScreen>
 
   void _startPrivateCall({required bool video}) {
     if (!SocketService.instance.isConnected) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Нет подключения к серверу')));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_chatText('noServerConnection'))));
       return;
     }
 
     if (CallService.instance.hasCall) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Другой звонок уже активен')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(_chatText('anotherCallActive'))));
       return;
     }
 
@@ -10456,7 +10475,7 @@ class _ChatScreenState extends State<ChatScreen>
                                 Flexible(
                                   child: Text(
                                     _contactIsTyping
-                                        ? '\u043F\u0435\u0447\u0430\u0442\u0430\u0435\u0442...'
+                                        ? _chatText('typing')
                                         : _formatContactStatus(),
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
@@ -10514,7 +10533,7 @@ class _ChatScreenState extends State<ChatScreen>
                         : null,
                   ),
                   child: IconButton(
-                    tooltip: 'SPARTAN PULSE · созвон, когда оба свободны',
+                    tooltip: _chatText('pulseTooltip'),
                     onPressed: () => unawaited(_showPulseSheet()),
                     icon: Icon(
                       Icons.bolt_rounded,
@@ -10527,21 +10546,21 @@ class _ChatScreenState extends State<ChatScreen>
               },
             ),
             IconButton(
-              tooltip: 'Аудиозвонок',
+              tooltip: _chatText('audioCall'),
               onPressed: () {
                 _startPrivateCall(video: false);
               },
               icon: const Icon(Icons.call_rounded, color: _gold),
             ),
             IconButton(
-              tooltip: 'Видеозвонок',
+              tooltip: _chatText('videoCall'),
               onPressed: () {
                 _startPrivateCall(video: true);
               },
               icon: const Icon(Icons.videocam_rounded, color: _gold),
             ),
             PopupMenuButton<String>(
-              tooltip: 'Ещё',
+              tooltip: _chatText('more'),
               icon: const Icon(Icons.more_vert_rounded),
               onSelected: (value) {
                 if (value == 'ai') unawaited(_showSpartanAiSheet());
@@ -10549,8 +10568,8 @@ class _ChatScreenState extends State<ChatScreen>
                 if (value == 'trust') {
                   unawaited(
                     _openTrustActions(
-                      const ShieldAssessment(
-                        reason: 'Управляйте доверием и безопасностью этого контакта.',
+                      ShieldAssessment(
+                        reason: _chatText('trustManageReason'),
                         level: 'info',
                       ),
                     ),
@@ -10558,15 +10577,15 @@ class _ChatScreenState extends State<ChatScreen>
                 }
               },
               itemBuilder: (_) => [
-                const PopupMenuItem(
+                PopupMenuItem(
                   value: 'trust',
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('SPARTAN TRUST · контакт'),
+                      Text(_chatText('trustContact')),
                       Text(
-                        'Доверие, блокировка и жалобы',
-                        style: TextStyle(fontSize: 11),
+                        _chatText('trustSubtitle'),
+                        style: const TextStyle(fontSize: 11),
                       ),
                     ],
                   ),
@@ -10577,8 +10596,8 @@ class _ChatScreenState extends State<ChatScreen>
                   enabled: !_autoReplyLoading,
                   child: Text(
                     _autoReplyEnabled
-                        ? 'Автоответы · включены'
-                        : 'Настроить автоответы',
+                        ? _chatText('autoRepliesOn')
+                        : _chatText('configureAutoReplies'),
                   ),
                 ),
               ],
