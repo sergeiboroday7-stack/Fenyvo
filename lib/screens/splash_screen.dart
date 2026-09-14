@@ -1,25 +1,22 @@
 import '../theme/spartan_theme.dart';
+
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/socket_service.dart';
+import '../config/server_config.dart';
 import 'auth_screen.dart';
 import 'chat_list_screen.dart';
 
 class SplashScreen extends StatefulWidget {
-  const SplashScreen({
-    super.key,
-  });
+  const SplashScreen({super.key});
 
   @override
-  State<SplashScreen> createState() =>
-      _SplashScreenState();
+  State<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState
-    extends State<SplashScreen> {
-  String _statusText =
-      'Подготовка приложения...';
+class _SplashScreenState extends State<SplashScreen> {
+  String _statusText = 'Подготовка приложения...';
 
   bool _isLoading = true;
 
@@ -29,50 +26,32 @@ class _SplashScreenState
   void initState() {
     super.initState();
 
-    SocketService.instance.addMessageHandler(
-      _handleSocketMessage,
-    );
+    SocketService.instance.addMessageHandler(_handleSocketMessage);
 
     _initialize();
   }
 
   @override
   void dispose() {
-    SocketService.instance.removeMessageHandler(
-      _handleSocketMessage,
-    );
+    SocketService.instance.removeMessageHandler(_handleSocketMessage);
 
     super.dispose();
   }
 
   Future<void> _initialize() async {
-    final prefs =
-        await SharedPreferences.getInstance();
+    final prefs = await SharedPreferences.getInstance();
 
-    final username =
-        prefs.getString('username');
+    final username = prefs.getString('username');
 
-    final password =
-        prefs.getString('password');
+    final password = prefs.getString('password');
 
-    final ip =
-        prefs.getString('ip');
-
-    final port =
-        prefs.getString('port');
-
-    final loggedIn =
-        prefs.getBool('logged_in') ?? false;
+    final loggedIn = prefs.getBool('logged_in') ?? false;
 
     if (!loggedIn ||
         username == null ||
         username.isEmpty ||
         password == null ||
-        password.isEmpty ||
-        ip == null ||
-        ip.isEmpty ||
-        port == null ||
-        port.isEmpty) {
+        password.isEmpty) {
       await _goToAuth();
 
       return;
@@ -83,68 +62,44 @@ class _SplashScreenState
     }
 
     setState(() {
-      _statusText =
-          'Подключение к серверу...';
+      _statusText = 'Подключение к серверу...';
     });
 
-    final url =
-        'ws://$ip:$port';
+    final url = ServerConfig.websocketUri.toString();
 
-    final connected =
-        await SocketService.instance.connect(
-      url,
-    );
+    final connected = await SocketService.instance.connect(url);
 
     if (!mounted) {
       return;
     }
 
     if (!connected) {
-      await _showErrorAndGoToAuth(
-        'Не удалось подключиться к серверу',
-      );
+      await _showErrorAndGoToAuth('Не удалось подключиться к серверу');
 
       return;
     }
 
     setState(() {
-      _statusText =
-          'Автоматический вход...';
+      _statusText = 'Автоматический вход...';
     });
 
-    SocketService.instance.login(
-      username,
-      password,
-    );
+    SocketService.instance.login(username, password);
   }
 
-  void _handleSocketMessage(
-    Map<String, dynamic> message,
-  ) {
-    final type =
-        message['type']
-                ?.toString() ??
-            '';
+  void _handleSocketMessage(Map<String, dynamic> message) {
+    final type = message['type']?.toString() ?? '';
 
-    final rawData =
-        message['data'];
+    final rawData = message['data'];
 
-    final data =
-        rawData is Map
-            ? Map<String, dynamic>.from(
-                rawData,
-              )
-            : <String, dynamic>{};
+    final data = rawData is Map
+        ? Map<String, dynamic>.from(rawData)
+        : <String, dynamic>{};
 
     if (type == 'login_success') {
-      final username =
-          data['username']
-                  ?.toString() ??
-              '';
+      final username = data['username']?.toString() ?? '';
 
       if (username.isNotEmpty) {
-        SocketService.instance.currentUser =
-            username;
+        SocketService.instance.currentUser = username;
       }
 
       _goToChatList();
@@ -153,35 +108,23 @@ class _SplashScreenState
     }
 
     if (type == 'login_error') {
-      final reason =
-          data['reason']
-                  ?.toString() ??
-              'Ошибка входа';
+      final reason = data['reason']?.toString() ?? 'Ошибка входа';
 
-      _showErrorAndGoToAuth(
-        reason,
-      );
+      _showErrorAndGoToAuth(reason);
 
       return;
     }
 
     if (type == 'disconnected') {
       final reason =
-          data['reason']
-                  ?.toString() ??
-              'Соединение с сервером потеряно';
+          data['reason']?.toString() ?? 'Соединение с сервером потеряно';
 
-      _showErrorAndGoToAuth(
-        reason,
-      );
+      _showErrorAndGoToAuth(reason);
     }
   }
 
-  Future<void> _showErrorAndGoToAuth(
-    String message,
-  ) async {
-    if (!mounted ||
-        _hasNavigated) {
+  Future<void> _showErrorAndGoToAuth(String message) async {
+    if (!mounted || _hasNavigated) {
       return;
     }
 
@@ -190,18 +133,13 @@ class _SplashScreenState
       _isLoading = false;
     });
 
-    await Future.delayed(
-      const Duration(
-        seconds: 2,
-      ),
-    );
+    await Future.delayed(const Duration(seconds: 2));
 
     await _goToAuth();
   }
 
   Future<void> _goToAuth() async {
-    if (!mounted ||
-        _hasNavigated) {
+    if (!mounted || _hasNavigated) {
       return;
     }
 
@@ -209,96 +147,56 @@ class _SplashScreenState
 
     Navigator.pushReplacement(
       context,
-      MaterialPageRoute(
-        builder: (_) =>
-            const AuthScreen(),
-      ),
+      MaterialPageRoute(builder: (_) => const AuthScreen()),
     );
   }
 
   void _goToChatList() {
-    if (!mounted ||
-        _hasNavigated) {
+    if (!mounted || _hasNavigated) {
       return;
     }
 
     _hasNavigated = true;
 
     setState(() {
-      _statusText =
-          'Вход выполнен!';
+      _statusText = 'Вход выполнен!';
     });
 
     Navigator.pushReplacement(
       context,
-      MaterialPageRoute(
-        builder: (_) =>
-            const ChatListScreen(),
-      ),
+      MaterialPageRoute(builder: (_) => const ChatListScreen()),
     );
   }
 
   @override
-  Widget build(
-    BuildContext context,
-  ) {
+  Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor:
-          SpartanPalette.canvas,
-
+      backgroundColor: SpartanPalette.canvas,
       body: Center(
         child: Column(
-          mainAxisAlignment:
-              MainAxisAlignment.center,
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(
-              Icons.shield,
-              size: 80,
-              color:
-                  SpartanPalette.ink,
-            ),
-
-            const SizedBox(
-              height: 20,
-            ),
-
+            const Icon(Icons.shield, size: 80, color: SpartanPalette.ink),
+            const SizedBox(height: 20),
             const Text(
               'SPARTAN CHAT',
               style: TextStyle(
-                color:
-                    SpartanPalette.ink,
+                color: SpartanPalette.ink,
                 fontSize: 28,
-                fontWeight:
-                    FontWeight.bold,
+                fontWeight: FontWeight.bold,
               ),
             ),
-
-            const SizedBox(
-              height: 40,
-            ),
-
+            const SizedBox(height: 40),
             if (_isLoading)
-              const CircularProgressIndicator(
-                color:
-                    SpartanPalette.ink,
-              ),
-
-            const SizedBox(
-              height: 20,
-            ),
-
+              const CircularProgressIndicator(color: SpartanPalette.ink),
+            const SizedBox(height: 20),
             Padding(
-              padding:
-                  const EdgeInsets.symmetric(
-                horizontal: 30,
-              ),
+              padding: const EdgeInsets.symmetric(horizontal: 30),
               child: Text(
                 _statusText,
-                textAlign:
-                    TextAlign.center,
+                textAlign: TextAlign.center,
                 style: const TextStyle(
-                  color:
-                      SpartanPalette.secondary,
+                  color: SpartanPalette.secondary,
                   fontSize: 14,
                 ),
               ),

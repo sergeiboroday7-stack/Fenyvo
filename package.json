@@ -1,4 +1,7 @@
 {
+  "scripts": {
+    "check": "node --check server.js && node --test test/server_config_test.js"
+  },
   "dependencies": {
     "firebase-admin": "^14.3.0",
     "ws": "^8.21.3"

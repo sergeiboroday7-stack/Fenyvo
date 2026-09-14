@@ -3,6 +3,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { loadServerConfig } = require('./server_config');
 
 const {
   initializeApp,
@@ -13,12 +14,18 @@ const {
   getMessaging,
 } = require('firebase-admin/messaging');
 
-const PORT = 8080;
-const MEDIA_PORT = 8081;
-const MAX_MEDIA_BYTES = 1024 * 1024 * 1024;
+const SERVER_CONFIG = loadServerConfig(__dirname);
+const PORT = SERVER_CONFIG.wsPort;
+const MEDIA_PORT = SERVER_CONFIG.mediaPort;
+const MAX_MEDIA_BYTES = SERVER_CONFIG.maxMediaBytes;
+const DATA_DIR = SERVER_CONFIG.dataDirectory;
+const LOG_MESSAGE_CONTENT = SERVER_CONFIG.logMessageContent;
+const LOG_CLIENT_IP = SERVER_CONFIG.logClientIp;
+
+fs.mkdirSync(DATA_DIR, { recursive: true });
 
 const USERS_FILE = path.join(
-  __dirname,
+  DATA_DIR,
   'users.json',
 );
 
@@ -28,77 +35,74 @@ const USERS_FILE = path.join(
 // ========================================
 
 const GROUPS_FILE = path.join(
-  __dirname,
+  DATA_DIR,
   'groups.json',
 );
 
 const GROUP_MESSAGES_FILE = path.join(
-  __dirname,
+  DATA_DIR,
   'group_messages.json',
 );
 
 const AVATARS_DIR = path.join(
-  __dirname,
+  DATA_DIR,
   'avatars',
 );
 
 const MEDIA_DIR = path.join(
-  __dirname,
+  DATA_DIR,
   'media',
 );
 
 const MEDIA_INDEX_FILE = path.join(
-  __dirname,
+  DATA_DIR,
   'media_index.json',
 );
 
 const FCM_TOKENS_FILE = path.join(
-  __dirname,
+  DATA_DIR,
   'fcm_tokens.json',
 );
 
 const OFFLINE_MESSAGES_FILE = path.join(
-  __dirname,
+  DATA_DIR,
   'offline_messages.json',
 );
 
 const OFFLINE_MESSAGE_STATUS_FILE = path.join(
-  __dirname,
+  DATA_DIR,
   'offline_message_status.json',
 );
 
 const AUTO_REPLY_SETTINGS_FILE = path.join(
-  __dirname,
+  DATA_DIR,
   'auto_reply_settings.json',
 );
 
 const AUTO_REPLY_HISTORY_FILE = path.join(
-  __dirname,
+  DATA_DIR,
   'auto_reply_history.json',
 );
 
 const SPARTAN_AI_HISTORY_FILE = path.join(
-  __dirname,
+  DATA_DIR,
   'spartan_ai_history.json',
 );
 
 // TRUST decisions contain only account-level safety state. Message text and
 // local runtime databases are intentionally never written here.
 const TRUST_DECISIONS_FILE = path.join(
-  __dirname,
+  DATA_DIR,
   'trust_decisions.json',
 );
 
 // Public Signal pre-key bundles only. Private keys never leave devices.
 const E2EE_BUNDLES_FILE = path.join(
-  __dirname,
+  DATA_DIR,
   'e2ee_prekey_bundles.json',
 );
 
-const FIREBASE_SERVICE_ACCOUNT_FILE = path.join(
-  __dirname,
-  'firebase-service-account.json',
-);
+const FIREBASE_SERVICE_ACCOUNT_FILE = SERVER_CONFIG.firebaseServiceAccountFile;
 
 // ========================================
 // FIREBASE ADMIN
@@ -182,7 +186,7 @@ if (!fs.existsSync(MEDIA_DIR)) {
 
 const wss =
   new WebSocket.Server({
-    host: '0.0.0.0',
+    host: SERVER_CONFIG.wsHost,
     port: PORT,
   });
 
@@ -2522,8 +2526,8 @@ const mediaServer = http.createServer((req, res) => {
   jsonResponse(res, 404, { error: 'Не найдено' });
 });
 
-mediaServer.listen(MEDIA_PORT, '0.0.0.0', () => {
-  console.log(`📦 Медиа-сервер запущен на порту ${MEDIA_PORT}`);
+mediaServer.listen(MEDIA_PORT, SERVER_CONFIG.mediaHost, () => {
+  console.log(`📦 Медиа-сервер: ${SERVER_CONFIG.mediaHost}:${MEDIA_PORT}`);
 });
 
 // ========================================
@@ -4056,7 +4060,9 @@ function scheduleChatGptAutoReply({
             }
 
             console.log(
-              `💡 SPARTAN AI совет для ${owner} ↔ ${peer}: action=${action}; ${replyText}${reaction ? ` | реакция ${reaction}` : ''}`,
+              LOG_MESSAGE_CONTENT
+                ? `💡 SPARTAN AI совет для ${owner} ↔ ${peer}: action=${action}; ${replyText}${reaction ? ` | реакция ${reaction}` : ''}`
+                : `💡 SPARTAN AI совет для ${owner} ↔ ${peer}: action=${action}`,
             );
 
             return;
@@ -4286,7 +4292,9 @@ function scheduleChatGptAutoReply({
           }
 
           console.log(
-            `🤖 SPARTAN AI автообщение: ${owner} → ${peer}: action=${action}; ${replyText}${reaction ? ` | реакция ${reaction}` : ''}`,
+            LOG_MESSAGE_CONTENT
+              ? `🤖 SPARTAN AI автообщение: ${owner} → ${peer}: action=${action}; ${replyText}${reaction ? ` | реакция ${reaction}` : ''}`
+              : `🤖 SPARTAN AI автообщение: ${owner} → ${peer}: action=${action}`,
           );
         } catch (error) {
           console.error(
@@ -4336,7 +4344,7 @@ console.log(
 console.log('');
 
 console.log(
-  `🚀 Сервер запущен на порту ${PORT}`,
+  `🚀 Сервер: ${SERVER_CONFIG.wsHost}:${PORT}`,
 );
 
 console.log('');
@@ -4365,9 +4373,9 @@ wss.on(
     request,
   ) => {
     console.log(
-      '🟢 Новое подключение:',
-      request.socket
-        .remoteAddress,
+      LOG_CLIENT_IP
+        ? `🟢 Новое подключение: ${request.socket.remoteAddress}`
+        : '🟢 Новое подключение',
     );
 
     let currentUser =
@@ -6066,7 +6074,11 @@ wss.on(
 
             sendToGroupMembers(group, 'group_message', messageData);
             sendToGroupMembers(group, 'group_updated', { group });
-            console.log(`👥💬 ${currentUser} → ${group.name}: ${text} [${messageType}]`);
+            console.log(
+              LOG_MESSAGE_CONTENT
+                ? `👥💬 ${currentUser} → ${group.name}: ${text} [${messageType}]`
+                : `👥💬 ${currentUser} → ${group.name}: [${messageType}]`,
+            );
             return;
           }
 
@@ -7287,7 +7299,11 @@ wss.on(
             }
 
             send(ws, 'message_sent', messageData);
-            console.log(`📎 ${currentUser} → ${to}: ${text} [${requestedType}]`);
+            console.log(
+              LOG_MESSAGE_CONTENT
+                ? `📎 ${currentUser} → ${to}: ${text} [${requestedType}]`
+                : `📎 ${currentUser} → ${to}: [${requestedType}]`,
+            );
             return;
           }
 
@@ -7494,10 +7510,11 @@ wss.on(
             );
 
             console.log(
-              messageType ===
-                  'voice'
+              messageType === 'voice'
                 ? `🎙️ ${currentUser} → ${to}: голосовое ${Math.ceil(voiceDurationMs / 1000)} сек.`
-                : `💬 ${currentUser} → ${to}: ${text}`,
+                : LOG_MESSAGE_CONTENT
+                  ? `💬 ${currentUser} → ${to}: ${text}`
+                  : `💬 ${currentUser} → ${to}: текстовое сообщение`,
             );
 
             const receiver =

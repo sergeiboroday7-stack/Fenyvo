@@ -7,10 +7,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/socket_service.dart';
 import '../services/app_language_service.dart';
+import '../config/server_config.dart';
 import 'chat_list_screen.dart';
-
-const String serverIp = '192.168.0.117';
-const String serverPort = '8080';
 
 class AuthScreen extends StatefulWidget {
   const AuthScreen({super.key});
@@ -23,14 +21,6 @@ class _AuthScreenState extends State<AuthScreen> {
   final TextEditingController _usernameController = TextEditingController();
 
   final TextEditingController _passwordController = TextEditingController();
-
-  final TextEditingController _ipController = TextEditingController(
-    text: serverIp,
-  );
-
-  final TextEditingController _portController = TextEditingController(
-    text: serverPort,
-  );
 
   bool _isLoading = false;
   bool _isRegisterMode = false;
@@ -59,9 +49,6 @@ class _AuthScreenState extends State<AuthScreen> {
 
     _usernameController.dispose();
     _passwordController.dispose();
-    _ipController.dispose();
-    _portController.dispose();
-
     super.dispose();
   }
 
@@ -80,17 +67,10 @@ class _AuthScreenState extends State<AuthScreen> {
 
     final password = prefs.getString('password') ?? '';
 
-    final ip = prefs.getString('ip') ?? serverIp;
-
-    final port = prefs.getString('port') ?? serverPort;
-
     final loggedIn = prefs.getBool('logged_in') ?? false;
 
     _usernameController.text = username;
     _passwordController.text = password;
-    _ipController.text = ip;
-    _portController.text = port;
-
     if (loggedIn && username.isNotEmpty && password.isNotEmpty) {
       setState(() {
         _isAutoLogin = true;
@@ -232,9 +212,10 @@ class _AuthScreenState extends State<AuthScreen> {
 
       await prefs.setString('password', _passwordController.text);
 
-      await prefs.setString('ip', _ipController.text.trim());
-
-      await prefs.setString('port', _portController.text.trim());
+      // Old builds stored the private local server address. It is no longer
+      // user-configurable and should not remain in application preferences.
+      await prefs.remove('ip');
+      await prefs.remove('port');
 
       await prefs.setBool('logged_in', true);
 
@@ -262,23 +243,13 @@ class _AuthScreenState extends State<AuthScreen> {
 
     final password = _passwordController.text;
 
-    final ip = _ipController.text.trim();
-
-    final port = _portController.text.trim();
-
     if (username.isEmpty || password.isEmpty) {
       _stopLoadingWithError('Введите логин и пароль');
 
       return;
     }
 
-    if (ip.isEmpty || port.isEmpty) {
-      _stopLoadingWithError('Введите IP и порт сервера');
-
-      return;
-    }
-
-    final url = 'ws://$ip:$port';
+    final url = ServerConfig.websocketUri.toString();
 
     try {
       print('🔌 Подключение к: $url');
@@ -352,10 +323,6 @@ class _AuthScreenState extends State<AuthScreen> {
 
     final password = _passwordController.text;
 
-    final ip = _ipController.text.trim();
-
-    final port = _portController.text.trim();
-
     if (username.length < 3) {
       setState(() {
         _error = 'Логин должен содержать минимум 3 символа';
@@ -372,21 +339,13 @@ class _AuthScreenState extends State<AuthScreen> {
       return;
     }
 
-    if (ip.isEmpty || port.isEmpty) {
-      setState(() {
-        _error = 'Введите IP и порт сервера';
-      });
-
-      return;
-    }
-
     setState(() {
       _isLoading = true;
       _isAutoLogin = false;
       _error = '';
     });
 
-    final url = 'ws://$ip:$port';
+    final url = ServerConfig.websocketUri.toString();
 
     try {
       print('🆕 Подключение для регистрации: $url');
@@ -637,59 +596,6 @@ class _AuthScreenState extends State<AuthScreen> {
                                 hint: 'Password',
                                 icon: Icons.lock_outline,
                               ),
-                            ),
-
-                            const SizedBox(height: 13),
-
-                            Row(
-                              children: [
-                                Expanded(
-                                  flex: 3,
-                                  child: TextField(
-                                    controller: _ipController,
-                                    enabled: !_isLoading,
-                                    style: const TextStyle(
-                                      color: SpartanPalette.ink,
-                                      fontSize: 14,
-                                    ),
-                                    keyboardType: TextInputType.number,
-                                    textInputAction: TextInputAction.next,
-                                    decoration: _inputDecoration(
-                                      hint: language.text('server'),
-                                      icon: Icons.dns_outlined,
-                                    ),
-                                  ),
-                                ),
-
-                                const SizedBox(width: 10),
-
-                                Expanded(
-                                  flex: 2,
-                                  child: TextField(
-                                    controller: _portController,
-                                    enabled: !_isLoading,
-                                    style: const TextStyle(
-                                      color: SpartanPalette.ink,
-                                      fontSize: 14,
-                                    ),
-                                    keyboardType: TextInputType.number,
-                                    textInputAction: TextInputAction.done,
-                                    decoration: _inputDecoration(
-                                      hint: language.text('port'),
-                                      icon: Icons.settings_ethernet,
-                                    ),
-                                    onSubmitted: (_) {
-                                      if (!_isLoading) {
-                                        if (_isRegisterMode) {
-                                          _register();
-                                        } else {
-                                          _login();
-                                        }
-                                      }
-                                    },
-                                  ),
-                                ),
-                              ],
                             ),
 
                             const SizedBox(height: 18),
