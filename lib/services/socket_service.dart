@@ -11,6 +11,8 @@ import 'notification_service.dart';
 import 'storage_service.dart';
 import 'app_visibility.dart';
 import 'system_call_service.dart';
+import 'e2ee_settings_service.dart';
+import 'crypto/signal_e2ee_service.dart';
 
 enum SpartanConnectionPhase {
   disconnected,
@@ -57,6 +59,17 @@ class SocketService {
   bool _needsResyncAfterLogin = false;
 
   bool _flushingOutbox = false;
+
+  bool _e2eeEnabled = false;
+  Set<String> _e2eeActivePeers = <String>{};
+  final Map<String, Completer<Map<String, dynamic>>> _e2eeBundleRequests = {};
+  final Set<String> _e2eeSendingIds = <String>{};
+  Completer<bool>? _e2eePublishRequest;
+
+  bool get e2eeEnabled => _e2eeEnabled;
+
+  bool isE2eeActiveWith(String username) =>
+      _e2eeEnabled && _e2eeActivePeers.contains(username.trim());
 
   String? _serverUrl;
 
@@ -133,6 +146,7 @@ class SocketService {
   // ========================================
 
   Future<bool> connect(String url) async {
+    _e2eeEnabled = await E2eeSettingsService.instance.isEnabled();
     if (_isConnected && _serverUrl == url && _channel != null) {
       return true;
     }
@@ -263,6 +277,16 @@ class SocketService {
           _sendFcmToken();
           await SystemCallService.configure(serverUrl, username, mediaPort);
 
+          if (_e2eeEnabled) {
+            _e2eeActivePeers = await E2eeSettingsService.instance.activePeers(
+              username,
+            );
+            await _prepareE2ee(username);
+          } else {
+            _e2eeActivePeers = <String>{};
+            _send('e2ee_remove_bundle', const {});
+          }
+
           if (_needsResyncAfterLogin) {
             _needsResyncAfterLogin = false;
             _receivingOfflineMessages = true;
@@ -286,11 +310,144 @@ class SocketService {
         print('📭 Получение офлайн-сообщений завершено');
       }
 
+      if (type == 'pinned_message_updated') {
+        final user = currentUser?.trim() ?? '';
+        final peer = data['peer']?.toString().trim() ?? '';
+        final messageId = data['messageId']?.toString().trim() ?? '';
+        if (user.isNotEmpty && peer.isNotEmpty && messageId.isNotEmpty) {
+          if (data['pinned'] == true) {
+            StorageService.addPinnedMessage(user, peer, {
+              'messageId': messageId,
+              'updatedAt': data['updatedAt']?.toString() ?? '',
+            });
+          } else {
+            StorageService.removePinnedMessage(user, peer, messageId);
+          }
+          StorageService.updateMessagePinnedState(
+            user,
+            peer,
+            messageId,
+            data['pinned'] == true,
+          );
+        }
+      }
+
+      if (type == 'e2ee_prekey_bundle') {
+        final username = data['username']?.toString().trim() ?? '';
+        final request = _e2eeBundleRequests.remove(username);
+        if (request != null && !request.isCompleted) {
+          if (data['available'] == true) {
+            try {
+              await SignalE2eeService.instance.processRemoteBundle(
+                username,
+                data,
+              );
+              request.complete(data);
+            } catch (error) {
+              request.completeError(error);
+            }
+          } else {
+            request.completeError(
+              StateError(data['reason']?.toString() ?? 'E2EE keys unavailable'),
+            );
+          }
+        }
+        return;
+      }
+
+      if (type == 'e2ee_bundle_published') {
+        final request = _e2eePublishRequest;
+        _e2eePublishRequest = null;
+        if (request != null && !request.isCompleted) {
+          request.complete(data['ok'] == true);
+        }
+        return;
+      }
+
+      if (type == 'e2ee_invite_response') {
+        final peer = data['from']?.toString().trim() ?? '';
+        final accepted = data['accepted'] == true;
+        final user = currentUser?.trim() ?? '';
+        if (peer.isNotEmpty && user.isNotEmpty) {
+          if (accepted) {
+            _e2eeActivePeers.add(peer);
+          } else {
+            _e2eeActivePeers.remove(peer);
+          }
+          await E2eeSettingsService.instance.setPeerActive(
+            user,
+            peer,
+            accepted,
+          );
+        }
+      }
+
+      if (type == 'e2ee_message_error') {
+        final id = data['id']?.toString().trim() ?? '';
+        final user = currentUser?.trim() ?? '';
+        if (id.isNotEmpty && user.isNotEmpty) {
+          _e2eeSendingIds.remove(id);
+          StorageService.updateOutboxStatus(user, id, 'failed');
+          final local = StorageService.getOutboxMessages(user)
+              .where((item) => item['id']?.toString() == id)
+              .cast<Map<String, dynamic>?>()
+              .firstWhere((item) => item != null, orElse: () => null);
+          _notifyHandlers({
+            'type': 'outbox_failed',
+            'data': {
+              ...?local,
+              'id': id,
+              'status': 'failed',
+              'reason':
+                  data['reason']?.toString() ??
+                  'Защищённое сообщение не отправлено',
+            },
+          });
+        }
+        return;
+      }
+
       // ======================================
       // ВХОДЯЩЕЕ СООБЩЕНИЕ
       // ======================================
 
       if (type == 'message') {
+        if (data['e2ee'] == true) {
+          final from = data['from']?.toString().trim() ?? '';
+          try {
+            if (!_e2eeEnabled ||
+                currentUser == null ||
+                !_e2eeActivePeers.contains(from)) {
+              throw StateError('E2EE is disabled on this device');
+            }
+            await SignalE2eeService.instance.initializeForUser(currentUser!);
+            final decrypted = await SignalE2eeService.instance.decrypt(
+              from,
+              data,
+            );
+            final outerId = data['id']?.toString() ?? '';
+            final outerTo = data['to']?.toString() ?? '';
+            if (decrypted['id']?.toString() != outerId ||
+                decrypted['from']?.toString() != from ||
+                decrypted['to']?.toString() != outerTo) {
+              throw const FormatException('E2EE envelope mismatch');
+            }
+            data
+              ..addAll(decrypted)
+              ..['e2ee'] = true
+              ..['e2eeVersion'] = 2;
+            message['data'] = data;
+            if (data['cipherType'] == 3) {
+              unawaited(_prepareE2ee(currentUser!));
+            }
+          } catch (error) {
+            data
+              ..['text'] = '🔒 Не удалось расшифровать сообщение'
+              ..['e2eeError'] = true;
+            message['data'] = data;
+            print('🔒 E2EE: сообщение не расшифровано');
+          }
+        }
         final id = data['id']?.toString().trim() ?? '';
 
         final from = data['from']?.toString().trim() ?? '';
@@ -478,6 +635,21 @@ class SocketService {
         final id = data['id']?.toString().trim() ?? '';
         final user = currentUser?.trim() ?? '';
         if (id.isNotEmpty && user.isNotEmpty) {
+          _e2eeSendingIds.remove(id);
+          if (data['e2ee'] == true) {
+            final local = StorageService.getOutboxMessages(user)
+                .where((item) => item['id']?.toString() == id)
+                .cast<Map<String, dynamic>?>()
+                .firstWhere((item) => item != null, orElse: () => null);
+            if (local != null) {
+              data
+                ..['text'] = local['text']
+                ..['replyTo'] = local['replyTo']
+                ..['forwardedFrom'] = local['forwardedFrom']
+                ..['forwardComment'] = local['forwardComment'];
+              message['data'] = data;
+            }
+          }
           StorageService.removeOutboxMessage(user, id);
           _notifyHandlers({'type': 'outbox_sent', 'data': data});
         }
@@ -537,6 +709,18 @@ class SocketService {
     _heartbeatTimer = null;
     _isConnected = false;
     _authenticated = false;
+    _e2eeSendingIds.clear();
+    final publishRequest = _e2eePublishRequest;
+    _e2eePublishRequest = null;
+    if (publishRequest != null && !publishRequest.isCompleted) {
+      publishRequest.complete(false);
+    }
+    for (final request in _e2eeBundleRequests.values) {
+      if (!request.isCompleted) {
+        request.completeError(StateError('Соединение с сервером потеряно'));
+      }
+    }
+    _e2eeBundleRequests.clear();
 
     _channel = null;
 
@@ -664,6 +848,10 @@ class SocketService {
         if (id.isEmpty || target.isEmpty) continue;
         StorageService.updateOutboxStatus(user, id, 'sending');
         _notifyHandlers({'type': 'outbox_sending', 'data': item});
+        if (item['requiresE2ee'] == true) {
+          unawaited(_sendE2eeMessage(Map<String, dynamic>.from(item)));
+          continue;
+        }
         final payload = Map<String, dynamic>.from(item)
           ..remove('from')
           ..remove('isMe')
@@ -1039,6 +1227,11 @@ class SocketService {
 
     final user = currentUser?.trim() ?? '';
     final connected = _isConnected && _channel != null;
+    final protectWithE2ee = isE2eeActiveWith(target);
+    if (protectWithE2ee) {
+      messageData['requiresE2ee'] = true;
+      messageData['e2ee'] = true;
+    }
     if (user.isNotEmpty) {
       messageData['status'] = connected ? 'sending' : 'queued';
       messageData['isMe'] = true;
@@ -1047,6 +1240,13 @@ class SocketService {
         'type': connected ? 'outbox_sending' : 'outbox_queued',
         'data': messageData,
       });
+    }
+
+    if (protectWithE2ee && user.isNotEmpty) {
+      if (connected) {
+        unawaited(_sendE2eeMessage(Map<String, dynamic>.from(messageData)));
+      }
+      return messageData['id'].toString();
     }
 
     final payload = Map<String, dynamic>.from(messageData)
@@ -1062,6 +1262,176 @@ class SocketService {
     }
     return messageData['id'].toString();
   }
+
+  Future<bool> setE2eeEnabled(bool enabled) async {
+    final user = currentUser?.trim() ?? '';
+    if (enabled && user.isNotEmpty && isAuthenticated) {
+      final ready = await _prepareE2ee(user);
+      if (!ready) return false;
+    } else if (!enabled && isAuthenticated) {
+      for (final peer in _e2eeActivePeers) {
+        _send('e2ee_invite_response', {
+          'to': peer,
+          'accepted': false,
+          'disabled': true,
+        });
+      }
+      _send('e2ee_remove_bundle', const {});
+    }
+    await E2eeSettingsService.instance.setEnabled(enabled);
+    _e2eeEnabled = enabled;
+    if (!enabled) {
+      _e2eeActivePeers = <String>{};
+      await E2eeSettingsService.instance.clearActivePeers(user);
+    }
+    return true;
+  }
+
+  Future<bool> inviteE2ee(String username) async {
+    final peer = username.trim();
+    if (peer.isEmpty || !isAuthenticated) return false;
+    if (!_e2eeEnabled && !await setE2eeEnabled(true)) return false;
+    return _send('e2ee_invite', {'to': peer});
+  }
+
+  Future<bool> respondToE2eeInvite(String username, bool accepted) async {
+    final peer = username.trim();
+    final user = currentUser?.trim() ?? '';
+    if (peer.isEmpty || user.isEmpty || !isAuthenticated) return false;
+    if (accepted && !_e2eeEnabled && !await setE2eeEnabled(true)) {
+      return false;
+    }
+    final sent = _send('e2ee_invite_response', {
+      'to': peer,
+      'accepted': accepted,
+    });
+    if (!sent && accepted) return false;
+    if (accepted) {
+      _e2eeActivePeers.add(peer);
+    } else {
+      _e2eeActivePeers.remove(peer);
+    }
+    await E2eeSettingsService.instance.setPeerActive(user, peer, accepted);
+    return sent || !accepted;
+  }
+
+  Future<bool> _prepareE2ee(String username) async {
+    try {
+      await SignalE2eeService.instance.initializeForUser(username);
+      final bundle = await SignalE2eeService.instance.createPublicBundle();
+      final previous = _e2eePublishRequest;
+      if (previous != null && !previous.isCompleted) {
+        previous.complete(false);
+      }
+      final request = Completer<bool>();
+      _e2eePublishRequest = request;
+      if (!_send('e2ee_publish_bundle', bundle)) {
+        _e2eePublishRequest = null;
+        throw StateError('E2EE server unavailable');
+      }
+      final accepted = await request.future.timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          if (identical(_e2eePublishRequest, request)) {
+            _e2eePublishRequest = null;
+          }
+          return false;
+        },
+      );
+      if (!accepted) throw StateError('E2EE bundle rejected');
+      print('🔐 Signal E2EE готов');
+      return true;
+    } catch (error) {
+      print('🔒 E2EE не удалось подготовить: $error');
+      _notifyHandlers({
+        'type': 'e2ee_status',
+        'data': {'ready': false, 'reason': 'Не удалось подготовить E2EE'},
+      });
+      return false;
+    }
+  }
+
+  Future<void> _requestE2eeBundle(String username) async {
+    final existing = _e2eeBundleRequests[username];
+    if (existing != null) {
+      await existing.future;
+      return;
+    }
+    final completer = Completer<Map<String, dynamic>>();
+    _e2eeBundleRequests[username] = completer;
+    if (!_send('e2ee_get_bundle', {'username': username})) {
+      _e2eeBundleRequests.remove(username);
+      throw StateError('Нет соединения с сервером');
+    }
+    await completer.future.timeout(
+      const Duration(seconds: 10),
+      onTimeout: () {
+        _e2eeBundleRequests.remove(username);
+        throw TimeoutException('E2EE key request timed out');
+      },
+    );
+  }
+
+  Future<void> _sendE2eeMessage(Map<String, dynamic> localMessage) async {
+    final user = currentUser?.trim() ?? '';
+    final id = localMessage['id']?.toString().trim() ?? '';
+    final target = localMessage['to']?.toString().trim() ?? '';
+    if (user.isEmpty || id.isEmpty || target.isEmpty) return;
+    if (!_e2eeSendingIds.add(id)) return;
+    try {
+      await SignalE2eeService.instance.initializeForUser(user);
+      Map<String, dynamic> encrypted;
+      try {
+        encrypted = await SignalE2eeService.instance.encrypt(
+          target,
+          _privateE2eePayload(localMessage, user),
+        );
+      } on E2eeSessionMissing {
+        await _requestE2eeBundle(target);
+        encrypted = await SignalE2eeService.instance.encrypt(
+          target,
+          _privateE2eePayload(localMessage, user),
+        );
+      }
+      final envelope = <String, dynamic>{
+        'id': id,
+        'to': target,
+        'time': localMessage['time'],
+        ...encrypted,
+      };
+      if (!_send('e2ee_message', envelope)) {
+        throw StateError('Нет соединения с сервером');
+      }
+    } catch (error) {
+      _e2eeSendingIds.remove(id);
+      StorageService.updateOutboxStatus(user, id, 'failed');
+      _notifyHandlers({
+        'type': 'outbox_failed',
+        'data': {
+          ...localMessage,
+          'status': 'failed',
+          'reason': 'Контакт ещё не готов к защищённой переписке',
+        },
+      });
+      print('🔒 E2EE: сообщение не отправлено');
+    }
+  }
+
+  Map<String, dynamic> _privateE2eePayload(
+    Map<String, dynamic> message,
+    String from,
+  ) => {
+    'id': message['id'],
+    'from': from,
+    'to': message['to'],
+    'text': message['text'],
+    'time': message['time'],
+    if (message['replyTo'] is Map) 'replyTo': message['replyTo'],
+    if (message['forwardedFrom'] != null)
+      'forwardedFrom': message['forwardedFrom'],
+    if (message['forwardComment'] != null)
+      'forwardComment': message['forwardComment'],
+  };
 
   // ========================================
   // STAGE 29 - PRIVATE MEDIA
@@ -1646,7 +2016,6 @@ class SocketService {
     required String to,
     required bool pinned,
     String messageFrom = '',
-    String text = '',
   }) {
     final id = messageId.trim();
     final target = to.trim();
@@ -1659,7 +2028,6 @@ class SocketService {
       'messageId': id,
       'to': target,
       'messageFrom': messageFrom.trim(),
-      'text': text,
     });
   }
 }

@@ -1,4 +1,7 @@
+import 'dart:io';
+
 import 'package:hive_flutter/hive_flutter.dart';
+import 'package:path_provider/path_provider.dart';
 
 import 'media_cache_service.dart';
 
@@ -11,7 +14,14 @@ class StorageService {
   static late Box _outboxBox;
 
   static Future<void> init() async {
-    await Hive.initFlutter();
+    if (Platform.isWindows) {
+      final supportDirectory = await getApplicationSupportDirectory();
+      await supportDirectory.create(recursive: true);
+      await _migrateLegacyWindowsBoxes(supportDirectory);
+      Hive.init(supportDirectory.path);
+    } else {
+      await Hive.initFlutter();
+    }
 
     _messagesBox = await Hive.openBox('chat_messages');
 
@@ -27,6 +37,45 @@ class StorageService {
     await _migrateEmbeddedMediaToFiles();
 
     print('📦 StorageService инициализирован');
+  }
+
+  static Future<void> _migrateLegacyWindowsBoxes(
+    Directory supportDirectory,
+  ) async {
+    try {
+      final legacyDirectory = await getApplicationDocumentsDirectory();
+      if (legacyDirectory.path == supportDirectory.path) return;
+
+      const boxNames = <String>[
+        'chat_messages',
+        'avatars',
+        'unread_messages',
+        'spartan_outbox',
+        'spartan_saved_messages',
+        'spartan_call_history',
+      ];
+
+      var migrated = 0;
+      for (final boxName in boxNames) {
+        final source = File(
+          '${legacyDirectory.path}${Platform.pathSeparator}$boxName.hive',
+        );
+        final destination = File(
+          '${supportDirectory.path}${Platform.pathSeparator}$boxName.hive',
+        );
+        if (!await destination.exists() && await source.exists()) {
+          await source.copy(destination.path);
+          migrated++;
+        }
+      }
+      if (migrated > 0) {
+        print('📦 Windows: перенесено локальных баз Hive: $migrated');
+      }
+    } catch (error) {
+      // A damaged or protected legacy file must not leave the app on a white
+      // screen. The new storage can still start and the old file remains intact.
+      print('⚠️ Windows: старая база Hive недоступна, запускаем новую: $error');
+    }
   }
 
   static Future<void> _migrateEmbeddedMediaToFiles() async {
@@ -163,6 +212,49 @@ class StorageService {
     );
 
     return messages;
+  }
+
+  static bool updateMessagePinnedState(
+    String currentUser,
+    String targetUser,
+    String messageId,
+    bool pinned,
+  ) {
+    final user = currentUser.trim();
+    final peer = targetUser.trim();
+    final id = messageId.trim();
+    if (user.isEmpty || peer.isEmpty || id.isEmpty) {
+      return false;
+    }
+
+    final key = _getChatKey(user, peer);
+    final rawData = _messagesBox.get(key);
+    if (rawData is! List) {
+      return false;
+    }
+
+    final messages = <Map<String, dynamic>>[];
+    var changed = false;
+    for (final rawItem in rawData) {
+      if (rawItem is! Map) {
+        continue;
+      }
+      final message = Map<String, dynamic>.from(rawItem);
+      if (_getStoredMessageId(message) == id) {
+        final wasPinned = message['isPinned'] == true;
+        if (wasPinned != pinned) {
+          message['isPinned'] = pinned;
+          changed = true;
+        }
+      }
+      messages.add(message);
+    }
+
+    if (changed) {
+      _messagesBox.put(key, messages);
+      print('📌 Состояние закрепления сохранено: $id = $pinned');
+    }
+    return changed;
   }
 
   static bool deleteMessageWithoutTrace(

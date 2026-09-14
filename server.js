@@ -89,6 +89,12 @@ const TRUST_DECISIONS_FILE = path.join(
   'trust_decisions.json',
 );
 
+// Public Signal pre-key bundles only. Private keys never leave devices.
+const E2EE_BUNDLES_FILE = path.join(
+  __dirname,
+  'e2ee_prekey_bundles.json',
+);
+
 const FIREBASE_SERVICE_ACCOUNT_FILE = path.join(
   __dirname,
   'firebase-service-account.json',
@@ -188,6 +194,38 @@ const trustDecisions =
     TRUST_DECISIONS_FILE,
     'решений доверия',
   );
+
+const e2eeBundles =
+  loadJsonObjectFile(
+    E2EE_BUNDLES_FILE,
+    'публичных E2EE-ключей',
+  );
+
+function isBase64Value(value, maxLength = 8192) {
+  return typeof value === 'string' &&
+    value.length > 0 &&
+    value.length <= maxLength &&
+    /^[A-Za-z0-9+/]+={0,2}$/.test(value);
+}
+
+function positiveKeyId(value) {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null;
+}
+
+function validPublicPreKey(value, kyber = false) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  const id = positiveKeyId(value.id);
+  const publicKey = value.publicKey;
+  const signature = value.signature;
+  if (!id || !isBase64Value(publicKey, kyber ? 8192 : 256)) return null;
+  if (kyber && !isBase64Value(signature, 256)) return null;
+  return kyber ? { id, publicKey, signature } : { id, publicKey };
+}
+
+function saveE2eeBundles() {
+  saveJsonObjectFile(E2EE_BUNDLES_FILE, e2eeBundles, 'публичных E2EE-ключей');
+}
 
 function isBlockedBy(owner, contact) {
   const ownerName = owner?.toString().trim().toLowerCase() || '';
@@ -893,6 +931,8 @@ function purgeOfflineMessageArtifacts(
             'message_edited' ||
           eventType ===
             'reaction_update' ||
+          eventType ===
+            'pinned_message_updated' ||
           eventType ===
             'message_deleted'
         )
@@ -6820,6 +6860,313 @@ wss.on(
           }
 
           // ====================================
+          // SIGNAL E2EE PRE-KEY DIRECTORY
+          // ====================================
+
+          if (type === 'e2ee_publish_bundle') {
+            if (!currentUser) {
+              send(ws, 'error', { reason: 'Сначала необходимо войти' });
+              return;
+            }
+
+            const deviceId = positiveKeyId(data.deviceId);
+            const registrationId = positiveKeyId(data.registrationId);
+            const identityKey = data.identityKey;
+            const signedRaw = data.signedPreKey;
+            const signedId = positiveKeyId(signedRaw?.id);
+            const signedPreKey = signedId &&
+              isBase64Value(signedRaw?.publicKey, 256) &&
+              isBase64Value(signedRaw?.signature, 256)
+              ? {
+                  id: signedId,
+                  publicKey: signedRaw.publicKey,
+                  signature: signedRaw.signature,
+                }
+              : null;
+            const submittedPreKeys = Array.isArray(data.preKeys)
+              ? data.preKeys.slice(0, 100).map((item) => validPublicPreKey(item)).filter(Boolean)
+              : [];
+            const submittedKyberKeys = Array.isArray(data.kyberPreKeys)
+              ? data.kyberPreKeys.slice(0, 100).map((item) => validPublicPreKey(item, true)).filter(Boolean)
+              : [];
+
+            if (
+              data.version !== 2 ||
+              data.protocol !== 'signal-pqxdh-double-ratchet' ||
+              !deviceId ||
+              !registrationId ||
+              !isBase64Value(identityKey, 256) ||
+              !signedPreKey ||
+              submittedPreKeys.length === 0 ||
+              submittedKyberKeys.length === 0
+            ) {
+              send(ws, 'e2ee_bundle_published', {
+                ok: false,
+                reason: 'Некорректный комплект E2EE-ключей',
+              });
+              return;
+            }
+
+            const existing = e2eeBundles[currentUser];
+            const identityChanged = !existing || existing.identityKey !== identityKey;
+            const consumedPreKeyIds = identityChanged
+              ? []
+              : Array.isArray(existing.consumedPreKeyIds)
+                ? existing.consumedPreKeyIds
+                : [];
+            const consumedKyberPreKeyIds = identityChanged
+              ? []
+              : Array.isArray(existing.consumedKyberPreKeyIds)
+                ? existing.consumedKyberPreKeyIds
+                : [];
+            const preKeys = identityChanged && !existing?.preKeys
+              ? {}
+              : { ...(existing?.preKeys || {}) };
+            const kyberPreKeys = identityChanged && !existing?.kyberPreKeys
+              ? {}
+              : { ...(existing?.kyberPreKeys || {}) };
+            if (identityChanged) {
+              for (const key of Object.keys(preKeys)) delete preKeys[key];
+              for (const key of Object.keys(kyberPreKeys)) delete kyberPreKeys[key];
+            }
+            for (const item of submittedPreKeys) {
+              if (!consumedPreKeyIds.includes(item.id)) preKeys[item.id] = item;
+            }
+            for (const item of submittedKyberKeys) {
+              if (!consumedKyberPreKeyIds.includes(item.id)) kyberPreKeys[item.id] = item;
+            }
+
+            e2eeBundles[currentUser] = {
+              version: 2,
+              protocol: 'signal-pqxdh-double-ratchet',
+              deviceId,
+              registrationId,
+              identityKey,
+              signedPreKey,
+              preKeys,
+              kyberPreKeys,
+              consumedPreKeyIds,
+              consumedKyberPreKeyIds,
+              updatedAt: new Date().toISOString(),
+            };
+            saveE2eeBundles();
+            send(ws, 'e2ee_bundle_published', {
+              ok: true,
+              preKeyCount: Object.keys(preKeys).length,
+              kyberPreKeyCount: Object.keys(kyberPreKeys).length,
+            });
+            console.log(`🔐 Signal E2EE: публичные ключи обновлены для ${currentUser}`);
+            return;
+          }
+
+          // ====================================
+          // E2EE INVITATION (MUTUAL CONSENT)
+          // ====================================
+
+          if (type === 'e2ee_invite') {
+            if (!currentUser) {
+              send(ws, 'error', { reason: 'Сначала необходимо войти' });
+              return;
+            }
+            const to = data.to?.toString().trim() || '';
+            const receiver = onlineUsers.get(to);
+            if (
+              !to ||
+              to === currentUser ||
+              !registeredUsers[to] ||
+              !e2eeBundles[currentUser] ||
+              !receiver
+            ) {
+              send(ws, 'e2ee_invite_status', {
+                to,
+                sent: false,
+                reason: !receiver
+                  ? 'Собеседник должен быть в сети для принятия E2EE'
+                  : 'Не удалось отправить приглашение E2EE',
+              });
+              return;
+            }
+            send(receiver, 'e2ee_invite', {
+              from: currentUser,
+              to,
+              time: new Date().toISOString(),
+            });
+            send(ws, 'e2ee_invite_status', { to, sent: true });
+            console.log(`🔐 E2EE: ${currentUser} пригласил ${to}`);
+            return;
+          }
+
+          if (type === 'e2ee_invite_response') {
+            if (!currentUser) {
+              send(ws, 'error', { reason: 'Сначала необходимо войти' });
+              return;
+            }
+            const to = data.to?.toString().trim() || '';
+            const accepted = data.accepted === true;
+            const receiver = onlineUsers.get(to);
+            if (
+              !to ||
+              to === currentUser ||
+              !registeredUsers[to] ||
+              (accepted && !e2eeBundles[currentUser])
+            ) {
+              send(ws, 'e2ee_invite_status', {
+                to,
+                sent: false,
+                reason: 'Не удалось подтвердить E2EE',
+              });
+              return;
+            }
+            if (!receiver) {
+              send(ws, 'e2ee_invite_status', {
+                to,
+                sent: false,
+                reason: 'Собеседник уже не в сети. Отправьте приглашение снова.',
+              });
+              return;
+            }
+            send(receiver, 'e2ee_invite_response', {
+              from: currentUser,
+              to,
+              accepted,
+              disabled: data.disabled === true,
+              time: new Date().toISOString(),
+            });
+            console.log(
+              `🔐 E2EE: ${currentUser} ${accepted ? 'принял' : 'отклонил'} приглашение ${to}`,
+            );
+            return;
+          }
+
+          if (type === 'e2ee_get_bundle') {
+            if (!currentUser) {
+              send(ws, 'error', { reason: 'Сначала необходимо войти' });
+              return;
+            }
+            const username = data.username?.toString().trim() || '';
+            const record = e2eeBundles[username];
+            const preKeyId = record
+              ? Object.keys(record.preKeys || {}).map(Number).sort((a, b) => a - b)[0]
+              : null;
+            const kyberPreKeyId = record
+              ? Object.keys(record.kyberPreKeys || {}).map(Number).sort((a, b) => a - b)[0]
+              : null;
+            if (!username || !record || !preKeyId || !kyberPreKeyId) {
+              send(ws, 'e2ee_prekey_bundle', {
+                username,
+                available: false,
+                reason: 'У контакта пока нет доступных E2EE-ключей',
+              });
+              return;
+            }
+            const preKey = record.preKeys[preKeyId];
+            const kyberPreKey = record.kyberPreKeys[kyberPreKeyId];
+            delete record.preKeys[preKeyId];
+            delete record.kyberPreKeys[kyberPreKeyId];
+            record.consumedPreKeyIds = [...new Set([
+              ...(record.consumedPreKeyIds || []),
+              preKeyId,
+            ])].slice(-5000);
+            record.consumedKyberPreKeyIds = [...new Set([
+              ...(record.consumedKyberPreKeyIds || []),
+              kyberPreKeyId,
+            ])].slice(-5000);
+            saveE2eeBundles();
+            send(ws, 'e2ee_prekey_bundle', {
+              username,
+              available: true,
+              version: record.version,
+              protocol: record.protocol,
+              deviceId: record.deviceId,
+              registrationId: record.registrationId,
+              identityKey: record.identityKey,
+              signedPreKey: record.signedPreKey,
+              preKey,
+              kyberPreKey,
+            });
+            return;
+          }
+
+          if (type === 'e2ee_remove_bundle') {
+            if (!currentUser) {
+              send(ws, 'error', { reason: 'Сначала необходимо войти' });
+              return;
+            }
+            delete e2eeBundles[currentUser];
+            saveE2eeBundles();
+            send(ws, 'e2ee_bundle_removed', { ok: true });
+            console.log(`🔓 Signal E2EE выключено для ${currentUser}`);
+            return;
+          }
+
+          // ====================================
+          // SIGNAL E2EE PRIVATE TEXT MESSAGE
+          // ====================================
+
+          if (type === 'e2ee_message') {
+            if (!currentUser) {
+              send(ws, 'error', { reason: 'Сначала необходимо войти' });
+              return;
+            }
+            const to = data.to?.toString().trim() || '';
+            const requestedId = data.id?.toString().trim() || '';
+            const cipherType = Number(data.cipherType);
+            const ciphertext = data.ciphertext?.toString().trim() || '';
+            if (
+              !registeredUsers[to] ||
+              !e2eeBundles[currentUser] ||
+              !e2eeBundles[to] ||
+              !/^[a-zA-Z0-9_-]{6,120}$/.test(requestedId) ||
+              ![2, 3].includes(cipherType) ||
+              !isBase64Value(ciphertext, 1024 * 1024)
+            ) {
+              send(ws, 'e2ee_message_error', {
+                id: requestedId,
+                to,
+                reason: 'Защищённое сообщение отклонено сервером',
+              });
+              return;
+            }
+            const messageData = {
+              id: requestedId,
+              from: currentUser,
+              to,
+              time: data.time || new Date().toISOString(),
+              messageType: 'text',
+              e2ee: true,
+              e2eeVersion: 2,
+              e2eeProtocol: 'signal',
+              cipherType,
+              ciphertext,
+            };
+            messageReactions.set(messageData.id, {
+              from: currentUser,
+              to,
+              users: new Set(),
+            });
+            const receiver = onlineUsers.get(to);
+            if (receiver) {
+              send(receiver, 'message', messageData);
+            } else {
+              queueOfflineMessage(to, messageData);
+              void sendFcmPush({
+                username: to,
+                title: currentUser,
+                body: '🔒 Защищённое сообщение',
+                data: {
+                  type: 'message',
+                  sender: currentUser,
+                  recipient: to,
+                  messageId: messageData.id,
+                },
+              });
+            }
+            send(ws, 'message_sent', messageData);
+            console.log(`🔐 ${currentUser} → ${to}: Signal E2EE`);
+            return;
+          }
+
+          // ====================================
           // PRIVATE AUDIO / VIDEO CALL SIGNALING
           // ====================================
 
@@ -7565,6 +7912,107 @@ wss.on(
               `🗑️ ${currentUser} удалил без следов сообщение ${messageId}`,
             );
 
+            return;
+          }
+
+          // ====================================
+          // PIN / UNPIN MESSAGE
+          // ====================================
+
+          if (
+            type === 'pin_message' ||
+            type === 'unpin_message'
+          ) {
+            if (!currentUser) {
+              send(ws, 'error', {
+                reason: 'Сначала необходимо войти',
+              });
+              return;
+            }
+
+            const messageId = data.messageId?.toString().trim();
+            const to = data.to?.toString().trim();
+            const messageFrom = data.messageFrom?.toString().trim() || '';
+
+            if (
+              !messageId ||
+              !to ||
+              to === currentUser ||
+              !registeredUsers[to]
+            ) {
+              send(ws, 'error', {
+                reason: 'Некорректные данные закрепления',
+              });
+              return;
+            }
+
+            if (
+              messageFrom &&
+              messageFrom !== currentUser &&
+              messageFrom !== to
+            ) {
+              send(ws, 'error', {
+                reason: 'Сообщение не принадлежит этому чату',
+              });
+              return;
+            }
+
+            const knownMessage = messageReactions.get(messageId);
+            if (knownMessage) {
+              const knownParticipants = new Set([
+                knownMessage.from,
+                knownMessage.to,
+              ]);
+              if (
+                !knownParticipants.has(currentUser) ||
+                !knownParticipants.has(to)
+              ) {
+                send(ws, 'error', {
+                  reason: 'Нет доступа к этому сообщению',
+                });
+                return;
+              }
+            }
+
+            const pinned = type === 'pin_message';
+            const updatedAt = new Date().toISOString();
+            const sharedData = {
+              messageId,
+              pinned,
+              changedBy: currentUser,
+              messageFrom,
+              updatedAt,
+            };
+
+            send(ws, 'pinned_message_updated', {
+              ...sharedData,
+              peer: to,
+            });
+
+            const receiver = onlineUsers.get(to);
+            if (
+              receiver &&
+              receiver.readyState === WebSocket.OPEN
+            ) {
+              send(receiver, 'pinned_message_updated', {
+                ...sharedData,
+                peer: currentUser,
+              });
+            } else {
+              queueOfflineEvent(
+                to,
+                'pinned_message_updated',
+                {
+                  ...sharedData,
+                  peer: currentUser,
+                },
+              );
+            }
+
+            console.log(
+              `${pinned ? '📌' : '📍'} ${currentUser} ` +
+              `${pinned ? 'закрепил' : 'открепил'} ${messageId} для ${to}`,
+            );
             return;
           }
 

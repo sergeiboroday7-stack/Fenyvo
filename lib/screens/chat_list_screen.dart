@@ -290,6 +290,38 @@ class _ChatListScreenState extends State<ChatListScreen> {
   // ОБРАБОТКА СООБЩЕНИЙ СЕРВЕРА
   // ========================================
 
+  Future<void> _showIncomingE2eeInvite(String from) async {
+    if (!mounted || SocketService.instance.activeChatUser != null) return;
+    final t = AppLanguageService.instance.text;
+    final accepted = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: Text(t('e2eeInviteTitle')),
+        content: Text(t('e2eeInviteText').replaceAll('{user}', from)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(t('e2eeDecline')),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(context, true),
+            icon: const Icon(Icons.lock_rounded),
+            label: Text(t('e2eeAccept')),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    final sent = await SocketService.instance.respondToE2eeInvite(
+      from,
+      accepted == true,
+    );
+    if (!mounted || sent) return;
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(t('e2eeEnableError'))));
+  }
+
   void _handleMessage(Map<String, dynamic> msg) {
     final type = msg['type']?.toString() ?? '';
 
@@ -298,6 +330,14 @@ class _ChatListScreenState extends State<ChatListScreen> {
     final data = rawData is Map
         ? Map<String, dynamic>.from(rawData)
         : <String, dynamic>{};
+
+    if (type == 'e2ee_invite') {
+      final from = data['from']?.toString().trim() ?? '';
+      if (from.isNotEmpty && SocketService.instance.activeChatUser == null) {
+        unawaited(_showIncomingE2eeInvite(from));
+      }
+      return;
+    }
 
     // SPARTAN_STAGE24_GROUPS
     if (type == 'groups') {
@@ -617,6 +657,8 @@ class _ChatListScreenState extends State<ChatListScreen> {
           if (data['mimeType'] != null) 'mimeType': data['mimeType'].toString(),
           'time': time,
           'status': 'delivered',
+          if (data['e2ee'] == true) 'e2ee': true,
+          if (data['e2eeError'] == true) 'e2eeError': true,
           if (data['replyTo'] is Map)
             'replyTo': Map<String, dynamic>.from(data['replyTo'] as Map),
           if (data['forwardedFrom'] != null)

@@ -2,7 +2,7 @@ name: spartan_chat_final
 description: Spartan Chat messenger
 publish_to: "none"
 
-version: 1.6.3+4132
+version: 1.7.5+4205
 
 environment:
   sdk: ">=3.13.0 <4.0.0"
@@ -43,6 +43,13 @@ dependencies:
   flutter_webrtc: 1.6.1
   flutter_callkit_incoming: ^3.1.5
   permission_handler: 11.3.1
+  # Official Signal Protocol core (X3DH/PQXDH + Double Ratchet).
+  libsignal: 7.3.0
+  # Long-term identity and ratchet state must not live in SharedPreferences.
+  flutter_secure_storage: 9.2.4
+  synchronized: ^3.4.1+2
+  # Local QR rendering for Signal safety-number verification.
+  qr_flutter: ^4.1.0
 
 dev_dependencies:
   flutter_test:

@@ -14,6 +14,7 @@ import 'package:video_player/video_player.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 
 import '../services/socket_service.dart';
 import '../services/call_service.dart';
@@ -25,6 +26,8 @@ import '../services/media_cache_service.dart';
 import '../services/download_service.dart';
 import '../services/media_transfer_service.dart';
 import '../services/app_language_service.dart';
+import '../services/e2ee_settings_service.dart';
+import '../services/crypto/signal_e2ee_service.dart';
 
 String _chatText(String key, [Map<String, Object> values = const {}]) {
   var result = AppLanguageService.instance.text(key);
@@ -575,6 +578,11 @@ class _ChatScreenState extends State<ChatScreen>
   bool _contactTrusted = false;
   bool _contactBlocked = false;
   bool _contactReported = false;
+  bool _e2eeActive = false;
+  bool _e2eeVerified = false;
+  bool _e2eeKeyChanged = false;
+  bool _e2eeKeyChangeWarningShown = false;
+  bool _changingE2ee = false;
 
   Timer? _typingStopTimer;
   Timer? _remoteTypingTimeoutTimer;
@@ -623,6 +631,7 @@ class _ChatScreenState extends State<ChatScreen>
     );
 
     SocketService.instance.setActiveChatUser(widget.targetUser);
+    _e2eeActive = SocketService.instance.isE2eeActiveWith(widget.targetUser);
 
     _typingAnimationController = AnimationController(
       vsync: this,
@@ -691,6 +700,10 @@ class _ChatScreenState extends State<ChatScreen>
     SocketService.instance.requestAvatar(widget.targetUser);
 
     SocketService.instance.getUserStatus(widget.targetUser);
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_refreshE2eeVerification(showChangedWarning: true));
+    });
   }
 
   @override
@@ -1129,12 +1142,20 @@ class _ChatScreenState extends State<ChatScreen>
       currentUser,
       widget.targetUser,
     );
+    final pinnedMessageIds = StorageService.getPinnedMessages(
+      currentUser,
+      widget.targetUser,
+    ).map((item) => item['messageId']?.toString().trim() ?? '').toSet();
 
     setState(() {
       _messages.clear();
 
       for (final savedMessage in savedMessages) {
         final message = Map<String, dynamic>.from(savedMessage);
+
+        if (pinnedMessageIds.contains(_getMessageId(message))) {
+          message['isPinned'] = true;
+        }
 
         _normalizeReactionUsers(message);
 
@@ -1392,6 +1413,291 @@ class _ChatScreenState extends State<ChatScreen>
   // \u041F\u041E\u041B\u0423\u0427\u0415\u041D\u0418\u0415 \u0421\u041E\u0411\u042B\u0422\u0418\u0419 \u041E\u0422 \u0421\u0415\u0420\u0412\u0415\u0420\u0410
   // ========================================
 
+  void _showE2eeNotice(String text) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+  }
+
+  Future<void> _toggleChatE2ee() async {
+    if (_changingE2ee) return;
+    if (_e2eeActive) {
+      final disable = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(_chatText('e2eeChatDisable')),
+          content: Text(
+            '${widget.targetUser}: ${_chatText('e2eeChatDisable')}?',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text(_chatText('cancel')),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: Text(_chatText('e2eeDisableAction')),
+            ),
+          ],
+        ),
+      );
+      if (disable != true || !mounted) return;
+      setState(() => _changingE2ee = true);
+      final sent = await SocketService.instance.respondToE2eeInvite(
+        widget.targetUser,
+        false,
+      );
+      if (!mounted) return;
+      setState(() {
+        _changingE2ee = false;
+        if (sent) _e2eeActive = false;
+      });
+      if (!sent) _showE2eeNotice(_chatText('noServerConnection'));
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        icon: const Icon(Icons.lock_rounded, color: _gold, size: 42),
+        title: Text(_chatText('e2eeBeforeTitle')),
+        content: SingleChildScrollView(
+          child: Text(_chatText('e2eeBeforeText')),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(_chatText('e2eeNotNow')),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(context, true),
+            icon: const Icon(Icons.lock_rounded),
+            label: Text(_chatText('e2eeEnable')),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    setState(() => _changingE2ee = true);
+    final sent = await SocketService.instance.inviteE2ee(widget.targetUser);
+    if (!mounted) return;
+    setState(() => _changingE2ee = false);
+    _showE2eeNotice(
+      sent ? _chatText('e2eeInviteSent') : _chatText('e2eeEnableError'),
+    );
+  }
+
+  Future<void> _showIncomingE2eeInvite(String from) async {
+    final accepted = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        title: Text(_chatText('e2eeInviteTitle')),
+        content: Text(_chatText('e2eeInviteText', {'user': from})),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(_chatText('e2eeDecline')),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(context, true),
+            icon: const Icon(Icons.lock_rounded),
+            label: Text(_chatText('e2eeAccept')),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    setState(() => _changingE2ee = true);
+    final sent = await SocketService.instance.respondToE2eeInvite(
+      from,
+      accepted == true,
+    );
+    if (!mounted) return;
+    setState(() {
+      _changingE2ee = false;
+      if (sent) _e2eeActive = accepted == true;
+    });
+    if (!sent) _showE2eeNotice(_chatText('e2eeEnableError'));
+  }
+
+  Future<void> _refreshE2eeVerification({
+    bool showChangedWarning = false,
+  }) async {
+    final currentUser = SocketService.instance.currentUser?.trim() ?? '';
+    if (currentUser.isEmpty || !_e2eeActive) {
+      if (mounted) {
+        setState(() {
+          _e2eeVerified = false;
+          _e2eeKeyChanged = false;
+        });
+      }
+      return;
+    }
+
+    try {
+      final safety = await SignalE2eeService.instance.safetyNumber(
+        widget.targetUser,
+      );
+      final stored = await E2eeSettingsService.instance.verifiedFingerprint(
+        currentUser,
+        widget.targetUser,
+      );
+      final verified = stored != null && stored == safety.display;
+      final changed = stored != null && stored != safety.display;
+      if (!mounted) return;
+      setState(() {
+        _e2eeVerified = verified;
+        _e2eeKeyChanged = changed;
+      });
+      if (changed && showChangedWarning && !_e2eeKeyChangeWarningShown) {
+        _e2eeKeyChangeWarningShown = true;
+        await _showE2eeKeyChangedWarning();
+      }
+    } on E2eeSessionMissing {
+      // The safety number becomes available after the first protected message.
+    } catch (_) {
+      // Verification is optional; a temporary read error must not block chat.
+    }
+  }
+
+  Future<void> _showE2eeKeyChangedWarning() async {
+    if (!mounted) return;
+    final verifyNow = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        icon: const Icon(
+          Icons.warning_amber_rounded,
+          color: Colors.orange,
+          size: 46,
+        ),
+        title: Text(_chatText('e2eeKeyChangedTitle')),
+        content: Text(
+          _chatText('e2eeKeyChangedText', {'user': widget.targetUser}),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(_chatText('e2eeContinueUnverified')),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(context, true),
+            icon: const Icon(Icons.verified_user_rounded),
+            label: Text(_chatText('e2eeVerifyNewCode')),
+          ),
+        ],
+      ),
+    );
+    if (verifyNow == true && mounted) {
+      await _showE2eeSafetyNumber();
+    }
+  }
+
+  Future<void> _showE2eeSafetyNumber() async {
+    final currentUser = SocketService.instance.currentUser?.trim() ?? '';
+    if (currentUser.isEmpty || !_e2eeActive) return;
+    try {
+      final safety = await SignalE2eeService.instance.safetyNumber(
+        widget.targetUser,
+      );
+      final verified = await E2eeSettingsService.instance.isFingerprintVerified(
+        currentUser,
+        widget.targetUser,
+        safety.display,
+      );
+      if (!mounted) return;
+      final markVerified = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(_chatText('e2eeVerifyTitle')),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  _chatText('e2eeVerifyExplanation', {
+                    'user': widget.targetUser,
+                  }),
+                ),
+                const SizedBox(height: 18),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  color: Colors.white,
+                  child: QrImageView(
+                    data: safety.scannable,
+                    version: QrVersions.auto,
+                    size: 190,
+                    backgroundColor: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 18),
+                SelectableText(
+                  safety.display,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    height: 1.55,
+                    letterSpacing: 1.1,
+                  ),
+                ),
+                if (verified) ...[
+                  const SizedBox(height: 12),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.verified_rounded, color: Colors.green),
+                      const SizedBox(width: 8),
+                      Text(_chatText('e2eeVerified')),
+                    ],
+                  ),
+                ],
+              ],
+            ),
+          ),
+          actions: [
+            TextButton.icon(
+              onPressed: () async {
+                await Clipboard.setData(ClipboardData(text: safety.display));
+              },
+              icon: const Icon(Icons.copy_rounded),
+              label: Text(_chatText('copy')),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text(_chatText('close')),
+            ),
+            FilledButton.icon(
+              onPressed: verified ? null : () => Navigator.pop(context, true),
+              icon: const Icon(Icons.verified_user_rounded),
+              label: Text(_chatText('e2eeCodesMatch')),
+            ),
+          ],
+        ),
+      );
+      if (markVerified == true) {
+        await E2eeSettingsService.instance.setFingerprintVerified(
+          currentUser,
+          widget.targetUser,
+          safety.display,
+        );
+        if (mounted) {
+          setState(() {
+            _e2eeVerified = true;
+            _e2eeKeyChanged = false;
+          });
+          _showE2eeNotice(_chatText('e2eeVerified'));
+        }
+      } else if (mounted) {
+        setState(() => _e2eeVerified = verified);
+      }
+    } on E2eeSessionMissing {
+      _showE2eeNotice(_chatText('e2eeVerifyNeedsMessage'));
+    } catch (_) {
+      _showE2eeNotice(_chatText('e2eeVerifyError'));
+    }
+  }
+
   void _handleMessage(Map<String, dynamic> msg) {
     final type = msg['type']?.toString() ?? '';
 
@@ -1402,6 +1708,38 @@ class _ChatScreenState extends State<ChatScreen>
         : <String, dynamic>{};
 
     final currentUser = SocketService.instance.currentUser ?? '';
+
+    if (type == 'e2ee_invite' &&
+        data['from']?.toString().trim() == widget.targetUser) {
+      unawaited(_showIncomingE2eeInvite(widget.targetUser));
+      return;
+    }
+
+    if (type == 'e2ee_invite_response' &&
+        data['from']?.toString().trim() == widget.targetUser) {
+      final accepted = data['accepted'] == true;
+      if (mounted) setState(() => _e2eeActive = accepted);
+      if (accepted) {
+        unawaited(_refreshE2eeVerification(showChangedWarning: true));
+      }
+      _showE2eeNotice(
+        accepted
+            ? _chatText('e2eeInviteAccepted')
+            : _chatText('e2eeInviteDeclined'),
+      );
+      return;
+    }
+
+    if (type == 'e2ee_invite_status' &&
+        data['to']?.toString().trim() == widget.targetUser &&
+        data['sent'] != true) {
+      _showE2eeNotice(
+        data['reason']?.toString().trim().isNotEmpty == true
+            ? data['reason'].toString()
+            : _chatText('e2eeEnableError'),
+      );
+      return;
+    }
 
     if (type == 'trust_state' || type == 'trust_updated') {
       final contact = data['contact']?.toString().trim() ?? '';
@@ -1710,6 +2048,35 @@ class _ChatScreenState extends State<ChatScreen>
       return;
     }
 
+    if (type == 'pinned_message_updated') {
+      final peer = data['peer']?.toString().trim() ?? '';
+      final messageId = data['messageId']?.toString().trim() ?? '';
+      final pinned = data['pinned'] == true;
+
+      if (peer != widget.targetUser || messageId.isEmpty || !mounted) {
+        return;
+      }
+
+      var changed = false;
+      setState(() {
+        for (final message in _messages) {
+          if (_getMessageId(message) != messageId) {
+            continue;
+          }
+          if (_isMessagePinned(message) != pinned) {
+            message['isPinned'] = pinned;
+            changed = true;
+          }
+          break;
+        }
+      });
+
+      if (changed) {
+        _saveMessages();
+      }
+      return;
+    }
+
     if (type == 'message_edited') {
       final messageId = data['messageId']?.toString().trim() ?? '';
 
@@ -1868,6 +2235,10 @@ class _ChatScreenState extends State<ChatScreen>
         _setContactTyping(false);
       }
 
+      if (data['e2ee'] == true) {
+        unawaited(_refreshE2eeVerification(showChangedWarning: true));
+      }
+
       _addMessageIfNotExists({
         'id': id,
         'from': from,
@@ -1892,6 +2263,8 @@ class _ChatScreenState extends State<ChatScreen>
         'time': time,
         'reactionUsers': <String>[],
         'readByMe': from == widget.targetUser && to == currentUser,
+        if (data['e2ee'] == true) 'e2ee': true,
+        if (data['e2eeError'] == true) 'e2eeError': true,
         if (data['replyTo'] is Map)
           'replyTo': Map<String, dynamic>.from(data['replyTo'] as Map),
         if (data['forwardedFrom'] != null)
@@ -1913,11 +2286,17 @@ class _ChatScreenState extends State<ChatScreen>
       return;
     }
 
-    if (type == 'outbox_queued' || type == 'outbox_sending') {
+    if (type == 'outbox_queued' ||
+        type == 'outbox_sending' ||
+        type == 'outbox_failed') {
       final id = data['id']?.toString().trim() ?? '';
       final to = data['to']?.toString().trim() ?? '';
       if (id.isEmpty || to != widget.targetUser) return;
-      final status = type == 'outbox_queued' ? 'queued' : 'sending';
+      final status = type == 'outbox_queued'
+          ? 'queued'
+          : type == 'outbox_failed'
+          ? 'failed'
+          : 'sending';
       _addMessageIfNotExists({
         'id': id,
         'from': currentUser,
@@ -1927,6 +2306,7 @@ class _ChatScreenState extends State<ChatScreen>
         'isMe': true,
         'status': status,
         'reactionUsers': <String>[],
+        if (data['e2ee'] == true) 'e2ee': true,
         if (data['replyTo'] is Map)
           'replyTo': Map<String, dynamic>.from(data['replyTo'] as Map),
         if (data['forwardedFrom'] != null)
@@ -1935,6 +2315,16 @@ class _ChatScreenState extends State<ChatScreen>
           'forwardComment': data['forwardComment'].toString(),
       });
       _updateMessageStatus(id, status);
+      if (type == 'outbox_failed') {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              data['reason']?.toString() ??
+                  'Защищённое сообщение не отправлено',
+            ),
+          ),
+        );
+      }
       return;
     }
 
@@ -1980,6 +2370,7 @@ class _ChatScreenState extends State<ChatScreen>
         'time': time,
         'status': 'sent',
         'reactionUsers': <String>[],
+        if (data['e2ee'] == true) 'e2ee': true,
         if (data['replyTo'] is Map)
           'replyTo': Map<String, dynamic>.from(data['replyTo'] as Map),
         if (data['forwardedFrom'] != null)
@@ -4169,6 +4560,29 @@ class _ChatScreenState extends State<ChatScreen>
     });
 
     _saveMessages();
+
+    final currentUser = SocketService.instance.currentUser?.trim() ?? '';
+    if (currentUser.isNotEmpty) {
+      if (wasPinned) {
+        StorageService.removePinnedMessage(
+          currentUser,
+          widget.targetUser,
+          targetId,
+        );
+      } else {
+        StorageService.addPinnedMessage(currentUser, widget.targetUser, {
+          'messageId': targetId,
+          'updatedAt': DateTime.now().toIso8601String(),
+        });
+      }
+    }
+
+    SocketService.instance.setPinnedMessage(
+      messageId: targetId,
+      to: widget.targetUser,
+      pinned: !wasPinned,
+      messageFrom: message['from']?.toString() ?? '',
+    );
 
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -8000,6 +8414,8 @@ class _ChatScreenState extends State<ChatScreen>
 
     final isMe = message['isMe'] == true;
 
+    final isE2ee = message['e2ee'] == true;
+
     final forwardedFrom = message['forwardedFrom']?.toString().trim() ?? '';
 
     final isPinned = _isMessagePinned(message);
@@ -8040,7 +8456,7 @@ class _ChatScreenState extends State<ChatScreen>
           icon: Icons.forward_rounded,
           label: _chatText('forward'),
         ),
-        if (isMe && forwardedFrom.isEmpty)
+        if (isMe && forwardedFrom.isEmpty && !isE2ee)
           _buildDesktopMessageContextItem(
             value: 'edit',
             icon: Icons.edit_rounded,
@@ -8052,16 +8468,18 @@ class _ChatScreenState extends State<ChatScreen>
           icon: Icons.favorite_rounded,
           label: '${_chatText('reaction')} ❤️',
         ),
-        _buildDesktopMessageContextItem(
-          value: 'translate',
-          icon: Icons.translate_rounded,
-          label: _chatText('translate'),
-        ),
-        _buildDesktopMessageContextItem(
-          value: 'chatgpt',
-          icon: Icons.auto_awesome_rounded,
-          label: 'ChatGPT',
-        ),
+        if (!isE2ee)
+          _buildDesktopMessageContextItem(
+            value: 'translate',
+            icon: Icons.translate_rounded,
+            label: _chatText('translate'),
+          ),
+        if (!isE2ee)
+          _buildDesktopMessageContextItem(
+            value: 'chatgpt',
+            icon: Icons.auto_awesome_rounded,
+            label: 'ChatGPT',
+          ),
         _buildDesktopMessageContextItem(
           value: 'pin',
           icon: isPinned ? Icons.push_pin_outlined : Icons.push_pin_rounded,
@@ -8159,6 +8577,8 @@ class _ChatScreenState extends State<ChatScreen>
 
   Future<void> _showMessageActionMenu(Map<String, dynamic> message) async {
     final isMe = message['isMe'] == true;
+
+    final isE2ee = message['e2ee'] == true;
 
     final isPinned = _isMessagePinned(message);
 
@@ -8366,6 +8786,7 @@ class _ChatScreenState extends State<ChatScreen>
                             ),
 
                             if (isMe &&
+                                !isE2ee &&
                                 (message['forwardedFrom']
                                         ?.toString()
                                         .trim()
@@ -8388,57 +8809,59 @@ class _ChatScreenState extends State<ChatScreen>
                               ),
                             ],
 
-                            Divider(
-                              height: 1,
-                              thickness: 0.6,
-                              color: _gold.withValues(alpha: 0.15),
-                            ),
+                            if (!isE2ee) ...[
+                              Divider(
+                                height: 1,
+                                thickness: 0.6,
+                                color: _gold.withValues(alpha: 0.15),
+                              ),
 
-                            _buildMessageMenuItem(
-                              icon: Icons.translate_rounded,
-                              title: _chatText('translate'),
-                              subtitle: _chatText('translateSubtitle'),
-                              onTap: () {
-                                Navigator.of(dialogContext).pop();
+                              _buildMessageMenuItem(
+                                icon: Icons.translate_rounded,
+                                title: _chatText('translate'),
+                                subtitle: _chatText('translateSubtitle'),
+                                onTap: () {
+                                  Navigator.of(dialogContext).pop();
 
-                                Future<void>.delayed(
-                                  const Duration(milliseconds: 320),
-                                  () {
-                                    if (!mounted) {
-                                      return;
-                                    }
+                                  Future<void>.delayed(
+                                    const Duration(milliseconds: 320),
+                                    () {
+                                      if (!mounted) {
+                                        return;
+                                      }
 
-                                    unawaited(_translateMessage(message));
-                                  },
-                                );
-                              },
-                            ),
+                                      unawaited(_translateMessage(message));
+                                    },
+                                  );
+                                },
+                              ),
 
-                            Divider(
-                              height: 1,
-                              thickness: 0.6,
-                              color: _gold.withValues(alpha: 0.15),
-                            ),
+                              Divider(
+                                height: 1,
+                                thickness: 0.6,
+                                color: _gold.withValues(alpha: 0.15),
+                              ),
 
-                            _buildMessageMenuItem(
-                              icon: Icons.auto_awesome_rounded,
-                              title: 'ChatGPT',
-                              subtitle: _chatText('chatGptSubtitle'),
-                              onTap: () {
-                                Navigator.of(dialogContext).pop();
+                              _buildMessageMenuItem(
+                                icon: Icons.auto_awesome_rounded,
+                                title: 'ChatGPT',
+                                subtitle: _chatText('chatGptSubtitle'),
+                                onTap: () {
+                                  Navigator.of(dialogContext).pop();
 
-                                Future<void>.delayed(
-                                  const Duration(milliseconds: 320),
-                                  () {
-                                    if (!mounted) {
-                                      return;
-                                    }
+                                  Future<void>.delayed(
+                                    const Duration(milliseconds: 320),
+                                    () {
+                                      if (!mounted) {
+                                        return;
+                                      }
 
-                                    unawaited(_showChatGptSheet(message));
-                                  },
-                                );
-                              },
-                            ),
+                                      unawaited(_showChatGptSheet(message));
+                                    },
+                                  );
+                                },
+                              ),
+                            ],
 
                             Divider(
                               height: 1,
@@ -8582,6 +9005,8 @@ class _ChatScreenState extends State<ChatScreen>
 
     final isAiGenerated =
         message['aiGenerated'] == true || message['autoReply'] == true;
+
+    final isE2ee = message['e2ee'] == true;
 
     final isVoiceMessage = _isVoiceMessage(message);
 
@@ -8946,6 +9371,18 @@ class _ChatScreenState extends State<ChatScreen>
                       Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
+                          if (isE2ee) ...[
+                            Icon(
+                              message['e2eeError'] == true
+                                  ? Icons.lock_reset_rounded
+                                  : Icons.lock_rounded,
+                              size: 10,
+                              color: message['e2eeError'] == true
+                                  ? Colors.redAccent
+                                  : _gold,
+                            ),
+                            const SizedBox(width: 3),
+                          ],
                           if (isAiGenerated) ...[
                             Icon(
                               Icons.smart_toy_rounded,
@@ -10565,6 +11002,10 @@ class _ChatScreenState extends State<ChatScreen>
               onSelected: (value) {
                 if (value == 'ai') unawaited(_showSpartanAiSheet());
                 if (value == 'auto') unawaited(_showAutoReplySettings());
+                if (value == 'e2ee') unawaited(_toggleChatE2ee());
+                if (value == 'e2ee_verify') {
+                  unawaited(_showE2eeSafetyNumber());
+                }
                 if (value == 'trust') {
                   unawaited(
                     _openTrustActions(
@@ -10577,6 +11018,58 @@ class _ChatScreenState extends State<ChatScreen>
                 }
               },
               itemBuilder: (_) => [
+                PopupMenuItem(
+                  value: 'e2ee',
+                  enabled: !_changingE2ee,
+                  child: Row(
+                    children: [
+                      Icon(
+                        _e2eeActive
+                            ? Icons.lock_rounded
+                            : Icons.lock_open_rounded,
+                        color: _e2eeActive ? _gold : null,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          _e2eeActive
+                              ? _chatText('e2eeChatOn')
+                              : _chatText('e2eeChatInvite'),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (_e2eeActive)
+                  PopupMenuItem(
+                    value: 'e2ee_verify',
+                    child: Row(
+                      children: [
+                        Icon(
+                          _e2eeVerified
+                              ? Icons.verified_user_rounded
+                              : _e2eeKeyChanged
+                              ? Icons.warning_amber_rounded
+                              : Icons.qr_code_2_rounded,
+                          color: _e2eeVerified
+                              ? Colors.green
+                              : _e2eeKeyChanged
+                              ? Colors.orange
+                              : _gold,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            _e2eeVerified
+                                ? _chatText('e2eeVerified')
+                                : _e2eeKeyChanged
+                                ? _chatText('e2eeKeyChangedTitle')
+                                : _chatText('e2eeVerifyTitle'),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 PopupMenuItem(
                   value: 'trust',
                   child: Column(

@@ -4,7 +4,6 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -12,6 +11,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'services/socket_service.dart';
 import 'services/storage_service.dart';
 import 'services/app_language_service.dart';
+import 'services/e2ee_settings_service.dart';
 
 class SettingsScreen extends StatefulWidget {
   final String username;
@@ -38,6 +38,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   double _backgroundOpacity = 0.35;
 
   int _selectedTextColor = 0xFFFFFFFF;
+  bool _e2eeEnabled = false;
+  bool _changingE2ee = false;
 
   void _showSupportDialog() {
     final language = AppLanguageService.instance;
@@ -47,8 +49,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         title: Text(language.text('supportSpartan')),
         content: SizedBox(
           width: 360,
-          height: 455,
-          child: _SupportPaymentPager(language: language),
+          height: 330,
+          child: _SupportPaymentCard(language: language),
         ),
         actions: [
           TextButton(
@@ -92,6 +94,55 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _loadBackground();
     _loadBackgroundOpacity();
     _loadTextColor();
+    _loadE2ee();
+  }
+
+  Future<void> _loadE2ee() async {
+    final enabled = await E2eeSettingsService.instance.isEnabled();
+    if (mounted) setState(() => _e2eeEnabled = enabled);
+  }
+
+  Future<void> _changeE2ee(bool enabled) async {
+    final t = AppLanguageService.instance.text;
+    if (enabled) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(t('e2eeTitle')),
+          content: Text(t('e2eeExplanation')),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text(t('cancel')),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: Text(t('e2eeEnable')),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+    }
+    if (!mounted) return;
+    setState(() => _changingE2ee = true);
+    final changed = await SocketService.instance.setE2eeEnabled(enabled);
+    if (!mounted) return;
+    setState(() {
+      _changingE2ee = false;
+      if (changed) _e2eeEnabled = enabled;
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          changed
+              ? enabled
+                    ? t('e2eeEnabledNotice')
+                    : t('e2eeDisabledNotice')
+              : t('e2eeEnableError'),
+        ),
+      ),
+    );
   }
 
   // ========================================
@@ -876,6 +927,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ]),
 
+            _buildSection(t('securitySection'), [
+              SwitchListTile.adaptive(
+                secondary: const Icon(Icons.lock_outline_rounded),
+                title: Text(t('e2eeTitle')),
+                subtitle: Text(
+                  _e2eeEnabled ? t('e2eeOnSubtitle') : t('e2eeOffSubtitle'),
+                ),
+                value: _e2eeEnabled,
+                onChanged: _changingE2ee ? null : _changeE2ee,
+              ),
+              if (_changingE2ee)
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(16, 0, 16, 12),
+                  child: LinearProgressIndicator(),
+                ),
+            ]),
+
             const SizedBox(height: 12),
 
             // =================================
@@ -974,177 +1042,58 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 }
 
-class _SupportPaymentPager extends StatefulWidget {
-  const _SupportPaymentPager({required this.language});
+class _SupportPaymentCard extends StatelessWidget {
+  const _SupportPaymentCard({required this.language});
 
   final AppLanguageService language;
-
-  @override
-  State<_SupportPaymentPager> createState() => _SupportPaymentPagerState();
-}
-
-class _SupportPaymentPagerState extends State<_SupportPaymentPager> {
   static final Uri _monobankUri = Uri.parse(
     'https://send.monobank.ua/jar/Aejkjg4K1k',
   );
-  final PageController _controller = PageController();
-  int _page = 0;
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
 
   @override
   Widget build(BuildContext context) {
-    String t(String key) => widget.language.text(key);
+    String t(String key) => language.text(key);
 
     return Column(
+      mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        Expanded(
-          child: PageView(
-            controller: _controller,
-            onPageChanged: (value) => setState(() => _page = value),
-            children: [
-              _paymentPage(
-                title: 'PayPal · 1/2',
-                child: Column(
-                  children: [
-                    Text(t('supportInstruction'), textAlign: TextAlign.center),
-                    const SizedBox(height: 10),
-                    Expanded(
-                      child: Image.asset(
-                        'assets/images/paypal_qr.png',
-                        fit: BoxFit.contain,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    const SelectableText(
-                      'sergeiboroday7@gmail.com',
-                      style: TextStyle(fontWeight: FontWeight.w600),
-                    ),
-                    TextButton.icon(
-                      onPressed: () async {
-                        await Clipboard.setData(
-                          const ClipboardData(text: 'sergeiboroday7@gmail.com'),
-                        );
-                      },
-                      icon: const Icon(Icons.copy),
-                      label: Text(t('copyEmail')),
-                    ),
-                  ],
-                ),
-              ),
-              _paymentPage(
-                title: 'Monobank · 2/2',
-                child: Column(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Container(
-                      width: 92,
-                      height: 92,
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        shape: BoxShape.circle,
-                        color: const Color(0xFF091B2D),
-                        border: Border.all(
-                          color: SpartanPalette.gold,
-                          width: 2,
-                        ),
-                      ),
-                      child: Image.asset('assets/images/spartan_brand.png'),
-                    ),
-                    const SizedBox(height: 22),
-                    Text(
-                      t('monobankInstruction'),
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(fontSize: 16),
-                    ),
-                    const SizedBox(height: 18),
-                    SelectableText(
-                      _monobankUri.toString(),
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        color: SpartanPalette.secondary,
-                        fontSize: 12,
-                      ),
-                    ),
-                    const SizedBox(height: 22),
-                    FilledButton.icon(
-                      style: FilledButton.styleFrom(
-                        backgroundColor: SpartanPalette.gold,
-                        foregroundColor: const Color(0xFF091B2D),
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 22,
-                          vertical: 14,
-                        ),
-                      ),
-                      onPressed: () async {
-                        await launchUrl(
-                          _monobankUri,
-                          mode: LaunchMode.externalApplication,
-                        );
-                      },
-                      icon: const Icon(Icons.account_balance_rounded),
-                      label: Text(t('openMonobank')),
-                    ),
-                  ],
-                ),
-              ),
-            ],
+        Container(
+          width: 92,
+          height: 92,
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            color: const Color(0xFF091B2D),
+            border: Border.all(color: SpartanPalette.gold, width: 2),
           ),
+          child: Image.asset('assets/images/spartan_brand.png'),
         ),
-        const SizedBox(height: 12),
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: List.generate(
-            2,
-            (index) => AnimatedContainer(
-              duration: const Duration(milliseconds: 220),
-              width: _page == index ? 24 : 8,
-              height: 8,
-              margin: const EdgeInsets.symmetric(horizontal: 4),
-              decoration: BoxDecoration(
-                color: _page == index
-                    ? SpartanPalette.gold
-                    : SpartanPalette.secondary.withValues(alpha: 0.35),
-                borderRadius: BorderRadius.circular(20),
-              ),
-            ),
-          ),
-        ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 22),
         Text(
-          _page == 0 ? t('swipeForMonobank') : t('monobankSecondPage'),
+          t('monobankInstruction'),
           textAlign: TextAlign.center,
-          style: const TextStyle(
-            color: SpartanPalette.secondary,
-            fontSize: 12,
-            fontWeight: FontWeight.w600,
+          style: const TextStyle(fontSize: 16),
+        ),
+        const SizedBox(height: 18),
+        SelectableText(
+          _monobankUri.toString(),
+          textAlign: TextAlign.center,
+          style: const TextStyle(color: SpartanPalette.secondary, fontSize: 12),
+        ),
+        const SizedBox(height: 22),
+        FilledButton.icon(
+          style: FilledButton.styleFrom(
+            backgroundColor: SpartanPalette.gold,
+            foregroundColor: const Color(0xFF091B2D),
+            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
           ),
+          onPressed: () async {
+            await launchUrl(_monobankUri, mode: LaunchMode.externalApplication);
+          },
+          icon: const Icon(Icons.account_balance_rounded),
+          label: Text(t('openMonobank')),
         ),
       ],
-    );
-  }
-
-  Widget _paymentPage({required String title, required Widget child}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4),
-      child: Column(
-        children: [
-          Text(
-            title,
-            style: const TextStyle(
-              color: SpartanPalette.gold,
-              fontSize: 17,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          const SizedBox(height: 12),
-          Expanded(child: child),
-        ],
-      ),
     );
   }
 }

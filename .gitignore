@@ -44,6 +44,11 @@ Thumbs.db
 /spartan_ai_history.json
 /media_index.json
 /call_history.json
+/e2ee_prekey_bundles.json
+/e2ee_public_keys.json
+/trust_decisions.json
+/e2ee_prekey_bundles.json
+/e2ee_public_keys.json
 
 # Credentials and local encrypted secrets
 .env
