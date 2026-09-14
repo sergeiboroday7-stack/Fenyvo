@@ -19,6 +19,8 @@
     <application
         android:label="Spartan Chat"
         android:name=".SpartanApplication"
+        android:allowBackup="false"
+        android:fullBackupContent="false"
         android:usesCleartextTraffic="true"
         android:icon="@mipmap/ic_launcher"
         android:requestLegacyExternalStorage="true">

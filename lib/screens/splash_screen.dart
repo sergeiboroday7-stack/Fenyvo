@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/socket_service.dart';
+import '../services/credential_storage_service.dart';
 import '../config/server_config.dart';
 import 'auth_screen.dart';
 import 'chat_list_screen.dart';
@@ -43,7 +44,9 @@ class _SplashScreenState extends State<SplashScreen> {
 
     final username = prefs.getString('username');
 
-    final password = prefs.getString('password');
+    final password = await CredentialStorageService.instance.readPassword(
+      prefs,
+    );
 
     final loggedIn = prefs.getBool('logged_in') ?? false;
 
@@ -172,12 +175,15 @@ class _SplashScreenState extends State<SplashScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: SpartanPalette.canvas,
+
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             const Icon(Icons.shield, size: 80, color: SpartanPalette.ink),
+
             const SizedBox(height: 20),
+
             const Text(
               'SPARTAN CHAT',
               style: TextStyle(
@@ -186,10 +192,14 @@ class _SplashScreenState extends State<SplashScreen> {
                 fontWeight: FontWeight.bold,
               ),
             ),
+
             const SizedBox(height: 40),
+
             if (_isLoading)
               const CircularProgressIndicator(color: SpartanPalette.ink),
+
             const SizedBox(height: 20),
+
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 30),
               child: Text(

@@ -1,12 +1,22 @@
 # Project-level configuration.
 cmake_minimum_required(VERSION 3.14)
+
+# Select the same dynamic MSVC runtime used by the prebuilt Firebase SDK.
+# CMP0091 and this initializer must be set before the first project() call;
+# recent CMake/Visual Studio generators otherwise silently choose /MT.
+if(POLICY CMP0091)
+  cmake_policy(SET CMP0091 NEW)
+endif()
+set(CMAKE_MSVC_RUNTIME_LIBRARY
+  "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+
 project(spartan_chat_final LANGUAGES CXX)
 
-# Firebase's Windows SDK is built against the dynamic MSVC runtime (MD).
-# Keep the Flutter runner and plugins on the same runtime to avoid mixing
-# static libcpmt/libucrt with the Firebase prebuilt libraries.
 if(MSVC)
-  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreadedDLL")
+  # CMake 4.3 with the Visual Studio 18 generator no longer populates the
+  # historical /DWIN32 /D_WINDOWS CXX defaults in every plugin target. WebRTC
+  # uses these macros to select its Windows atomic implementation.
+  add_compile_definitions(WIN32 _WINDOWS)
 endif()
 
 # The name of the executable created for the application. Change this to change
@@ -96,9 +106,10 @@ endif()
 set(BUILD_BUNDLE_DIR "$<TARGET_FILE_DIR:${BINARY_NAME}>")
 # Make the "install" step default, as it's required to run.
 set(CMAKE_VS_INCLUDE_INSTALL_TO_DEFAULT_BUILD 1)
-if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-  set(CMAKE_INSTALL_PREFIX "${BUILD_BUNDLE_DIR}" CACHE PATH "..." FORCE)
-endif()
+# Always keep the runnable bundle next to the generated executable. A failed
+# first CMake configure can cache the Windows default under Program Files and
+# make later non-administrator installs fail.
+set(CMAKE_INSTALL_PREFIX "${BUILD_BUNDLE_DIR}" CACHE PATH "..." FORCE)
 
 set(INSTALL_BUNDLE_DATA_DIR "${CMAKE_INSTALL_PREFIX}/data")
 set(INSTALL_BUNDLE_LIB_DIR "${CMAKE_INSTALL_PREFIX}")

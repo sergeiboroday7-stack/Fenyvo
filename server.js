@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { loadServerConfig } = require('./server_config');
+const { AuthRateLimiter, getClientAddress } = require('./server_security');
 
 const {
   initializeApp,
@@ -21,6 +22,46 @@ const MAX_MEDIA_BYTES = SERVER_CONFIG.maxMediaBytes;
 const DATA_DIR = SERVER_CONFIG.dataDirectory;
 const LOG_MESSAGE_CONTENT = SERVER_CONFIG.logMessageContent;
 const LOG_CLIENT_IP = SERVER_CONFIG.logClientIp;
+const AUTH_ACCOUNT_RATE_LIMITER = new AuthRateLimiter({
+  maxAttempts: SERVER_CONFIG.authMaxAttempts,
+  windowMs: SERVER_CONFIG.authWindowMs,
+});
+const AUTH_IP_RATE_LIMITER = new AuthRateLimiter({
+  maxAttempts: SERVER_CONFIG.authIpMaxAttempts,
+  windowMs: SERVER_CONFIG.authWindowMs,
+});
+const AUTH_DUMMY_SALT = crypto.randomBytes(16).toString('hex');
+const AUTH_DUMMY_HASH = crypto
+  .scryptSync(crypto.randomBytes(32), AUTH_DUMMY_SALT, 64)
+  .toString('hex');
+
+const authRateLimitCleanup = setInterval(
+  () => {
+    AUTH_ACCOUNT_RATE_LIMITER.cleanup();
+    AUTH_IP_RATE_LIMITER.cleanup();
+  },
+  Math.min(SERVER_CONFIG.authWindowMs, 60 * 1000),
+);
+authRateLimitCleanup.unref?.();
+
+function authAccountKey(clientAddress, username) {
+  return `${clientAddress}\u0000${username.trim().toLocaleLowerCase('en-US')}`;
+}
+
+function consumeAuthAttempt(clientAddress, username) {
+  const accountResult = AUTH_ACCOUNT_RATE_LIMITER.consume(
+    authAccountKey(clientAddress, username),
+  );
+  const ipResult = AUTH_IP_RATE_LIMITER.consume(clientAddress);
+  if (accountResult.allowed && ipResult.allowed) return accountResult;
+  return {
+    allowed: false,
+    retryAfterSeconds: Math.max(
+      accountResult.retryAfterSeconds,
+      ipResult.retryAfterSeconds,
+    ),
+  };
+}
 
 fs.mkdirSync(DATA_DIR, { recursive: true });
 
@@ -4372,9 +4413,14 @@ wss.on(
     ws,
     request,
   ) => {
+    const clientAddress = getClientAddress(
+      request,
+      SERVER_CONFIG.trustProxy,
+    );
+
     console.log(
       LOG_CLIENT_IP
-        ? `🟢 Новое подключение: ${request.socket.remoteAddress}`
+        ? `🟢 Новое подключение: ${clientAddress}`
         : '🟢 Новое подключение',
     );
 
@@ -4485,11 +4531,23 @@ wss.on(
             'register'
           ) {
             const username =
-              data.username
-                ?.trim();
+              typeof data.username === 'string'
+                ? data.username.trim()
+                : '';
 
             const password =
-              data.password;
+              typeof data.password === 'string'
+                ? data.password
+                : '';
+
+            const authAttempt = consumeAuthAttempt(clientAddress, username);
+            if (!authAttempt.allowed) {
+              send(ws, 'register_error', {
+                reason: 'Слишком много попыток. Повторите позже.',
+                retryAfterSeconds: authAttempt.retryAfterSeconds,
+              });
+              return;
+            }
 
             if (
               !username ||
@@ -4526,17 +4584,24 @@ wss.on(
 
             if (
               password.length <
-              4
+              8
             ) {
               send(
                 ws,
                 'register_error',
                 {
                   reason:
-                    'Пароль должен содержать минимум 4 символа',
+                    'Пароль должен содержать минимум 8 символов',
                 },
               );
 
+              return;
+            }
+
+            if (password.length > 128) {
+              send(ws, 'register_error', {
+                reason: 'Пароль не должен быть длиннее 128 символов',
+              });
               return;
             }
 
@@ -4597,6 +4662,10 @@ wss.on(
               },
             );
 
+            AUTH_ACCOUNT_RATE_LIMITER.reset(
+              authAccountKey(clientAddress, username),
+            );
+
             return;
           }
 
@@ -4609,11 +4678,23 @@ wss.on(
             'login'
           ) {
             const username =
-              data.username
-                ?.trim();
+              typeof data.username === 'string'
+                ? data.username.trim()
+                : '';
 
             const password =
-              data.password;
+              typeof data.password === 'string'
+                ? data.password
+                : '';
+
+            const authAttempt = consumeAuthAttempt(clientAddress, username);
+            if (!authAttempt.allowed) {
+              send(ws, 'login_error', {
+                reason: 'Слишком много попыток. Повторите позже.',
+                retryAfterSeconds: authAttempt.retryAfterSeconds,
+              });
+              return;
+            }
 
             if (
               !username ||
@@ -4636,13 +4717,13 @@ wss.on(
                 username
               ];
 
-            if (!user) {
+            if (password.length > 128) {
               send(
                 ws,
                 'login_error',
                 {
                   reason:
-                    'Пользователь не зарегистрирован',
+                    'Неверный логин или пароль',
                 },
               );
 
@@ -4652,11 +4733,12 @@ wss.on(
             const passwordCorrect =
               await verifyPassword(
                 password,
-                user.salt,
-                user.passwordHash,
+                user?.salt || AUTH_DUMMY_SALT,
+                user?.passwordHash || AUTH_DUMMY_HASH,
               );
 
             if (
+              !user ||
               !passwordCorrect
             ) {
               send(
@@ -4664,7 +4746,7 @@ wss.on(
                 'login_error',
                 {
                   reason:
-                    'Неверный пароль',
+                    'Неверный логин или пароль',
                 },
               );
 
@@ -4705,6 +4787,10 @@ wss.on(
             onlineUsers.set(
               username,
               ws,
+            );
+
+            AUTH_ACCOUNT_RATE_LIMITER.reset(
+              authAccountKey(clientAddress, username),
             );
 
             console.log(

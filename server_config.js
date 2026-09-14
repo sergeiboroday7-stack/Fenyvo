@@ -54,6 +54,19 @@ function loadServerConfig(projectDirectory = __dirname) {
     ),
     logMessageContent: readBoolean('SPARTAN_LOG_MESSAGE_CONTENT', false),
     logClientIp: readBoolean('SPARTAN_LOG_CLIENT_IP', false),
+    trustProxy: readBoolean('SPARTAN_TRUST_PROXY', false),
+    authMaxAttempts: readInteger('SPARTAN_AUTH_MAX_ATTEMPTS', 10, {
+      min: 5,
+      max: 1000,
+    }),
+    authIpMaxAttempts: readInteger('SPARTAN_AUTH_IP_MAX_ATTEMPTS', 120, {
+      min: 10,
+      max: 10000,
+    }),
+    authWindowMs: readInteger('SPARTAN_AUTH_WINDOW_MS', 15 * 60 * 1000, {
+      min: 10 * 1000,
+      max: 24 * 60 * 60 * 1000,
+    }),
   });
 }
 

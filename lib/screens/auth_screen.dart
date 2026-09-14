@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/socket_service.dart';
 import '../services/app_language_service.dart';
+import '../services/credential_storage_service.dart';
 import '../config/server_config.dart';
 import 'chat_list_screen.dart';
 
@@ -65,7 +66,8 @@ class _AuthScreenState extends State<AuthScreen> {
 
     final username = prefs.getString('username') ?? '';
 
-    final password = prefs.getString('password') ?? '';
+    final password =
+        await CredentialStorageService.instance.readPassword(prefs) ?? '';
 
     final loggedIn = prefs.getBool('logged_in') ?? false;
 
@@ -210,7 +212,10 @@ class _AuthScreenState extends State<AuthScreen> {
 
       await prefs.setString('username', _usernameController.text.trim());
 
-      await prefs.setString('password', _passwordController.text);
+      await CredentialStorageService.instance.savePassword(
+        _passwordController.text,
+        prefs,
+      );
 
       // Old builds stored the private local server address. It is no longer
       // user-configurable and should not remain in application preferences.
@@ -331,9 +336,17 @@ class _AuthScreenState extends State<AuthScreen> {
       return;
     }
 
-    if (password.length < 4) {
+    if (password.length < 8) {
       setState(() {
-        _error = 'Пароль должен содержать минимум 4 символа';
+        _error = 'Пароль должен содержать минимум 8 символов';
+      });
+
+      return;
+    }
+
+    if (password.length > 128) {
+      setState(() {
+        _error = 'Пароль не должен быть длиннее 128 символов';
       });
 
       return;
