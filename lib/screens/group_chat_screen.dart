@@ -509,7 +509,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
     if (mounted) setState(() {});
   }
 
-  Future<void> _startGroupCall() async {
+  Future<void> _startGroupCall({bool withVideo = true}) async {
     if (_recordingVoice) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -520,7 +520,12 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
     }
     final service = GroupCallService.instance;
     final room = service.rooms[_groupId];
-    await service.begin(_groupId, _groupName, existingCallId: room?.id);
+    await service.begin(
+      _groupId,
+      _groupName,
+      existingCallId: room?.id,
+      withVideo: withVideo,
+    );
   }
 
   Widget _groupCallBanner() {
@@ -538,7 +543,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  'Голосовой звонок · ${call.members.length}/4\nПрисоединиться',
+                  'Групповой видеозвонок · ${call.members.length}/4\nПрисоединиться',
                 ),
               ),
               const Icon(Icons.chevron_right_rounded),
@@ -938,15 +943,15 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
             : type == 'file'
             ? 512 * 1024 * 1024
             : 20 * 1024 * 1024;
-        final upload = await MediaTransferService.uploadFile(
-          path: path,
-          fileName: fileName,
-          mimeType: mimeType,
-          messageType: type,
-          maxBytes: maxBytes,
-        );
-
         for (final user in recipients) {
+          final upload = await MediaTransferService.uploadFile(
+            path: path,
+            fileName: fileName,
+            mimeType: mimeType,
+            messageType: type,
+            maxBytes: maxBytes,
+            encryptForE2ee: SocketService.instance.isE2eeActiveWith(user),
+          );
           if (type == 'voice') {
             final rawDuration =
                 int.tryParse(prepared['voiceDurationMs']?.toString() ?? '') ??
@@ -959,6 +964,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
               mimeType: upload.mimeType,
               durationMs: rawDuration > 0 ? rawDuration : 1000,
               forwardedFrom: forwardedFrom,
+              e2eeMedia: upload.e2eeMedia,
             );
           } else {
             SocketService.instance.sendMediaMessage(
@@ -970,6 +976,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
               mimeType: upload.mimeType,
               text: text,
               forwardedFrom: forwardedFrom,
+              e2eeMedia: upload.e2eeMedia,
             );
           }
         }
@@ -3770,8 +3777,13 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
         actions: [
           IconButton(
             tooltip: 'Групповой голосовой звонок',
-            onPressed: _startGroupCall,
+            onPressed: () => _startGroupCall(withVideo: false),
             icon: const Icon(Icons.call_rounded, color: _gold),
+          ),
+          IconButton(
+            tooltip: 'Групповой видеозвонок',
+            onPressed: () => _startGroupCall(withVideo: true),
+            icon: const Icon(Icons.videocam_rounded, color: _gold),
           ),
           IconButton(
             tooltip: 'Поиск',

@@ -36,7 +36,12 @@ class GroupCallService extends ChangeNotifier {
           'noiseSuppression': true,
           'autoGainControl': true,
         },
-        'video': false,
+        'video': {
+          'facingMode': 'user',
+          'width': {'ideal': 640},
+          'height': {'ideal': 480},
+          'frameRate': {'ideal': 20, 'max': 24},
+        },
       })),
       _connection = (() => createPeerConnection({
         'sdpSemantics': 'unified-plan',
@@ -72,6 +77,7 @@ class GroupCallService extends ChangeNotifier {
   final Future<RTCPeerConnection> Function() _connection;
   final Map<String, GroupCallState> rooms = {};
   final Map<String, _GroupPeer> _peers = {};
+  final Map<String, RTCVideoRenderer> remoteVideos = {};
   final Set<String> _dismissed = {};
   Future<void> _events = Future.value();
   Future<void>? _leaving;
@@ -87,6 +93,7 @@ class GroupCallService extends ChangeNotifier {
   String groupName = 'Групповой звонок';
   GroupCallPhase phase = GroupCallPhase.idle;
   bool supported = false, microphoneEnabled = true, speakerphoneEnabled = false;
+  bool videoEnabled = true;
   String? notice;
   int noticeSerial = 0;
   bool get hasCall => phase != GroupCallPhase.idle;
@@ -115,7 +122,7 @@ class GroupCallService extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> begin(String id, String name, {String? existingCallId}) async {
+  Future<void> begin(String id, String name, {String? existingCallId, bool withVideo = true}) async {
     if (!supported) {
       _notifyError(
         'Для групповых звонков нужно перезапустить обновлённый сервер.',
@@ -140,6 +147,7 @@ class GroupCallService extends ChangeNotifier {
     _requestId =
         '${DateTime.now().microsecondsSinceEpoch}-${Random.secure().nextInt(1 << 32)}';
     microphoneEnabled = true;
+    videoEnabled = withVideo;
     speakerphoneEnabled = false;
     _clock.reset();
     notifyListeners();
@@ -152,6 +160,12 @@ class GroupCallService extends ChangeNotifier {
         );
       if (epoch != _epoch) return;
       final stream = await _media();
+      if (!withVideo) {
+        for (final track in stream.getVideoTracks()) {
+          track.enabled = false;
+          await track.stop();
+        }
+      }
       if (epoch != _epoch) {
         await _releaseStream(stream);
         return;
@@ -180,10 +194,10 @@ class GroupCallService extends ChangeNotifier {
     }
   }
 
-  Future<void> accept() async {
+  Future<void> accept({bool withVideo = true}) async {
     final room = current;
     if (phase == GroupCallPhase.invited && room != null) {
-      await begin(room.groupId, room.name, existingCallId: room.id);
+      await begin(room.groupId, room.name, existingCallId: room.id, withVideo: withVideo);
     }
   }
 
@@ -453,8 +467,10 @@ class GroupCallService extends ChangeNotifier {
       };
       pc.onTrack = (event) {
         if (!valid()) return;
-        // Native WebRTC plays remote audio tracks; never attach the local stream to an audio renderer.
         if (event.track.kind == 'audio') event.track.enabled = true;
+        if (event.track.kind == 'video' && event.streams.isNotEmpty) {
+          unawaited(_attachRemoteVideo(peer.member.user, event.streams.first));
+        }
       };
       pc.onConnectionState = (state) {
         if (!valid()) return;
@@ -477,7 +493,7 @@ class GroupCallService extends ChangeNotifier {
           notifyListeners();
         }
       });
-      for (final track in _stream!.getAudioTracks()) {
+      for (final track in _stream!.getTracks()) {
         if (!valid()) return;
         await pc.addTrack(track, _stream!);
       }
@@ -488,6 +504,13 @@ class GroupCallService extends ChangeNotifier {
         if (valid()) _sendDescription(peer, offer);
       }
     }
+  }
+
+  Future<void> _attachRemoteVideo(String user, MediaStream stream) async {
+    final renderer = remoteVideos[user] ??= RTCVideoRenderer();
+    if (renderer.textureId == null) await renderer.initialize();
+    renderer.srcObject = stream;
+    notifyListeners();
   }
 
   void _signal(_GroupPeer peer, Map<String, dynamic> signal) =>
@@ -549,6 +572,13 @@ class GroupCallService extends ChangeNotifier {
     for (final peer in peers) {
       await _releasePeer(peer);
     }
+    for (final renderer in remoteVideos.values) {
+      try {
+        renderer.srcObject = null;
+        await renderer.dispose();
+      } catch (_) {}
+    }
+    remoteVideos.clear();
     if (stream != null) await _releaseStream(stream);
     if (stream != null && Platform.isAndroid) {
       try {

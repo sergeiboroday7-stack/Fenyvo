@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_webrtc/flutter_webrtc.dart';
 
 import '../services/group_call_service.dart';
 import '../services/group_call_state.dart';
@@ -114,6 +115,7 @@ class GroupCallScreen extends StatelessWidget {
                                             : invited
                                             ? 'В звонке'
                                             : call.peerStatus(member.user),
+                                        renderer: call.remoteVideos[member.user],
                                       ),
                                     ),
                                   )
@@ -123,7 +125,7 @@ class GroupCallScreen extends StatelessWidget {
                         ),
                         const SizedBox(height: 24),
                         const Text(
-                          'Тестовая версия · голос до 4 участников.\n'
+                          'Тестовая версия · видео до 4 участников.\n'
                           'Держите приложение открытым на всех устройствах.',
                           textAlign: TextAlign.center,
                           style: TextStyle(
@@ -148,7 +150,7 @@ class GroupCallScreen extends StatelessWidget {
                             label: 'Присоединиться',
                             icon: Icons.call_rounded,
                             color: Colors.green.shade700,
-                            onTap: () => unawaited(call.accept()),
+                            onTap: () => _chooseJoinMode(context, call),
                           ),
                         if (active)
                           _Action(
@@ -200,15 +202,39 @@ class GroupCallScreen extends StatelessWidget {
   }
 }
 
+Future<void> _chooseJoinMode(BuildContext context, GroupCallService call) async {
+  final withVideo = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('Как присоединиться?'),
+      content: const Text('Выберите, включать ли камеру. Это можно изменить во время звонка.'),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('Только голос'),
+        ),
+        FilledButton.icon(
+          onPressed: () => Navigator.pop(context, true),
+          icon: const Icon(Icons.videocam_rounded),
+          label: const Text('С камерой'),
+        ),
+      ],
+    ),
+  );
+  if (withVideo != null) await call.accept(withVideo: withVideo);
+}
+
 class _MemberCard extends StatelessWidget {
   const _MemberCard({
     required this.member,
     required this.me,
     required this.status,
+    this.renderer,
   });
   final GroupCallMember member;
   final bool me;
   final String status;
+  final RTCVideoRenderer? renderer;
   @override
   Widget build(BuildContext context) {
     ImageProvider? avatar;
@@ -230,13 +256,22 @@ class _MemberCard extends StatelessWidget {
       ),
       child: Column(
         children: [
-          CircleAvatar(
-            radius: 36,
-            backgroundImage: avatar,
-            backgroundColor: SpartanPalette.blue,
-            child: avatar == null
-                ? const Icon(Icons.person_rounded, size: 38)
-                : null,
+          SizedBox(
+            height: 120,
+            width: double.infinity,
+            child: renderer?.srcObject != null
+                ? ClipRRect(
+                    borderRadius: BorderRadius.circular(16),
+                    child: RTCVideoView(renderer!, objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover),
+                  )
+                : CircleAvatar(
+                    radius: 36,
+                    backgroundImage: avatar,
+                    backgroundColor: SpartanPalette.blue,
+                    child: avatar == null
+                        ? const Icon(Icons.person_rounded, size: 38)
+                        : null,
+                  ),
           ),
           const SizedBox(height: 12),
           Text(
