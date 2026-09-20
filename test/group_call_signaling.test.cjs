@@ -77,6 +77,20 @@ test('lease and membership required for mute or signal', () => {
   f.send('A', 'group_call_get', { groupId: 'g' }); assert.equal(f.api.isBusy('B'), false);
   f.api.dispose();
 });
+test('host can moderate guests; guests cannot moderate host', () => {
+  const f = fixture(); f.start(); f.join('B');
+  f.send('B', 'group_call_moderate', { ...f.packet('B'), target: 'A', action: 'kick' });
+  assert.equal(f.sent.at(-1).type, 'group_call_error');
+  f.send('A', 'group_call_moderate', { ...f.packet('A'), target: 'B', action: 'video_off' });
+  assert.equal(f.sent.some(x => x.to === 'B' && x.type === 'group_call_moderation' && x.data.action === 'video_off'), true);
+  assert.equal(f.sent.findLast(x => x.type === 'group_call_state').data.call.participants.find(x => x.user === 'B').videoEnabled, false);
+  f.send('A', 'group_call_moderate', { ...f.packet('A'), target: 'B', action: 'promote' });
+  assert.equal(f.sent.findLast(x => x.type === 'group_call_state').data.call.participants.find(x => x.user === 'B').role, 'moderator');
+  f.send('B', 'group_call_moderate', { ...f.packet('B'), target: 'A', action: 'mute' });
+  assert.notEqual(f.sent.at(-1).type, 'group_call_moderation');
+  f.send('A', 'group_call_moderate', { ...f.packet('A'), target: 'B', action: 'kick' });
+  assert.equal(f.api.isBusy('B'), false); f.api.dispose();
+});
 test('private busy and other group rooms cannot be joined', () => {
   const f = fixture(); f.busy.add('A');
   f.send('A', 'group_call_start', { groupId: 'g', requestId: 'r' });

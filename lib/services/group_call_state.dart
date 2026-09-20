@@ -3,10 +3,16 @@ class GroupCallMember {
     required this.user,
     required this.sessionId,
     this.muted = false,
+    this.videoEnabled = true,
+    this.role = 'guest',
   });
   final String user;
   final String sessionId;
   final bool muted;
+  final bool videoEnabled;
+  final String role;
+  bool get isHost => role == 'host';
+  bool get isModerator => role == 'moderator';
 }
 
 class GroupCallState {
@@ -42,6 +48,8 @@ class GroupCallState {
           user: user,
           sessionId: session,
           muted: item['muted'] == true,
+          videoEnabled: item['videoEnabled'] != false,
+          role: item['role']?.toString() ?? 'guest',
         ),
       );
     }

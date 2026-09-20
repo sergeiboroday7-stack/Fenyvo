@@ -166,6 +166,9 @@ void main() {
   });
   test('room parser rejects duplicates, malformed and overcapacity', () {
     expect(GroupCallState.parse(room())!.members.length, 2);
+    final videoRoom = room();
+    (videoRoom['participants'] as List)[1]['videoEnabled'] = false;
+    expect(GroupCallState.parse(videoRoom)!.members[1].videoEnabled, false);
     expect(GroupCallState.parse({}), isNull);
     final bad = room();
     bad['participants'] = [

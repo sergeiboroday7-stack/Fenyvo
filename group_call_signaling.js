@@ -8,7 +8,8 @@ function createGroupCallSignaling({ send, onlineUsers, getGroup, getMembers,
   const rooms = new Map(), byUser = new Map();
   const types = new Set(['group_call_get', 'group_call_sync', 'group_call_start',
     'group_call_join', 'group_call_leave', 'group_call_mute',
-    'group_call_signal', 'group_call_heartbeat']);
+    'group_call_video', 'group_call_moderate', 'group_call_signal',
+    'group_call_heartbeat']);
   const members = id => getMembers(getGroup(id));
   const emit = (user, type, data) => {
     const ws = onlineUsers.get(user);
@@ -17,7 +18,9 @@ function createGroupCallSignaling({ send, onlineUsers, getGroup, getMembers,
   const snapshot = room => ({ id: room.id, groupId: room.groupId, name: room.name,
     startedBy: room.startedBy, limit: maxParticipants,
     participants: [...room.people].map(([user, p]) => ({ user,
-      sessionId: p.sessionId, muted: p.muted })) });
+      sessionId: p.sessionId, muted: p.muted,
+      videoEnabled: p.videoEnabled,
+      role: user === room.startedBy ? 'host' : room.moderators.has(user) ? 'moderator' : 'guest' })) });
   function broadcast(room) {
     const data = { groupId: room.groupId, call: room.people.size ? snapshot(room) : null };
     for (const user of members(room.groupId)) emit(user, 'group_call_state', data);
@@ -26,9 +29,14 @@ function createGroupCallSignaling({ send, onlineUsers, getGroup, getMembers,
     const person = room.people.get(user);
     if (!person) return;
     room.people.delete(user);
+    room.moderators.delete(user);
     if (byUser.get(user) === room) byUser.delete(user);
     emit(user, 'group_call_left', { callId: room.id, sessionId: person.sessionId, reason });
     if (!room.people.size) { rooms.delete(room.groupId); cancel(room.timer); }
+    else if (room.startedBy === user) {
+      room.startedBy = room.moderators.values().next().value || room.people.keys().next().value;
+      room.moderators.delete(room.startedBy);
+    }
     broadcast(room);
   }
   function prune(room) {
@@ -81,10 +89,11 @@ function createGroupCallSignaling({ send, onlineUsers, getGroup, getMembers,
       const created = !room;
       if (!room) {
         room = { id: crypto.randomUUID(), groupId, name: String(getGroup(groupId)?.name || 'Группа'),
-          startedBy: user, people: new Map() };
+          startedBy: user, moderators: new Set(), people: new Map() };
         rooms.set(groupId, room); arm(room);
       }
-      const person = { sessionId: crypto.randomUUID(), requestId, socket: ws, muted: false, seen: now(),
+      const person = { sessionId: crypto.randomUUID(), requestId, socket: ws,
+        muted: false, videoEnabled: data.videoEnabled !== false, seen: now(),
         window: now(), signals: 0 };
       room.people.set(user, person); byUser.set(user, room);
       // The new member learns its lease before anyone can send an SDP offer.
@@ -108,6 +117,37 @@ function createGroupCallSignaling({ send, onlineUsers, getGroup, getMembers,
     if (type === 'group_call_mute') {
       if (typeof data.muted === 'boolean' && person.muted !== data.muted) {
         person.muted = data.muted; broadcast(room);
+      }
+      return true;
+    }
+    if (type === 'group_call_video') {
+      if (typeof data.videoEnabled === 'boolean' && person.videoEnabled !== data.videoEnabled) {
+        person.videoEnabled = data.videoEnabled; broadcast(room);
+      }
+      return true;
+    }
+    if (type === 'group_call_moderate') {
+      const isHost = room.startedBy === user;
+      const isModerator = room.moderators.has(user);
+      if (!isHost && !isModerator) { error('Только ведущий или модератор может управлять участниками'); return true; }
+      const target = typeof data.target === 'string' ? data.target : '';
+      const targetPerson = room.people.get(target);
+      if (!targetPerson || target === user) return true;
+      if (target === room.startedBy || (!isHost && room.moderators.has(target))) return true;
+      if (data.action === 'kick') {
+        remove(room, target, 'Ведущий удалил вас из звонка');
+      } else if (data.action === 'mute') {
+        targetPerson.muted = true;
+        emit(target, 'group_call_moderation', { callId: room.id, action: 'mute', by: user });
+        broadcast(room);
+      } else if (data.action === 'video_off') {
+        targetPerson.videoEnabled = false;
+        emit(target, 'group_call_moderation', { callId: room.id, action: 'video_off', by: user });
+        broadcast(room);
+      } else if (data.action === 'promote' && isHost) {
+        room.moderators.add(target); broadcast(room);
+      } else if (data.action === 'demote' && isHost) {
+        room.moderators.delete(target); broadcast(room);
       }
       return true;
     }
