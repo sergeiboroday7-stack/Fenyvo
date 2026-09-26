@@ -160,7 +160,7 @@ void FlutterWindow::AddTrayIcon() {
   tray_icon_.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
   tray_icon_.uCallbackMessage = kTrayCallbackMessage;
   tray_icon_.hIcon = LoadIconW(GetModuleHandle(nullptr), MAKEINTRESOURCEW(IDI_APP_ICON));
-  wcscpy_s(tray_icon_.szTip, L"SPARTAN CHAT");
+  wcscpy_s(tray_icon_.szTip, L"FENYVO");
 
   tray_icon_added_ = Shell_NotifyIconW(NIM_ADD, &tray_icon_) == TRUE;
   if (tray_icon_added_) {
@@ -208,7 +208,7 @@ void FlutterWindow::ShowTrayMenu() {
   }
   AppendMenuW(
       menu, MF_STRING, kTrayOpenCommand,
-      L"\u041E\u0442\u043A\u0440\u044B\u0442\u044C SPARTAN CHAT");
+      L"\u041E\u0442\u043A\u0440\u044B\u0442\u044C FENYVO");
   AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
   AppendMenuW(menu, MF_STRING, kTrayExitCommand,
               L"\u0412\u044B\u0439\u0442\u0438");
@@ -231,7 +231,7 @@ void FlutterWindow::ShowTrayHint() {
   tray_icon_.dwInfoFlags = NIIF_INFO;
   wcscpy_s(
       tray_icon_.szInfoTitle,
-      L"SPARTAN CHAT \u0440\u0430\u0431\u043E\u0442\u0430\u0435\u0442 "
+      L"FENYVO \u0440\u0430\u0431\u043E\u0442\u0430\u0435\u0442 "
       L"\u0432 \u0444\u043E\u043D\u0435");
   wcscpy_s(tray_icon_.szInfo,
            L"\u0421\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F "

@@ -68,16 +68,27 @@ class _InlinePrivateVideo extends StatefulWidget {
 class _InlinePrivateVideoState extends State<_InlinePrivateVideo> {
   VideoPlayerController? _controller;
   File? _tempFile;
-  bool _loading = true;
+  bool _loading = false;
   String? _error;
 
   @override
   void initState() {
     super.initState();
-    unawaited(_prepare());
+    // Start preparing immediately so the existing first-frame cover appears
+    // without an extra tap. Duplicate requests are coalesced by the cache.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_prepare());
+    });
   }
 
   Future<void> _prepare() async {
+    if (_loading || _controller != null) return;
+    if (mounted) {
+      setState(() {
+        _loading = true;
+        _error = null;
+      });
+    }
     try {
       File file;
       var ownsTemp = false;
@@ -221,13 +232,36 @@ class _InlinePrivateVideoState extends State<_InlinePrivateVideo> {
     if (_error != null ||
         controller == null ||
         !controller.value.isInitialized) {
-      return SizedBox(
-        width: 250,
-        height: 90,
-        child: Center(
-          child: Text(
-            '🎥 ${_chatText('videoUnavailable')}',
-            style: const TextStyle(color: SpartanPalette.ink),
+      return Material(
+        color: SpartanPalette.surface.withValues(alpha: 0.18),
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onTap: () => unawaited(_prepare()),
+          child: SizedBox(
+            width: 250,
+            height: 140,
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    _error == null
+                        ? Icons.play_circle_fill_rounded
+                        : Icons.refresh_rounded,
+                    color: widget.gold,
+                    size: 48,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    _error == null
+                        ? '${_chatText('download')} ${_chatText('video').toLowerCase()}'
+                        : _chatText('videoUnavailable'),
+                    style: const TextStyle(color: SpartanPalette.ink),
+                  ),
+                ],
+              ),
+            ),
           ),
         ),
       );
@@ -619,9 +653,77 @@ class _ChatScreenState extends State<ChatScreen>
     '\u{1F494}',
   ];
 
+  bool _handleWindowsTypeToPrivateChat(KeyEvent event) {
+    if (!Platform.isWindows || !mounted || event is! KeyDownEvent) {
+      return false;
+    }
+
+    final keyboard = HardwareKeyboard.instance;
+
+    if (keyboard.isControlPressed ||
+        keyboard.isAltPressed ||
+        keyboard.isMetaPressed) {
+      return false;
+    }
+
+    if (_messageFocusNode.hasFocus) {
+      return false;
+    }
+
+    final focusedWidget = FocusManager.instance.primaryFocus?.context?.widget;
+
+    if (focusedWidget is EditableText) {
+      return false;
+    }
+
+    final character = event.character;
+
+    if (character == null || character.isEmpty) {
+      return false;
+    }
+
+    if (character.runes.any((rune) => rune < 0x20 || rune == 0x7F)) {
+      return false;
+    }
+
+    final value = _messageController.value;
+    final selection = value.selection.isValid
+        ? value.selection
+        : TextSelection.collapsed(offset: value.text.length);
+
+    final start = selection.start < 0
+        ? value.text.length
+        : selection.start > value.text.length
+        ? value.text.length
+        : selection.start;
+
+    final end = selection.end < 0
+        ? start
+        : selection.end > value.text.length
+        ? value.text.length
+        : selection.end;
+
+    final newText = value.text.replaceRange(start, end, character);
+    final newOffset = start + character.length;
+
+    _messageController.value = value.copyWith(
+      text: newText,
+      selection: TextSelection.collapsed(offset: newOffset),
+      composing: TextRange.empty,
+    );
+
+    _handleTextChanged(newText);
+    _messageFocusNode.requestFocus();
+
+    return true;
+  }
+
   @override
   void initState() {
     super.initState();
+    if (Platform.isWindows) {
+      HardwareKeyboard.instance.addHandler(_handleWindowsTypeToPrivateChat);
+    }
     AppLanguageService.instance.code.addListener(_refreshLanguage);
     _draftKey =
         '${SocketService.instance.currentUser ?? ''}::${widget.targetUser}';
@@ -708,6 +810,9 @@ class _ChatScreenState extends State<ChatScreen>
 
   @override
   void dispose() {
+    if (Platform.isWindows) {
+      HardwareKeyboard.instance.removeHandler(_handleWindowsTypeToPrivateChat);
+    }
     AppLanguageService.instance.code.removeListener(_refreshLanguage);
     SocketService.instance.clearActiveChatUser(widget.targetUser);
 
@@ -1765,7 +1870,7 @@ class _ChatScreenState extends State<ChatScreen>
 
     if (type == 'spartan_ai_error') {
       final requestId = data['requestId']?.toString().trim() ?? '';
-      final reason = data['reason']?.toString().trim() ?? 'SPARTAN AI error';
+      final reason = data['reason']?.toString().trim() ?? 'FENYVO AI error';
 
       final completer = _spartanAiCompleters.remove(requestId);
 
@@ -1863,8 +1968,8 @@ class _ChatScreenState extends State<ChatScreen>
             SnackBar(
               content: Text(
                 _autoReplyEnabled
-                    ? '\u{1F916} SPARTAN AI \u0430\u0432\u0442\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435 \u0432\u043A\u043B\u044E\u0447\u0435\u043D\u043E \u0434\u043B\u044F ${widget.targetUser}'
-                    : 'SPARTAN AI \u0430\u0432\u0442\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435 \u0432\u044B\u043A\u043B\u044E\u0447\u0435\u043D\u043E \u0434\u043B\u044F ${widget.targetUser}',
+                    ? '\u{1F916} FENYVO AI \u0430\u0432\u0442\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435 \u0432\u043A\u043B\u044E\u0447\u0435\u043D\u043E \u0434\u043B\u044F ${widget.targetUser}'
+                    : 'FENYVO AI \u0430\u0432\u0442\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435 \u0432\u044B\u043A\u043B\u044E\u0447\u0435\u043D\u043E \u0434\u043B\u044F ${widget.targetUser}',
               ),
               backgroundColor: SpartanPalette.surface,
               duration: const Duration(milliseconds: 1700),
@@ -1890,7 +1995,7 @@ class _ChatScreenState extends State<ChatScreen>
             duration: const Duration(seconds: 10),
             backgroundColor: SpartanPalette.surface,
             content: Text(
-              '\u{1F916} SPARTAN AI \u043F\u0440\u0435\u0434\u043B\u0430\u0433\u0430\u0435\u0442: $suggestion',
+              '\u{1F916} FENYVO AI \u043F\u0440\u0435\u0434\u043B\u0430\u0433\u0430\u0435\u0442: $suggestion',
               maxLines: 4,
               overflow: TextOverflow.ellipsis,
             ),
@@ -1927,7 +2032,7 @@ class _ChatScreenState extends State<ChatScreen>
           const SnackBar(
             backgroundColor: SpartanPalette.surface,
             content: Text(
-              '\u2705 SPARTAN AI: \u0446\u0435\u043B\u044C \u0434\u0438\u0430\u043B\u043E\u0433\u0430 \u0434\u043E\u0441\u0442\u0438\u0433\u043D\u0443\u0442\u0430. \u0410\u0432\u0442\u043E\u0440\u0435\u0436\u0438\u043C \u043E\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D.',
+              '\u2705 FENYVO AI: \u0446\u0435\u043B\u044C \u0434\u0438\u0430\u043B\u043E\u0433\u0430 \u0434\u043E\u0441\u0442\u0438\u0433\u043D\u0443\u0442\u0430. \u0410\u0432\u0442\u043E\u0440\u0435\u0436\u0438\u043C \u043E\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D.',
             ),
           ),
         );
@@ -1947,7 +2052,7 @@ class _ChatScreenState extends State<ChatScreen>
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
-              '\u041F\u0430\u043C\u044F\u0442\u044C SPARTAN AI \u044D\u0442\u043E\u0433\u043E \u0434\u0438\u0430\u043B\u043E\u0433\u0430 \u043E\u0447\u0438\u0449\u0435\u043D\u0430',
+              '\u041F\u0430\u043C\u044F\u0442\u044C FENYVO AI \u044D\u0442\u043E\u0433\u043E \u0434\u0438\u0430\u043B\u043E\u0433\u0430 \u043E\u0447\u0438\u0449\u0435\u043D\u0430',
             ),
             backgroundColor: SpartanPalette.surface,
           ),
@@ -2259,6 +2364,8 @@ class _ChatScreenState extends State<ChatScreen>
         if (data['fileName'] != null) 'fileName': data['fileName'].toString(),
         if (data['fileSize'] != null) 'fileSize': data['fileSize'],
         if (data['mimeType'] != null) 'mimeType': data['mimeType'].toString(),
+        if (data['e2eeMedia'] is Map)
+          'e2eeMedia': Map<String, dynamic>.from(data['e2eeMedia'] as Map),
         'isMe': from == currentUser,
         'time': time,
         'reactionUsers': <String>[],
@@ -2307,6 +2414,18 @@ class _ChatScreenState extends State<ChatScreen>
         'status': status,
         'reactionUsers': <String>[],
         if (data['e2ee'] == true) 'e2ee': true,
+        if (data['messageType'] != null)
+          'messageType': data['messageType'].toString(),
+        if (data['mediaId'] != null) 'mediaId': data['mediaId'].toString(),
+        if (data['fileName'] != null) 'fileName': data['fileName'].toString(),
+        if (data['fileSize'] != null) 'fileSize': data['fileSize'],
+        if (data['mimeType'] != null) 'mimeType': data['mimeType'].toString(),
+        if (data['voiceDurationMs'] != null)
+          'voiceDurationMs': data['voiceDurationMs'],
+        if (data['voiceMimeType'] != null)
+          'voiceMimeType': data['voiceMimeType'].toString(),
+        if (data['e2eeMedia'] is Map)
+          'e2eeMedia': Map<String, dynamic>.from(data['e2eeMedia'] as Map),
         if (data['replyTo'] is Map)
           'replyTo': Map<String, dynamic>.from(data['replyTo'] as Map),
         if (data['forwardedFrom'] != null)
@@ -2366,6 +2485,8 @@ class _ChatScreenState extends State<ChatScreen>
         if (data['fileName'] != null) 'fileName': data['fileName'].toString(),
         if (data['fileSize'] != null) 'fileSize': data['fileSize'],
         if (data['mimeType'] != null) 'mimeType': data['mimeType'].toString(),
+        if (data['e2eeMedia'] is Map)
+          'e2eeMedia': Map<String, dynamic>.from(data['e2eeMedia'] as Map),
         'isMe': true,
         'time': time,
         'status': 'sent',
@@ -2804,12 +2925,16 @@ class _ChatScreenState extends State<ChatScreen>
     }
     if (mounted) setState(() => _sendingPrivateMedia = true);
     try {
+      final protectWithE2ee = SocketService.instance.isE2eeActiveWith(
+        widget.targetUser,
+      );
       final upload = await MediaTransferService.uploadFile(
         path: path,
         fileName: _privateSafeFileName(fileName),
         mimeType: mimeType,
         messageType: messageType,
         maxBytes: maxBytes,
+        encryptForE2ee: protectWithE2ee,
       );
       SocketService.instance.sendMediaMessage(
         widget.targetUser,
@@ -2820,6 +2945,7 @@ class _ChatScreenState extends State<ChatScreen>
         mimeType: upload.mimeType,
         text: text,
         replyTo: _currentReplyPayload(),
+        e2eeMedia: upload.e2eeMedia,
       );
       if (_replyToMessage != null && mounted) {
         setState(() => _replyToMessage = null);
@@ -2869,10 +2995,32 @@ class _ChatScreenState extends State<ChatScreen>
     }
   }
 
-  void _openPrivateImage(Map<String, dynamic> message) {
-    final path = _privateMediaPath(message);
-    final bytes = path == null ? _privateMediaBytes(message) : null;
-    final networkUrl = MediaCacheService.remoteUrl(message);
+  Future<void> _openPrivateImage(Map<String, dynamic> source) async {
+    var message = Map<String, dynamic>.from(source);
+    var path = _privateMediaPath(message);
+    var bytes = path == null ? _privateMediaBytes(message) : null;
+    var networkUrl = MediaCacheService.remoteUrl(message);
+
+    // Protected media on the server is ciphertext and must never be passed to
+    // Image.network. Download and authenticate/decrypt it on this device first.
+    if (path == null &&
+        (bytes == null || bytes.isEmpty) &&
+        networkUrl != null &&
+        MediaCacheService.e2eeMediaMetadata(message) != null) {
+      try {
+        message = await MediaCacheService.cacheRemoteMedia(message);
+        path = _privateMediaPath(message);
+        bytes = path == null ? _privateMediaBytes(message) : null;
+        networkUrl = null;
+      } catch (error) {
+        if (mounted) {
+          _privateMediaSnack(_chatText('fileSaveError', {'error': error}));
+        }
+        return;
+      }
+    }
+
+    if (!mounted) return;
     if (path == null &&
         (bytes == null || bytes.isEmpty) &&
         networkUrl == null) {
@@ -2966,7 +3114,7 @@ class _ChatScreenState extends State<ChatScreen>
       return Stack(
         children: [
           GestureDetector(
-            onTap: () => _openPrivateImage(message),
+            onTap: () => unawaited(_openPrivateImage(message)),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(12),
               child: ConstrainedBox(
@@ -2975,7 +3123,56 @@ class _ChatScreenState extends State<ChatScreen>
                   maxWidth: 340,
                   maxHeight: 330,
                 ),
-                child: path != null
+                child:
+                    path == null &&
+                        (bytes == null || bytes.isEmpty) &&
+                        networkUrl != null &&
+                        MediaCacheService.e2eeMediaMetadata(message) != null
+                    ? FutureBuilder<Map<String, dynamic>>(
+                        future: MediaCacheService.cacheRemoteMedia(message),
+                        builder: (context, snapshot) {
+                          final decryptedPath = snapshot.hasData
+                              ? MediaCacheService.existingLocalPath(
+                                  snapshot.data!,
+                                )
+                              : null;
+                          if (decryptedPath != null) {
+                            return Image.file(
+                              File(decryptedPath),
+                              fit: BoxFit.cover,
+                              gaplessPlayback: true,
+                              errorBuilder: (_, __, ___) => const SizedBox(
+                                width: 220,
+                                height: 120,
+                                child: Center(
+                                  child: Icon(
+                                    Icons.broken_image_outlined,
+                                    size: 42,
+                                  ),
+                                ),
+                              ),
+                            );
+                          }
+                          if (snapshot.hasError) {
+                            return const SizedBox(
+                              width: 220,
+                              height: 120,
+                              child: Center(
+                                child: Icon(
+                                  Icons.broken_image_outlined,
+                                  size: 42,
+                                ),
+                              ),
+                            );
+                          }
+                          return const SizedBox(
+                            width: 220,
+                            height: 120,
+                            child: Center(child: CircularProgressIndicator()),
+                          );
+                        },
+                      )
+                    : path != null
                     ? Image.file(
                         File(path),
                         fit: BoxFit.cover,
@@ -3387,12 +3584,16 @@ class _ChatScreenState extends State<ChatScreen>
         return;
       }
 
+      final protectWithE2ee = SocketService.instance.isE2eeActiveWith(
+        widget.targetUser,
+      );
       final upload = await MediaTransferService.uploadFile(
         path: file.path,
         fileName: _privateBasename(file.path),
         mimeType: 'audio/mp4',
         messageType: 'voice',
         maxBytes: 20 * 1024 * 1024,
+        encryptForE2ee: protectWithE2ee,
       );
 
       SocketService.instance.sendVoiceMessage(
@@ -3403,6 +3604,7 @@ class _ChatScreenState extends State<ChatScreen>
         mimeType: upload.mimeType,
         durationMs: duration.inMilliseconds,
         replyTo: _currentReplyPayload(),
+        e2eeMedia: upload.e2eeMedia,
       );
 
       if (_replyToMessage != null && mounted) {
@@ -5568,7 +5770,7 @@ class _ChatScreenState extends State<ChatScreen>
         const Duration(seconds: 65),
         onTimeout: () {
           throw TimeoutException(
-            'SPARTAN AI \u043D\u0435 \u043E\u0442\u0432\u0435\u0442\u0438\u043B \u0432\u043E\u0432\u0440\u0435\u043C\u044F',
+            'FENYVO AI \u043D\u0435 \u043E\u0442\u0432\u0435\u0442\u0438\u043B \u0432\u043E\u0432\u0440\u0435\u043C\u044F',
           );
         },
       );
@@ -5638,7 +5840,7 @@ class _ChatScreenState extends State<ChatScreen>
 
     if (result.isEmpty) {
       throw Exception(
-        'SPARTAN AI \u0432\u0435\u0440\u043D\u0443\u043B \u043F\u0443\u0441\u0442\u043E\u0439 \u043E\u0442\u0432\u0435\u0442',
+        'FENYVO AI \u0432\u0435\u0440\u043D\u0443\u043B \u043F\u0443\u0441\u0442\u043E\u0439 \u043E\u0442\u0432\u0435\u0442',
       );
     }
 
@@ -5891,7 +6093,7 @@ class _ChatScreenState extends State<ChatScreen>
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     const Text(
-                                      'SPARTAN AI',
+                                      'FENYVO AI',
                                       style: TextStyle(
                                         color: SpartanPalette.ink,
                                         fontSize: 20,
@@ -6004,7 +6206,7 @@ class _ChatScreenState extends State<ChatScreen>
                                               ),
                                               SizedBox(width: 10),
                                               Text(
-                                                'SPARTAN AI...',
+                                                'FENYVO AI...',
                                                 style: TextStyle(
                                                   color:
                                                       SpartanPalette.secondary,
@@ -7701,15 +7903,15 @@ class _ChatScreenState extends State<ChatScreen>
             : type == 'file'
             ? 512 * 1024 * 1024
             : 20 * 1024 * 1024;
-        final upload = await MediaTransferService.uploadFile(
-          path: path,
-          fileName: fileName,
-          mimeType: mimeType,
-          messageType: type,
-          maxBytes: maxBytes,
-        );
-
         for (final user in recipients) {
+          final upload = await MediaTransferService.uploadFile(
+            path: path,
+            fileName: fileName,
+            mimeType: mimeType,
+            messageType: type,
+            maxBytes: maxBytes,
+            encryptForE2ee: SocketService.instance.isE2eeActiveWith(user),
+          );
           if (type == 'voice') {
             final rawDuration =
                 int.tryParse(prepared['voiceDurationMs']?.toString() ?? '') ??
@@ -7723,6 +7925,7 @@ class _ChatScreenState extends State<ChatScreen>
               durationMs: rawDuration > 0 ? rawDuration : 1000,
               forwardedFrom: forwardedFrom,
               forwardComment: comment,
+              e2eeMedia: upload.e2eeMedia,
             );
           } else {
             SocketService.instance.sendMediaMessage(
@@ -7735,6 +7938,7 @@ class _ChatScreenState extends State<ChatScreen>
               text: text,
               forwardedFrom: forwardedFrom,
               forwardComment: comment,
+              e2eeMedia: upload.e2eeMedia,
             );
           }
         }
@@ -9899,7 +10103,7 @@ class _ChatScreenState extends State<ChatScreen>
                   const SizedBox(width: 10),
                   const Expanded(
                     child: Text(
-                      'SPARTAN TRUST',
+                      'FENYVO TRUST',
                       style: TextStyle(
                         color: SpartanPalette.ink,
                         fontSize: 20,
@@ -10576,7 +10780,7 @@ class _ChatScreenState extends State<ChatScreen>
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     const Text(
-                                      'SPARTAN PULSE',
+                                      'FENYVO PULSE',
                                       style: TextStyle(
                                         color: SpartanPalette.gold,
                                         fontSize: 19,
@@ -11083,7 +11287,7 @@ class _ChatScreenState extends State<ChatScreen>
                     ],
                   ),
                 ),
-                const PopupMenuItem(value: 'ai', child: Text('SPARTAN AI')),
+                const PopupMenuItem(value: 'ai', child: Text('FENYVO AI')),
                 PopupMenuItem(
                   value: 'auto',
                   enabled: !_autoReplyLoading,

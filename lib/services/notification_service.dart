@@ -43,7 +43,7 @@ class NotificationService {
     );
 
     final windowsSettings = WindowsInitializationSettings(
-      appName: 'SPARTAN CHAT',
+      appName: 'FENYVO',
       appUserModelId: 'Sparta.SpartanChat.Desktop',
       guid: '4d7db11e-4595-47d1-907d-5b70f384d9c7',
     );

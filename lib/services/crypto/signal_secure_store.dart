@@ -119,6 +119,11 @@ class SignalSecureStore
     return bytes == null ? null : PublicKey.deserialize(bytes: bytes);
   }
 
+  /// Removes only the remembered identity of one remote device.
+  /// The local account identity is never touched.
+  Future<void> deleteRemoteIdentity(ProtocolAddress address) =>
+      _storage.delete(key: _key('remote_identity', _addressKey(address)));
+
   @override
   Future<bool> isTrustedIdentity(
     ProtocolAddress address,

@@ -46,6 +46,7 @@ class CallService extends ChangeNotifier {
   String? callId;
   String? peerUser;
   bool isVideo = false;
+  bool callE2ee = false;
   bool isIncoming = false;
   bool microphoneEnabled = true;
   bool cameraEnabled = true;
@@ -61,6 +62,7 @@ class CallService extends ChangeNotifier {
   bool get hasCall => phase != CallPhase.idle;
   bool get shouldShowCallScreen => hasCall && phase != CallPhase.ended;
   bool Function() externalCallBusy = () => false;
+  Future<void> Function()? leaveExternalCall;
   bool get canSwitchCamera => Platform.isAndroid || Platform.isIOS;
 
   void initialize() {
@@ -112,11 +114,24 @@ class CallService extends ChangeNotifier {
 
   Future<void> startCall({required String peer, required bool video}) async {
     final target = peer.trim();
-    if (target.isEmpty ||
-        hasCall ||
-        externalCallBusy() ||
-        !SocketService.instance.isAuthenticated)
+    if (target.isEmpty || hasCall || !SocketService.instance.isAuthenticated) {
       return;
+    }
+
+    // A private call can be started from a participant card while a group
+    // call is active. Finish that call completely before checking availability
+    // and allocating private-call media. Otherwise the group route can remain
+    // on screen in a joining state while this method silently returns.
+    if (externalCallBusy()) {
+      final leave = leaveExternalCall;
+      if (leave == null) return;
+      await leave();
+      if (hasCall ||
+          externalCallBusy() ||
+          !SocketService.instance.isAuthenticated) {
+        return;
+      }
+    }
     final bytes = List<int>.generate(16, (_) => Random.secure().nextInt(256));
     bytes[6] = (bytes[6] & 15) | 64;
     bytes[8] = (bytes[8] & 63) | 128;
@@ -129,6 +144,7 @@ class CallService extends ChangeNotifier {
     SocketService.instance.requestAvatar(target);
     isVideo = video;
     isIncoming = false;
+    callE2ee = await SocketService.instance.isE2eeReadyWith(target);
     _accepted = false;
     outcome = null;
     speakerphoneEnabled = video;
@@ -145,12 +161,13 @@ class CallService extends ChangeNotifier {
       if (!_isCurrent(id)) return;
       await connection.setLocalDescription(description);
       if (!_isCurrent(id)) return;
-      SocketService.instance.sendCallOffer(
+      final sent = await SocketService.instance.sendCallOffer(
         to: target,
         callId: id,
         video: video,
         sdp: {'type': description.type, 'sdp': description.sdp},
       );
+      if (!sent) throw StateError('Не удалось защитить данные звонка');
       // ICE may be emitted during setLocalDescription: always send SDP first.
       _flushLocalCandidates(id);
       statusText = 'Ожидание ответа…';
@@ -167,11 +184,16 @@ class CallService extends ChangeNotifier {
     if (phase != CallPhase.incoming ||
         _pendingOffer == null ||
         peerUser == null ||
-        callId == null)
-      return;
+        callId == null) return;
     final offer = _pendingOffer!;
     final target = peerUser!;
     final id = callId!;
+    if (externalCallBusy()) {
+      final leave = leaveExternalCall;
+      if (leave == null) return;
+      await leave();
+      if (!_isCurrent(id)) return;
+    }
     if (!SocketService.instance.isAuthenticated) {
       SystemCallService.instance.acceptedId = id;
       statusText = 'Восстановление связи с сервером…';
@@ -205,11 +227,12 @@ class CallService extends ChangeNotifier {
       if (!_isCurrent(id)) return;
       await connection.setLocalDescription(answer);
       if (!_isCurrent(id)) return;
-      SocketService.instance.sendCallAnswer(
+      final sent = await SocketService.instance.sendCallAnswer(
         to: target,
         callId: id,
         sdp: {'type': answer.type, 'sdp': answer.sdp},
       );
+      if (!sent) throw StateError('Не удалось защитить ответ звонка');
       _flushLocalCandidates(id);
       _pendingOffer = null;
       if (phase != CallPhase.active) statusText = 'Соединение…';
@@ -240,8 +263,8 @@ class CallService extends ChangeNotifier {
       clock.connected
           ? CallOutcome.completed
           : isIncoming
-          ? CallOutcome.declined
-          : CallOutcome.cancelled,
+              ? CallOutcome.declined
+              : CallOutcome.cancelled,
       'Звонок завершён',
     );
     await _cleanup();
@@ -249,15 +272,38 @@ class CallService extends ChangeNotifier {
 
   Future<void> toggleSpeakerphone() async {
     final id = callId;
-    if (id == null || !_isCurrent(id) || !canSwitchSpeaker || _speakerChanging)
+    if (id == null ||
+        !_isCurrent(id) ||
+        !canSwitchSpeaker ||
+        _speakerChanging) {
       return;
+    }
+
     _speakerChanging = true;
     final next = !speakerphoneEnabled;
+
     try {
+      if (Platform.isAndroid) {
+        await Helper.setAndroidAudioConfiguration(
+          AndroidAudioConfiguration.communication,
+        );
+
+        if (!_isCurrent(id)) return;
+
+        await Future<void>.delayed(const Duration(milliseconds: 80));
+
+        if (!_isCurrent(id)) return;
+      }
+
       await Helper.setSpeakerphoneOn(next);
-      if (_isCurrent(id)) speakerphoneEnabled = next;
+
+      if (_isCurrent(id)) {
+        speakerphoneEnabled = next;
+      }
     } catch (_) {
-      if (_isCurrent(id)) statusText = 'Не удалось переключить динамик';
+      if (_isCurrent(id)) {
+        statusText = 'Не удалось переключить динамик';
+      }
     } finally {
       _speakerChanging = false;
       notifyListeners();
@@ -331,7 +377,12 @@ class CallService extends ChangeNotifier {
               'frameRate': {'ideal': 30},
             }
           : false,
-    });
+    }).timeout(
+      const Duration(seconds: 20),
+      onTimeout: () => throw TimeoutException(
+        'Камера или микрофон не ответили за 20 секунд',
+      ),
+    );
     // A permission dialog can outlive the call. Never retain its camera/mic.
     if (!_isCurrent(id)) {
       await _disposeStream(stream);
@@ -375,10 +426,12 @@ class CallService extends ChangeNotifier {
       if (!_localDescriptionSent) {
         if (_localCandidates.length < 256) _localCandidates.add(data);
       } else {
-        SocketService.instance.sendCallIceCandidate(
-          to: peerUser!,
-          callId: id,
-          candidate: data,
+        unawaited(
+          SocketService.instance.sendCallIceCandidate(
+            to: peerUser!,
+            callId: id,
+            candidate: data,
+          ),
         );
       }
     };
@@ -458,9 +511,8 @@ class CallService extends ChangeNotifier {
       debugPrint('Remote Android track arrived without a MediaStream');
       return;
     }
-    MediaStream? stream = event.streams.isNotEmpty
-        ? event.streams.first
-        : _fallbackRemoteStream;
+    MediaStream? stream =
+        event.streams.isNotEmpty ? event.streams.first : _fallbackRemoteStream;
     if (stream == null) {
       try {
         stream = await createLocalMediaStream('spartan_remote_$id');
@@ -494,10 +546,12 @@ class CallService extends ChangeNotifier {
     if (!_isCurrent(id)) return;
     _localDescriptionSent = true;
     for (final candidate in _localCandidates) {
-      SocketService.instance.sendCallIceCandidate(
-        to: peerUser!,
-        callId: id,
-        candidate: candidate,
+      unawaited(
+        SocketService.instance.sendCallIceCandidate(
+          to: peerUser!,
+          callId: id,
+          candidate: candidate,
+        ),
       );
     }
     _localCandidates.clear();
@@ -574,15 +628,13 @@ class CallService extends ChangeNotifier {
       return;
     }
     final rawSdp = data['sdp'];
-    final sdp = rawSdp is Map
-        ? Map<String, dynamic>.from(rawSdp)
-        : <String, dynamic>{};
+    final sdp =
+        rawSdp is Map ? Map<String, dynamic>.from(rawSdp) : <String, dynamic>{};
     if (id.isEmpty ||
         from.isEmpty ||
         sdp['type'] != 'offer' ||
-        sdp['sdp']?.toString().isNotEmpty != true)
-      return;
-    if (externalCallBusy()) {
+        sdp['sdp']?.toString().isNotEmpty != true) return;
+    if (externalCallBusy() && leaveExternalCall == null) {
       SocketService.instance.sendCallReject(
         to: from,
         callId: id,
@@ -612,6 +664,7 @@ class CallService extends ChangeNotifier {
     _loadAvatar(from);
     SocketService.instance.requestAvatar(from);
     _incomingData = data;
+    callE2ee = data['callE2ee'] == true;
     isVideo = data['video'] == true;
     isIncoming = true;
     _accepted = false;
@@ -688,17 +741,14 @@ class CallService extends ChangeNotifier {
     if (!_matchesCurrentCall(data) ||
         isIncoming ||
         _answerApplying ||
-        _remoteDescriptionSet)
-      return;
+        _remoteDescriptionSet) return;
     final rawSdp = data['sdp'];
-    final sdp = rawSdp is Map
-        ? Map<String, dynamic>.from(rawSdp)
-        : <String, dynamic>{};
+    final sdp =
+        rawSdp is Map ? Map<String, dynamic>.from(rawSdp) : <String, dynamic>{};
     final connection = _peerConnection;
     if (connection == null ||
         sdp['type'] != 'answer' ||
-        sdp['sdp']?.toString().isNotEmpty != true)
-      return;
+        sdp['sdp']?.toString().isNotEmpty != true) return;
     final id = callId!;
     _answerApplying = true;
     phase = CallPhase.connecting;

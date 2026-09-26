@@ -32,6 +32,7 @@ class AppVisibility with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (Platform.isWindows) return;
     _setForeground(state == AppLifecycleState.resumed);
   }
 

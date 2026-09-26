@@ -5,6 +5,7 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
@@ -15,6 +16,7 @@ import 'package:video_player/video_player.dart';
 
 import '../services/socket_service.dart';
 import '../services/group_call_service.dart';
+import 'group_call_screen.dart';
 import '../services/storage_service.dart';
 import '../services/media_cache_service.dart';
 import '../services/download_service.dart';
@@ -400,6 +402,9 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
 
   StreamSubscription<void>? _audioCompleteSubscription;
 
+  double? _callMiniX;
+  double? _callMiniY;
+
   bool _recordingVoice = false;
   bool _composerHasText = false;
   DateTime? _voiceStartedAt;
@@ -520,33 +525,129 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
     }
     final service = GroupCallService.instance;
     final room = service.rooms[_groupId];
-    await service.begin(
+    if (room != null) {
+      if (service.hasCall && service.groupId == _groupId) {
+        await Navigator.of(context)
+            .push(MaterialPageRoute(builder: (_) => const GroupCallScreen()));
+        return;
+      }
+      await service.watch(_groupId, _groupName, room.id);
+      if (mounted) {
+        await Navigator.of(context)
+            .push(MaterialPageRoute(builder: (_) => const GroupCallScreen()));
+      }
+      return;
+    }
+    await service.begin(_groupId, _groupName, withVideo: withVideo);
+  }
+
+  Future<void> _planGroupCall() async {
+    final now = DateTime.now();
+    final date = await showDatePicker(
+      context: context,
+      initialDate: now,
+      firstDate: DateTime(now.year, now.month, now.day),
+      lastDate: now.add(const Duration(days: 365)),
+    );
+    if (!mounted || date == null) return;
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(now.add(const Duration(hours: 1))),
+    );
+    if (!mounted || time == null) return;
+    final planned = DateTime(
+      date.year,
+      date.month,
+      date.day,
+      time.hour,
+      time.minute,
+    );
+    final day = planned.day.toString().padLeft(2, '0');
+    final month = planned.month.toString().padLeft(2, '0');
+    final hour = planned.hour.toString().padLeft(2, '0');
+    final minute = planned.minute.toString().padLeft(2, '0');
+    SocketService.instance.sendGroupMessage(
       _groupId,
-      _groupName,
-      existingCallId: room?.id,
-      withVideo: withVideo,
+      '📅 Групповой видеозвонок запланирован на '
+      '$day.$month.${planned.year} в $hour:$minute. '
+      'В назначенное время откройте чат и запросите вход у ведущего.',
     );
   }
 
+  Future<void> _showGroupCallOptions() async {
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      builder: (sheetContext) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            ListTile(
+              leading: const Icon(Icons.event_rounded),
+              title: const Text('Запланировать звонок'),
+              subtitle: const Text('Сообщить группе дату и время'),
+              onTap: () => Navigator.pop(sheetContext, 'plan'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.videocam_rounded),
+              title: const Text('Начать звонок сейчас'),
+              subtitle: const Text(
+                'Участники войдут сами с разрешения ведущего',
+              ),
+              onTap: () => Navigator.pop(sheetContext, 'start'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted) return;
+    if (action == 'plan') await _planGroupCall();
+    if (action == 'start') await _startGroupCall(withVideo: true);
+  }
+
   Widget _groupCallBanner() {
-    final call = GroupCallService.instance.rooms[_groupId];
+    final service = GroupCallService.instance;
+    final call = service.rooms[_groupId];
     if (call == null) return const SizedBox.shrink();
+    final alreadyInside = service.hasCall && service.groupId == _groupId;
+    final pending = service.isJoinPending(_groupId);
     return Material(
       color: SpartanPalette.blue,
       child: InkWell(
-        onTap: _startGroupCall,
+        onTap: pending ? null : () => _startGroupCall(withVideo: true),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           child: Row(
             children: [
-              const Icon(Icons.call_rounded, color: SpartanPalette.gold),
+              Container(
+                width: 54,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: Colors.black54,
+                  borderRadius: BorderRadius.circular(11),
+                  border: Border.all(color: SpartanPalette.gold),
+                ),
+                child: const Icon(
+                  Icons.videocam_rounded,
+                  color: SpartanPalette.gold,
+                ),
+              ),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  'Групповой видеозвонок · ${call.members.length}/4\nПрисоединиться',
+                  alreadyInside
+                      ? 'Групповой видеозвонок · ${call.members.where((member) => !member.isViewer).length}/4\nВернуться в звонок'
+                      : pending
+                      ? 'Групповой видеозвонок · ${call.members.where((member) => !member.isViewer).length}/4\nЖдём разрешения ведущего…'
+                      : 'Групповой видеозвонок · ${call.members.where((member) => !member.isViewer).length}/4\nСмотреть трансляцию и открыть чат',
+                  style: const TextStyle(color: Colors.white),
                 ),
               ),
-              const Icon(Icons.chevron_right_rounded),
+              Icon(
+                pending
+                    ? Icons.hourglass_top_rounded
+                    : Icons.chevron_right_rounded,
+                color: Colors.white70,
+              ),
             ],
           ),
         ),
@@ -903,7 +1004,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
       }
     } else {
       if (!MediaTransferService.isReady) {
-        _mediaSnack('Медиа-сервер не готов. Перезайдите в аккаунт.');
+        _mediaSnack('�����-������ �� �����. ����������� � �������.');
         return;
       }
 
@@ -1010,7 +1111,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
     final text = rawText.isNotEmpty
         ? rawText
         : messageType == 'voice'
-        ? '🎤 Голосовое сообщение'
+        ? '?? ��������� ���������'
         : messageType == 'image'
         ? '📷 Фото'
         : messageType == 'video'
@@ -1083,7 +1184,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                           Icon(Icons.forward_rounded, color: _gold),
                           SizedBox(width: 10),
                           Text(
-                            'Переслать сообщение',
+                            '��������� ���������',
                             style: TextStyle(
                               color: SpartanPalette.ink,
                               fontSize: 18,
@@ -1103,7 +1204,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                         },
                         style: const TextStyle(color: SpartanPalette.ink),
                         decoration: InputDecoration(
-                          hintText: 'Поиск получателя',
+                          hintText: '����� ����������',
                           hintStyle: const TextStyle(
                             color: SpartanPalette.muted,
                           ),
@@ -1135,7 +1236,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            '↪ Переслано из $_groupName • $forwardedFrom',
+                            '? ��������� �� $_groupName � $forwardedFrom',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
@@ -1380,7 +1481,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
               onChanged: _onSearchChanged,
               style: const TextStyle(color: SpartanPalette.ink),
               decoration: InputDecoration(
-                hintText: 'Поиск по группе',
+                hintText: '����� �� ������',
                 hintStyle: const TextStyle(color: SpartanPalette.muted),
                 prefixIcon: const Icon(Icons.search_rounded, color: _gold),
                 suffixText: _searchQuery.isEmpty
@@ -1401,7 +1502,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
             ),
           ),
           IconButton(
-            tooltip: 'Предыдущее',
+            tooltip: '����������',
             onPressed: matchCount == 0
                 ? null
                 : () {
@@ -1646,7 +1747,6 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
       if (incomingGroupId != _groupId) {
         return;
       }
-
       final id = data['id']?.toString().trim() ?? '';
 
       if (id.isEmpty) {
@@ -1967,7 +2067,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
         ? raw.toInt()
         : int.tryParse(raw?.toString() ?? '') ?? 0;
     if (bytes <= 0) return '';
-    if (bytes < 1024) return '$bytes Б';
+    if (bytes < 1024) return '$bytes Р‘';
     final kb = bytes / 1024;
     if (kb < 1024) return '${kb.toStringAsFixed(kb >= 100 ? 0 : 1)} КБ';
     final mb = kb / 1024;
@@ -2026,7 +2126,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
             children: [
               item(Icons.photo_library_outlined, 'Фото', _pickGroupImage),
               item(Icons.video_library_outlined, 'Видео', _pickGroupVideo),
-              item(Icons.attach_file_rounded, 'Файл', _pickGroupFile),
+              item(Icons.attach_file_rounded, 'Р¤Р°Р№Р»', _pickGroupFile),
             ],
           ),
         );
@@ -2047,7 +2147,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
         fileName: _basename(picked.path),
         mimeType: _mimeFromName(picked.path, 'image/jpeg'),
         text: '📷 Фото',
-        maxBytes: 20 * 1024 * 1024,
+        maxBytes: 100 * 1024 * 1024,
       );
     } catch (error) {
       _mediaSnack('Не удалось выбрать фото: $error');
@@ -2153,7 +2253,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
         path: file.path,
         fileName: _basename(path),
         mimeType: 'audio/mp4',
-        text: '🎙️ Голосовое сообщение',
+        text: '??? ��������� ���������',
         maxBytes: 20 * 1024 * 1024,
         voiceDurationMs: durationMs,
       );
@@ -2186,7 +2286,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
       return;
     }
     if (!MediaTransferService.isReady) {
-      _mediaSnack('Медиа-сервер не готов. Перезайдите в аккаунт.');
+      _mediaSnack('�����-������ �� �����. ����������� � �������.');
       return;
     }
 
@@ -2306,7 +2406,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
         fileName: original,
         mimeType: mime,
       );
-      _mediaSnack('Сохранено в Spartan Chat: $savedPath');
+      _mediaSnack('Сохранено в Fenyvo: $savedPath');
     } catch (error) {
       _mediaSnack('Не удалось сохранить файл: $error');
     }
@@ -2396,7 +2496,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
           (bytes == null || bytes.isEmpty) &&
           networkUrl == null) {
         return Text(
-          '📷 Фото недоступно',
+          '?? ���� ����������',
           style: TextStyle(
             color: isMe ? SpartanPalette.ink : SpartanPalette.ink,
           ),
@@ -2517,7 +2617,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
           (bytes == null || bytes.isEmpty) &&
           networkUrl == null) {
         return Text(
-          '🎥 Видео недоступно',
+          '?? ����� ����������',
           style: TextStyle(
             color: isMe ? SpartanPalette.ink : SpartanPalette.ink,
           ),
@@ -2974,7 +3074,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
-              'Не удалось сохранить. Проверьте доступность вложения.',
+              '�� ������� ���������. ��������� ����������� ��������.',
             ),
           ),
         );
@@ -3056,7 +3156,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                 ),
                 action(
                   icon: Icons.forward_rounded,
-                  title: 'Переслать',
+                  title: '���������',
                   onTap: () {
                     Navigator.of(sheetContext).pop();
                     Future<void>.delayed(const Duration(milliseconds: 80), () {
@@ -3570,15 +3670,19 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
     final desktop = Platform.isWindows;
 
     return Container(
-      padding: EdgeInsets.fromLTRB(desktop ? 16 : 8, 9, desktop ? 16 : 8, 10),
+      margin: EdgeInsets.fromLTRB(desktop ? 16 : 10, 5, desktop ? 16 : 10, 9),
+      padding: const EdgeInsets.fromLTRB(6, 5, 6, 5),
       decoration: BoxDecoration(
-        color: SpartanPalette.surface,
-        border: Border(top: BorderSide(color: _gold.withValues(alpha: 0.16))),
-        boxShadow: [
+        gradient: const LinearGradient(
+          colors: [SpartanPalette.surfaceSoft, SpartanPalette.rail],
+        ),
+        borderRadius: BorderRadius.circular(30),
+        border: Border.all(color: SpartanPalette.line),
+        boxShadow: const [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.06),
-            blurRadius: 10,
-            offset: const Offset(0, -2),
+            color: Color(0x4A000000),
+            blurRadius: 16,
+            offset: Offset(0, 7),
           ),
         ],
       ),
@@ -3596,7 +3700,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
-                    IconButton(
+                    IconButton.outlined(
                       tooltip: 'Вложение',
                       onPressed: _sending
                           ? null
@@ -3606,7 +3710,9 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                       icon: const Icon(
                         Icons.add_circle_outline_rounded,
                         color: _gold,
-                        size: 28,
+                      ),
+                      style: IconButton.styleFrom(
+                        side: BorderSide(color: _gold.withValues(alpha: .58)),
                       ),
                     ),
                     const SizedBox(width: 2),
@@ -3626,27 +3732,76 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                           minLines: 1,
                           keyboardType: TextInputType.multiline,
                           textInputAction: TextInputAction.newline,
-                          style: const TextStyle(color: SpartanPalette.ink),
+                          style: const TextStyle(
+                            color: SpartanPalette.ink,
+                            fontSize: 16,
+                          ),
                           decoration: InputDecoration(
                             hintText: 'Сообщение...',
-                            hintStyle: const TextStyle(
-                              color: SpartanPalette.secondary,
+                            fillColor: SpartanPalette.canvasDeep.withValues(
+                              alpha: .72,
                             ),
                             filled: true,
-                            fillColor: SpartanPalette.surface,
+                            suffixIcon: PopupMenuButton<String>(
+                              tooltip: 'Эмодзи',
+                              icon: const Icon(
+                                Icons.emoji_emotions_outlined,
+                                color: SpartanPalette.ink,
+                              ),
+                              color: SpartanPalette.surfaceSoft,
+                              onSelected: (emoji) {
+                                final selection = _messageController.selection;
+                                final offset = selection.isValid
+                                    ? selection.baseOffset
+                                    : _messageController.text.length;
+                                final text = _messageController.text;
+                                _messageController.text = text.replaceRange(
+                                  offset,
+                                  offset,
+                                  emoji,
+                                );
+                                _messageController.selection =
+                                    TextSelection.collapsed(
+                                      offset: offset + emoji.length,
+                                    );
+                                _handleGroupTextChanged(
+                                  _messageController.text,
+                                );
+                                _messageFocusNode.requestFocus();
+                              },
+                              itemBuilder: (context) => const [
+                                PopupMenuItem(value: '😀', child: Text('😀')),
+                                PopupMenuItem(value: '😂', child: Text('😂')),
+                                PopupMenuItem(value: '😊', child: Text('😊')),
+                                PopupMenuItem(value: '❤️', child: Text('❤️')),
+                                PopupMenuItem(value: '👍', child: Text('👍')),
+                                PopupMenuItem(value: '🙏', child: Text('🙏')),
+                                PopupMenuItem(value: '💪', child: Text('💪')),
+                                PopupMenuItem(value: '🔥', child: Text('🔥')),
+                                PopupMenuItem(value: '🎉', child: Text('🎉')),
+                              ],
+                            ),
                             border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(30),
-                              borderSide: BorderSide.none,
+                              borderRadius: BorderRadius.circular(26),
+                              borderSide: const BorderSide(
+                                color: SpartanPalette.line,
+                              ),
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(26),
+                              borderSide: const BorderSide(
+                                color: SpartanPalette.line,
+                              ),
                             ),
                             focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(30),
+                              borderRadius: BorderRadius.circular(26),
                               borderSide: BorderSide(
-                                color: _gold.withValues(alpha: 0.55),
+                                color: _gold.withValues(alpha: .72),
                               ),
                             ),
                             contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 20,
-                              vertical: 12,
+                              horizontal: 16,
+                              vertical: 13,
                             ),
                           ),
                           onChanged: _handleGroupTextChanged,
@@ -3654,59 +3809,139 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                         ),
                       ),
                     ),
-                    const SizedBox(width: 4),
+                    const SizedBox(width: 8),
                     SizedBox(
                       width: 48,
                       height: 48,
-                      child: DecoratedBox(
-                        decoration: const BoxDecoration(
-                          shape: BoxShape.circle,
-                          gradient: LinearGradient(
-                            colors: [SpartanPalette.gold, SpartanPalette.gold],
-                          ),
+                      child: IconButton.filled(
+                        tooltip: _recordingVoice
+                            ? 'Остановить и отправить'
+                            : _composerHasText
+                            ? 'Отправить сообщение'
+                            : 'Голосовое сообщение',
+                        onPressed: _sending
+                            ? null
+                            : _recordingVoice
+                            ? () {
+                                unawaited(_toggleVoiceRecording());
+                              }
+                            : _composerHasText
+                            ? _sendMessage
+                            : () {
+                                unawaited(_toggleVoiceRecording());
+                              },
+                        style: IconButton.styleFrom(
+                          backgroundColor: SpartanPalette.gold,
+                          foregroundColor: SpartanPalette.onGold,
                         ),
-                        child: IconButton(
-                          tooltip: _recordingVoice
-                              ? 'Остановить и отправить'
-                              : _composerHasText
-                              ? 'Отправить сообщение'
-                              : 'Голосовое сообщение',
-                          onPressed: _sending
-                              ? null
-                              : _recordingVoice
-                              ? () {
-                                  unawaited(_toggleVoiceRecording());
-                                }
-                              : _composerHasText
-                              ? _sendMessage
-                              : () {
-                                  unawaited(_toggleVoiceRecording());
-                                },
-                          icon: _sending
-                              ? const SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: Colors.black,
-                                  ),
-                                )
-                              : Icon(
-                                  _recordingVoice
-                                      ? Icons.stop_circle_rounded
-                                      : _composerHasText
-                                      ? Icons.send_rounded
-                                      : Icons.mic_rounded,
-                                  color: _recordingVoice
-                                      ? const Color(0xFFFF3D3D)
-                                      : Colors.black,
+                        icon: _sending
+                            ? const SizedBox(
+                                width: 18,
+                                height: 18,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: SpartanPalette.onGold,
                                 ),
-                        ),
+                              )
+                            : Icon(
+                                _recordingVoice
+                                    ? Icons.stop_circle_rounded
+                                    : _composerHasText
+                                    ? Icons.send_rounded
+                                    : Icons.mic_rounded,
+                                color: _recordingVoice
+                                    ? const Color(0xFFFF3D3D)
+                                    : SpartanPalette.onGold,
+                              ),
                       ),
                     ),
                   ],
                 ),
               ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildActiveCallMiniWindow() {
+    final call = GroupCallService.instance;
+
+    if (!call.hasCall || call.groupId != _groupId) {
+      return const SizedBox.shrink();
+    }
+
+    RTCVideoRenderer? renderer;
+
+    for (final entry in call.remoteVideos.entries) {
+      if (entry.value.srcObject != null) {
+        renderer = entry.value;
+        break;
+      }
+    }
+
+    renderer ??= call.localVideo;
+
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final miniLeft = _callMiniX ?? (screenWidth - 132);
+    final miniTop = _callMiniY ?? 12.0;
+
+    return Positioned(
+      left: miniLeft,
+      top: miniTop,
+      child: GestureDetector(
+        onPanUpdate: (details) {
+          final size = MediaQuery.sizeOf(context);
+          final currentX = _callMiniX ?? (size.width - 132);
+          final currentY = _callMiniY ?? 12.0;
+          setState(() {
+            _callMiniX = (currentX + details.delta.dx).clamp(
+              8.0,
+              size.width - 128.0,
+            );
+            _callMiniY = (currentY + details.delta.dy).clamp(
+              8.0,
+              size.height - 128.0,
+            );
+          });
+        },
+        child: SafeArea(
+          child: Material(
+            color: Colors.transparent,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(16),
+              onTap: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const GroupCallScreen()),
+                );
+              },
+              child: Container(
+                width: 120,
+                height: 120,
+                clipBehavior: Clip.antiAlias,
+                decoration: BoxDecoration(
+                  color: Colors.black,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: SpartanPalette.gold, width: 2),
+                  boxShadow: const [
+                    BoxShadow(blurRadius: 12, color: Colors.black38),
+                  ],
+                ),
+                child: renderer == null
+                    ? const Center(
+                        child: Icon(
+                          Icons.call_rounded,
+                          color: SpartanPalette.gold,
+                          size: 36,
+                        ),
+                      )
+                    : RTCVideoView(
+                        renderer,
+                        objectFit:
+                            RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
+                      ),
+              ),
             ),
           ),
         ),
@@ -3782,11 +4017,11 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
           ),
           IconButton(
             tooltip: 'Групповой видеозвонок',
-            onPressed: () => _startGroupCall(withVideo: true),
+            onPressed: _showGroupCallOptions,
             icon: const Icon(Icons.videocam_rounded, color: _gold),
           ),
           IconButton(
-            tooltip: 'Поиск',
+            tooltip: '�����',
             onPressed: _searchMode ? _closeSearch : _openSearch,
             icon: Icon(
               _searchMode ? Icons.search_off_rounded : Icons.search_rounded,
@@ -3806,13 +4041,18 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
             ),
         ],
       ),
-      body: Column(
+      body: Stack(
         children: [
-          if (_searchMode) _buildSearchBar(),
-          _groupCallBanner(),
-          _buildPinnedMessagesBanner(),
-          Expanded(child: _buildMessages()),
-          _buildComposer(),
+          Column(
+            children: [
+              if (_searchMode) _buildSearchBar(),
+              _groupCallBanner(),
+              _buildPinnedMessagesBanner(),
+              Expanded(child: _buildMessages()),
+              _buildComposer(),
+            ],
+          ),
+          _buildActiveCallMiniWindow(),
         ],
       ),
     );

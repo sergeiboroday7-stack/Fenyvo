@@ -85,6 +85,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
     SocketService.instance.addMessageHandler(_handleMessage);
 
     SocketService.instance.getOfflineMessages();
+    SocketService.instance.getCommunicationRequests();
     SocketService.instance.getGroups();
 
     _notificationTapSubscription = NotificationService
@@ -290,6 +291,60 @@ class _ChatListScreenState extends State<ChatListScreen> {
   // ОБРАБОТКА СООБЩЕНИЙ СЕРВЕРА
   // ========================================
 
+  Future<void> _showCommunicationRequest(
+    String from, {
+    String message = '',
+  }) async {
+    final user = from.trim();
+    if (!mounted || user.isEmpty) return;
+
+    final accepted = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Запрос связи'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('$user хочет связаться с вами'),
+            if (message.trim().isNotEmpty) ...[
+              const SizedBox(height: 14),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Theme.of(dialogContext)
+                      .colorScheme
+                      .surfaceContainerHighest,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(message.trim()),
+              ),
+            ],
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Отклонить'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Принять'),
+          ),
+        ],
+      ),
+    );
+
+    if (!mounted) return;
+
+    SocketService.instance.respondCommunicationRequest(
+      user,
+      accepted: accepted == true,
+    );
+  }
+
   Future<void> _showIncomingE2eeInvite(String from) async {
     if (!mounted || SocketService.instance.activeChatUser != null) return;
     final t = AppLanguageService.instance.text;
@@ -339,6 +394,38 @@ class _ChatListScreenState extends State<ChatListScreen> {
       return;
     }
 
+    if (type == 'communication_request') {
+      final from = data['from']?.toString().trim() ?? '';
+      if (from.isNotEmpty) {
+        unawaited(
+          _showCommunicationRequest(
+            from,
+            message: data['message']?.toString() ?? '',
+          ),
+        );
+      }
+      return;
+    }
+
+    if (type == 'communication_requests') {
+      final rawRequests = data['requests'];
+      if (rawRequests is List) {
+        for (final rawRequest in rawRequests) {
+          if (rawRequest is! Map) continue;
+          final request = Map<String, dynamic>.from(rawRequest);
+          final from = request['from']?.toString().trim() ?? '';
+          if (from.isNotEmpty) {
+            unawaited(
+              _showCommunicationRequest(
+                from,
+                message: request['message']?.toString() ?? '',
+              ),
+            );
+          }
+        }
+      }
+      return;
+    }
     // SPARTAN_STAGE24_GROUPS
     if (type == 'groups') {
       final rawGroups = data['groups'];
@@ -1563,7 +1650,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
-                            'Запросы SPARTAN PULSE · ${pulses.length}',
+                            'Запросы FENYVO PULSE · ${pulses.length}',
                             style: const TextStyle(
                               fontSize: 19,
                               fontWeight: FontWeight.w800,
@@ -1764,7 +1851,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         const Text(
-                          'SPARTAN PULSE',
+                          'FENYVO PULSE',
                           style: TextStyle(
                             color: SpartanPalette.gold,
                             fontWeight: FontWeight.w900,
@@ -1815,7 +1902,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                     ),
                   ] else if (!matched)
                     IconButton(
-                      tooltip: 'Отменить SPARTAN PULSE',
+                      tooltip: 'Отменить FENYVO PULSE',
                       onPressed: service.cancel,
                       icon: const Icon(
                         Icons.close_rounded,
@@ -2350,7 +2437,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
               const Padding(
                 padding: EdgeInsets.fromLTRB(12, 0, 12, 10),
                 child: Text(
-                  'SPARTAN COMMAND',
+                  'FENYVO COMMAND',
                   style: TextStyle(
                     color: SpartanPalette.gold,
                     fontSize: 18,
@@ -2465,7 +2552,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                 padding: const EdgeInsets.symmetric(horizontal: 10),
                 child: IconButton.filled(
                   key: const ValueKey('spartan-command-button'),
-                  tooltip: 'SPARTAN COMMAND',
+                  tooltip: 'FENYVO COMMAND',
                   onPressed: _showCommandActions,
                   style: IconButton.styleFrom(
                     minimumSize: const Size(56, 56),

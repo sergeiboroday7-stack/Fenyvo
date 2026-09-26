@@ -141,7 +141,7 @@ class SystemCallService {
           CallKitParams(
             id: id,
             nameCaller: from,
-            appName: 'SPARTAN CHAT',
+            appName: 'FENYVO',
             type: video ? 1 : 0,
             handle: video ? 'Пропущенный видеозвонок' : 'Пропущенный звонок',
             missedCallNotification: NotificationParams(
@@ -218,7 +218,7 @@ class SystemCallService {
       CallKitParams(
         id: id,
         nameCaller: data['sender'].toString(),
-        appName: 'SPARTAN CHAT',
+        appName: 'FENYVO',
         handle: data['video'].toString() == 'true'
             ? 'Видеозвонок'
             : 'Аудиозвонок',
@@ -344,7 +344,7 @@ class SystemCallService {
         builder: (context) => AlertDialog(
           title: const Text('Входящие звонки'),
           content: const Text(
-            'Разреши SPARTAN показывать звонок поверх заблокированного экрана. Без этого Android может показать только уведомление.',
+            'Разреши FENYVO показывать звонок поверх заблокированного экрана. Без этого Android может показать только уведомление.',
           ),
           actions: [
             TextButton(

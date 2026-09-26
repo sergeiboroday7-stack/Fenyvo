@@ -206,8 +206,8 @@ class PulseService extends ChangeNotifier {
     });
     _showNotice(
       video
-          ? 'Видеоприглашение SPARTAN PULSE отправлено'
-          : 'Аудиоприглашение SPARTAN PULSE отправлено',
+          ? 'Видеоприглашение FENYVO PULSE отправлено'
+          : 'Аудиоприглашение FENYVO PULSE отправлено',
     );
   }
 
@@ -267,7 +267,7 @@ class PulseService extends ChangeNotifier {
       'requestId': 'cancel-${_now()}',
     });
     _removePulse(pulse.id);
-    _showNotice('SPARTAN PULSE отменён');
+    _showNotice('FENYVO PULSE отменён');
   }
 
   void markAllSeen() {
@@ -321,7 +321,7 @@ class PulseService extends ChangeNotifier {
         _handleClosed(data);
         break;
       case 'pulse_error':
-        _showNotice(data['reason']?.toString() ?? 'Ошибка SPARTAN PULSE');
+        _showNotice(data['reason']?.toString() ?? 'Ошибка FENYVO PULSE');
         break;
     }
   }
@@ -420,10 +420,10 @@ class PulseService extends ChangeNotifier {
         _showNotice('$peer сейчас не готов к звонку');
         break;
       case 'expired':
-        _showNotice('Время SPARTAN PULSE истекло');
+        _showNotice('Время FENYVO PULSE истекло');
         break;
       case 'cancelled':
-        _showNotice('SPARTAN PULSE отменён');
+        _showNotice('FENYVO PULSE отменён');
         break;
     }
   }

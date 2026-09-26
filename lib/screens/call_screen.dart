@@ -285,6 +285,29 @@ class _CallScreenState extends State<CallScreen> {
               fontWeight: FontWeight.w600,
             ),
           ),
+          const SizedBox(height: 6),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(
+                service.callE2ee
+                    ? Icons.lock_rounded
+                    : Icons.lock_outline_rounded,
+                color: service.callE2ee ? Colors.greenAccent : Colors.orange,
+                size: 16,
+              ),
+              const SizedBox(width: 5),
+              Text(
+                service.callE2ee
+                    ? 'Защищённый звонок'
+                    : 'Защита E2EE не подтверждена',
+                style: TextStyle(
+                  color: service.callE2ee ? Colors.greenAccent : Colors.orange,
+                  fontSize: 12,
+                ),
+              ),
+            ],
+          ),
           if (service.clock.connected) ...[
             const SizedBox(height: 8),
             Text(

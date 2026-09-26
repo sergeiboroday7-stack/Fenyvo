@@ -17,7 +17,7 @@
     <uses-permission android:name="android.permission.READ_MEDIA_VIDEO"/>
 
     <application
-        android:label="Spartan Chat"
+        android:label="Fenyvo"
         android:name=".SpartanApplication"
         android:allowBackup="false"
         android:fullBackupContent="false"

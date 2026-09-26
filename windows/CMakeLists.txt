@@ -10,7 +10,7 @@ endif()
 set(CMAKE_MSVC_RUNTIME_LIBRARY
   "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
 
-project(spartan_chat_final LANGUAGES CXX)
+project(fenyvo LANGUAGES CXX)
 
 if(MSVC)
   # CMake 4.3 with the Visual Studio 18 generator no longer populates the
@@ -21,7 +21,7 @@ endif()
 
 # The name of the executable created for the application. Change this to change
 # the on-disk name of your application.
-set(BINARY_NAME "spartan_chat_final")
+set(BINARY_NAME "fenyvo")
 
 # Explicitly opt in to modern CMake behaviors to avoid warnings with recent
 # versions of CMake.

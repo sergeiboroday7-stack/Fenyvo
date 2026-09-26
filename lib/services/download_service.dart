@@ -5,7 +5,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:public_file_saver/public_file_saver.dart';
 
 class SpartanDownloadService {
-  static const String folderName = 'Spartan Chat';
+  static const String folderName = 'Fenyvo';
 
   static String _safeFileName(String value) {
     final clean = value
@@ -47,7 +47,8 @@ class SpartanDownloadService {
 
     Directory root;
     try {
-      root = await getDownloadsDirectory() ??
+      root =
+          await getDownloadsDirectory() ??
           await getApplicationDocumentsDirectory();
     } catch (_) {
       root = await getApplicationDocumentsDirectory();
@@ -58,9 +59,7 @@ class SpartanDownloadService {
     );
     await directory.create(recursive: true);
 
-    var target = File(
-      '${directory.path}${Platform.pathSeparator}$safeName',
-    );
+    var target = File('${directory.path}${Platform.pathSeparator}$safeName');
     if (await target.exists()) {
       final dot = safeName.lastIndexOf('.');
       final stem = dot > 0 ? safeName.substring(0, dot) : safeName;

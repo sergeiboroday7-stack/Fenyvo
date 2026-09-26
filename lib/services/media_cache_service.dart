@@ -5,9 +5,12 @@ import 'dart:typed_data';
 
 import 'package:path_provider/path_provider.dart';
 
+import 'crypto/e2ee_media_cipher.dart';
 import 'media_transfer_service.dart';
 
 class MediaCacheService {
+  static final Map<String, Future<Map<String, dynamic>>> _remoteDownloads =
+      <String, Future<Map<String, dynamic>>>{};
   static Future<Directory> _cacheDirectory() async {
     final root = await getApplicationSupportDirectory();
     final directory = Directory(
@@ -37,7 +40,8 @@ class MediaCacheService {
       }
     }
 
-    final mime = message['mimeType']?.toString().toLowerCase() ??
+    final mime =
+        message['mimeType']?.toString().toLowerCase() ??
         message['voiceMimeType']?.toString().toLowerCase() ??
         '';
     final type = message['messageType']?.toString().toLowerCase() ?? '';
@@ -70,6 +74,11 @@ class MediaCacheService {
   static String? existingLocalPath(Map<String, dynamic> message) {
     final path = message['localMediaPath']?.toString().trim() ?? '';
     if (path.isEmpty) return null;
+    // Older builds could cache ciphertext under the original .jpg/.mp4 name.
+    // Never treat that legacy path as decrypted E2EE media.
+    if (e2eeMediaMetadata(message) != null && !path.contains('.e2ee-clear')) {
+      return null;
+    }
     try {
       final file = File(path);
       if (file.existsSync() && file.lengthSync() > 0) return path;
@@ -94,6 +103,13 @@ class MediaCacheService {
   static bool hasRemoteMedia(Map<String, dynamic> message) =>
       mediaId(message) != null;
 
+  static Map<String, dynamic>? e2eeMediaMetadata(Map<String, dynamic> message) {
+    final raw = message['e2eeMedia'];
+    if (raw is! Map) return null;
+    final metadata = Map<String, dynamic>.from(raw);
+    return metadata.isEmpty ? null : metadata;
+  }
+
   static String? remoteUrl(Map<String, dynamic> message) {
     final id = mediaId(message);
     if (id == null) return null;
@@ -104,11 +120,13 @@ class MediaCacheService {
       MediaTransferService.authHeaders;
 
   static Future<String> _targetPath(Map<String, dynamic> message) async {
-    final id = mediaId(message) ??
+    final id =
+        mediaId(message) ??
         message['id']?.toString().trim() ??
         DateTime.now().microsecondsSinceEpoch.toString();
     final directory = await _cacheDirectory();
-    return '${directory.path}${Platform.pathSeparator}${_safePart(id)}${_extensionFor(message)}';
+    final clearMarker = e2eeMediaMetadata(message) == null ? '' : '.e2ee-clear';
+    return '${directory.path}${Platform.pathSeparator}${_safePart(id)}$clearMarker${_extensionFor(message)}';
   }
 
   static Future<String?> findCachedRemotePath(
@@ -154,9 +172,29 @@ class MediaCacheService {
   static Future<Map<String, dynamic>> cacheRemoteMedia(
     Map<String, dynamic> source,
   ) async {
+    final id = mediaId(source);
+    if (id != null) {
+      final active = _remoteDownloads[id];
+      if (active != null) return active;
+      final download = _cacheRemoteMedia(source);
+      _remoteDownloads[id] = download;
+      try {
+        return await download;
+      } finally {
+        if (identical(_remoteDownloads[id], download)) {
+          _remoteDownloads.remove(id);
+        }
+      }
+    }
+    return _cacheRemoteMedia(source);
+  }
+
+  static Future<Map<String, dynamic>> _cacheRemoteMedia(
+    Map<String, dynamic> source,
+  ) async {
     var message = Map<String, dynamic>.from(source);
-    final existing = existingLocalPath(message) ??
-        await findCachedRemotePath(message);
+    final existing =
+        existingLocalPath(message) ?? await findCachedRemotePath(message);
     if (existing != null) {
       message['localMediaPath'] = existing;
       return message;
@@ -170,10 +208,33 @@ class MediaCacheService {
     if (id == null) return message;
 
     final targetPath = await _targetPath(message);
-    await MediaTransferService.downloadToFile(
-      mediaId: id,
-      targetPath: targetPath,
-    );
+    final e2eeMedia = e2eeMediaMetadata(message);
+    if (e2eeMedia == null) {
+      await MediaTransferService.downloadToFile(
+        mediaId: id,
+        targetPath: targetPath,
+      );
+    } else {
+      final encryptedPath = '$targetPath.e2ee';
+      try {
+        await MediaTransferService.downloadToFile(
+          mediaId: id,
+          targetPath: encryptedPath,
+        );
+        await E2eeMediaCipher.decryptFile(
+          sourcePath: encryptedPath,
+          targetPath: targetPath,
+          metadata: e2eeMedia,
+        );
+      } finally {
+        final encrypted = File(encryptedPath);
+        if (await encrypted.exists()) {
+          try {
+            await encrypted.delete();
+          } catch (_) {}
+        }
+      }
+    }
     message['localMediaPath'] = targetPath;
     return message;
   }

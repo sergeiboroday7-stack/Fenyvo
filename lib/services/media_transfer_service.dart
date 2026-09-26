@@ -1,17 +1,23 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:path_provider/path_provider.dart';
+
+import 'crypto/e2ee_media_cipher.dart';
+
 class SpartanMediaUpload {
   final String mediaId;
   final String fileName;
   final int fileSize;
   final String mimeType;
+  final Map<String, dynamic>? e2eeMedia;
 
   const SpartanMediaUpload({
     required this.mediaId,
     required this.fileName,
     required this.fileSize,
     required this.mimeType,
+    this.e2eeMedia,
   });
 }
 
@@ -20,13 +26,11 @@ class MediaTransferService {
   static String _token = '';
   static const int defaultMaxBytes = 1024 * 1024 * 1024;
 
-  static bool get isReady =>
-      _baseUri != null && _token.trim().isNotEmpty;
+  static bool get isReady => _baseUri != null && _token.trim().isNotEmpty;
 
-  static Map<String, String> get authHeaders =>
-      _token.trim().isEmpty
-          ? const <String, String>{}
-          : <String, String>{'Authorization': 'Bearer $_token'};
+  static Map<String, String> get authHeaders => _token.trim().isEmpty
+      ? const <String, String>{}
+      : <String, String>{'Authorization': 'Bearer $_token'};
 
   static void configure({
     required String webSocketUrl,
@@ -40,11 +44,7 @@ class MediaTransferService {
     }
 
     final scheme = ws.scheme.toLowerCase() == 'wss' ? 'https' : 'http';
-    _baseUri = Uri(
-      scheme: scheme,
-      host: ws.host,
-      port: mediaPort,
-    );
+    _baseUri = Uri(scheme: scheme, host: ws.host, port: mediaPort);
     _token = token.trim();
   }
 
@@ -60,8 +60,7 @@ class MediaTransferService {
     return base.replace(path: '/media/$id', query: null);
   }
 
-  static String? mediaUrl(String mediaId) =>
-      mediaUri(mediaId)?.toString();
+  static String? mediaUrl(String mediaId) => mediaUri(mediaId)?.toString();
 
   static Future<SpartanMediaUpload> uploadFile({
     required String path,
@@ -69,6 +68,7 @@ class MediaTransferService {
     required String mimeType,
     required String messageType,
     int maxBytes = defaultMaxBytes,
+    bool encryptForE2ee = false,
   }) async {
     if (!isReady) {
       throw StateError('Медиа-сервер не готов. Перезайдите в аккаунт.');
@@ -90,13 +90,34 @@ class MediaTransferService {
       );
     }
 
+    File uploadSource = file;
+    Map<String, dynamic>? e2eeMedia;
+    String? encryptedPath;
+    var uploadName = fileName;
+    var uploadMime = mimeType;
+    var uploadType = messageType;
+    if (encryptForE2ee) {
+      final temporary = await getTemporaryDirectory();
+      encryptedPath =
+          '${temporary.path}${Platform.pathSeparator}spartan_e2ee_${DateTime.now().microsecondsSinceEpoch}.bin';
+      final encrypted = await E2eeMediaCipher.encryptFile(
+        sourcePath: path,
+        targetPath: encryptedPath,
+      );
+      uploadSource = File(encrypted.encryptedPath);
+      e2eeMedia = encrypted.metadata;
+      uploadName = 'protected.bin';
+      uploadMime = 'application/octet-stream';
+      uploadType = 'file';
+    }
+
     final base = _baseUri!;
     final uri = base.replace(
       path: '/media/upload',
       queryParameters: <String, String>{
-        'fileName': fileName,
-        'mimeType': mimeType,
-        'messageType': messageType,
+        'fileName': uploadName,
+        'mimeType': uploadMime,
+        'messageType': uploadType,
       },
     );
 
@@ -108,10 +129,12 @@ class MediaTransferService {
       request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $_token');
       request.headers.set(
         HttpHeaders.contentTypeHeader,
-        mimeType.trim().isEmpty ? 'application/octet-stream' : mimeType.trim(),
+        uploadMime.trim().isEmpty
+            ? 'application/octet-stream'
+            : uploadMime.trim(),
       );
-      request.contentLength = size;
-      await request.addStream(file.openRead());
+      request.contentLength = await uploadSource.length();
+      await request.addStream(uploadSource.openRead());
 
       final response = await request.close();
       final body = await utf8.decoder.bind(response).join();
@@ -139,22 +162,28 @@ class MediaTransferService {
 
       return SpartanMediaUpload(
         mediaId: mediaId,
-        fileName: data['fileName']?.toString().trim().isNotEmpty == true
-            ? data['fileName'].toString().trim()
-            : fileName,
-        fileSize: int.tryParse(data['fileSize']?.toString() ?? '') ?? size,
-        mimeType: data['mimeType']?.toString().trim().isNotEmpty == true
-            ? data['mimeType'].toString().trim()
-            : mimeType,
+        fileName: fileName,
+        fileSize: size,
+        mimeType: mimeType,
+        e2eeMedia: e2eeMedia,
       );
     } finally {
       client.close(force: true);
+      if (encryptedPath != null) {
+        final encryptedFile = File(encryptedPath);
+        if (await encryptedFile.exists()) {
+          try {
+            await encryptedFile.delete();
+          } catch (_) {}
+        }
+      }
     }
   }
 
   static Future<void> downloadToFile({
     required String mediaId,
     required String targetPath,
+    void Function(int receivedBytes, int? totalBytes)? onProgress,
   }) async {
     if (!isReady) {
       throw StateError('Медиа-сервер не готов. Перезайдите в аккаунт.');
@@ -172,20 +201,48 @@ class MediaTransferService {
     final client = HttpClient();
     client.connectionTimeout = const Duration(seconds: 20);
     try {
+      var downloaded = await partial.exists() ? await partial.length() : 0;
       final request = await client.getUrl(uri);
       request.headers.set(HttpHeaders.authorizationHeader, 'Bearer $_token');
+      if (downloaded > 0) {
+        request.headers.set(HttpHeaders.rangeHeader, 'bytes=$downloaded-');
+      }
       final response = await request.close();
-      if (response.statusCode != HttpStatus.ok) {
+      if (response.statusCode != HttpStatus.ok &&
+          response.statusCode != HttpStatus.partialContent) {
         final body = await utf8.decoder.bind(response).join();
         throw HttpException(
-          body.trim().isEmpty ? 'Ошибка скачивания (${response.statusCode})' : body,
+          body.trim().isEmpty
+              ? 'Ошибка скачивания (${response.statusCode})'
+              : body,
           uri: uri,
         );
       }
 
-      final sink = partial.openWrite();
+      // A server may ignore Range and return the whole file. In that case the
+      // partial file must be replaced instead of appending duplicate bytes.
+      final append =
+          downloaded > 0 && response.statusCode == HttpStatus.partialContent;
+      if (!append) downloaded = 0;
+      final responseBytes = response.contentLength >= 0
+          ? response.contentLength
+          : null;
+      final totalBytes = responseBytes == null
+          ? null
+          : downloaded + responseBytes;
+      onProgress?.call(downloaded, totalBytes);
+
+      final sink = partial.openWrite(
+        mode: append ? FileMode.append : FileMode.write,
+      );
       try {
-        await response.pipe(sink);
+        await for (final chunk in response) {
+          sink.add(chunk);
+          downloaded += chunk.length;
+          onProgress?.call(downloaded, totalBytes);
+        }
+        await sink.flush();
+        await sink.close();
       } catch (_) {
         await sink.close();
         rethrow;
@@ -197,11 +254,8 @@ class MediaTransferService {
       await partial.rename(target.path);
     } finally {
       client.close(force: true);
-      if (await partial.exists()) {
-        try {
-          await partial.delete();
-        } catch (_) {}
-      }
+      // Keep an interrupted .part file. The next attempt continues from the
+      // last received byte using HTTP Range instead of starting over.
     }
   }
 }

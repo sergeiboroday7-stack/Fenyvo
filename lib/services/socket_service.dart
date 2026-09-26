@@ -29,8 +29,14 @@ class SocketService {
   SocketService._internal();
 
   WebSocketChannel? _channel;
+  int _connectionGeneration = 0;
 
   final List<void Function(Map<String, dynamic>)> _messageHandlers = [];
+
+  final Map<String, Map<String, dynamic>> _communicationStates =
+      <String, Map<String, dynamic>>{};
+  final Map<String, Map<String, dynamic>> _userProfiles =
+      <String, Map<String, dynamic>>{};
 
   String? currentUser;
 
@@ -70,6 +76,16 @@ class SocketService {
 
   bool isE2eeActiveWith(String username) =>
       _e2eeEnabled && _e2eeActivePeers.contains(username.trim());
+
+  Future<bool> isE2eeReadyWith(String username) async {
+    final user = currentUser?.trim() ?? '';
+    final peer = username.trim();
+    if (user.isEmpty || peer.isEmpty) return false;
+    if (_e2eeActivePeers.contains(peer)) return true;
+    final stored = await E2eeSettingsService.instance.activePeers(user);
+    _e2eeActivePeers = stored;
+    return stored.contains(peer);
+  }
 
   String? _serverUrl;
 
@@ -174,19 +190,29 @@ class SocketService {
 
       final uri = Uri.parse(url);
 
-      _channel = WebSocketChannel.connect(uri);
+      final generation = ++_connectionGeneration;
+      final channel = WebSocketChannel.connect(uri);
+      _channel = channel;
 
-      _channel!.stream.listen(
+      channel.stream.listen(
         _handleRawMessage,
         onError: (Object error) {
           print('❌ Ошибка WebSocket: $error');
 
-          _handleDisconnect(reason: 'Ошибка подключения к серверу');
+          _handleDisconnect(
+            reason: 'Ошибка подключения к серверу',
+            generation: generation,
+            channel: channel,
+          );
         },
         onDone: () {
           print('🔴 WebSocket отключён');
 
-          _handleDisconnect(reason: 'Соединение с сервером закрыто');
+          _handleDisconnect(
+            reason: 'Соединение с сервером закрыто',
+            generation: generation,
+            channel: channel,
+          );
         },
         cancelOnError: false,
       );
@@ -291,6 +317,7 @@ class SocketService {
             _needsResyncAfterLogin = false;
             _receivingOfflineMessages = true;
             _send('get_offline_messages', const {});
+            _send('get_communication_requests', const {});
             _send('get_groups', const {});
             _send('get_users', const {});
             print('🔄 RELAY: состояние после переподключения синхронизировано');
@@ -300,6 +327,61 @@ class SocketService {
         }
       }
 
+      if (type == 'communication_state') {
+        final contact = data['contact']?.toString().trim() ?? '';
+        if (contact.isNotEmpty) {
+          _communicationStates[contact.toLowerCase()] =
+              Map<String, dynamic>.from(data);
+        }
+      }
+
+      if (type == 'communication_request_status') {
+        final to = data['to']?.toString().trim() ?? '';
+        if (to.isNotEmpty) {
+          final previous = _communicationStates[to.toLowerCase()];
+          final accepted = data['accepted'] == true;
+          final pending = data['pending'] == true;
+          _communicationStates[to.toLowerCase()] = <String, dynamic>{
+            if (previous != null) ...previous,
+            'contact': to,
+            'status': accepted
+                ? 'accepted'
+                : pending
+                ? 'pending'
+                : (previous?['status'] ?? 'none'),
+            'from': currentUser,
+            'to': to,
+            'incoming': false,
+            'outgoing': pending,
+            ...data,
+          };
+        }
+      }
+      if (type == 'communication_request_response') {
+        final me = currentUser?.trim().toLowerCase() ?? '';
+        final from = data['from']?.toString().trim() ?? '';
+        final to = data['to']?.toString().trim() ?? '';
+        final peer = from.toLowerCase() == me ? to : from;
+        if (peer.isNotEmpty) {
+          _communicationStates[peer.toLowerCase()] = {'contact': peer, ...data};
+        }
+      }
+
+      if (type == 'communication_request') {
+        final from = data['from']?.toString().trim() ?? '';
+        if (from.isNotEmpty) {
+          _communicationStates[from.toLowerCase()] = {'contact': from, ...data};
+        }
+      }
+
+      if (type == 'user_profile' || type == 'user_profile_updated') {
+        final username = data['username']?.toString().trim() ?? '';
+        if (username.isNotEmpty) {
+          _userProfiles[username.toLowerCase()] = Map<String, dynamic>.from(
+            data,
+          );
+        }
+      }
       // ======================================
       // ОФЛАЙН-СООБЩЕНИЯ ПОЛУЧЕНЫ
       // ======================================
@@ -379,6 +461,13 @@ class SocketService {
             peer,
             accepted,
           );
+          if (!accepted) {
+            await SignalE2eeService.instance.resetPeerSession(peer);
+            await E2eeSettingsService.instance.clearFingerprintVerification(
+              user,
+              peer,
+            );
+          }
         }
       }
 
@@ -548,9 +637,11 @@ class SocketService {
       if (type == 'group_message') {
         final groupId = data['groupId']?.toString() ?? '';
         final from = data['from']?.toString() ?? '';
+        final callScoped = data['scope']?.toString() == 'group_call';
         if (groupId.isNotEmpty &&
             from.isNotEmpty &&
             from != currentUser &&
+            !callScoped &&
             AppVisibility.shouldNotify(
               foreground: AppVisibility.instance.foreground,
               sameChat: activeGroupId == groupId,
@@ -642,16 +733,62 @@ class SocketService {
                 .cast<Map<String, dynamic>?>()
                 .firstWhere((item) => item != null, orElse: () => null);
             if (local != null) {
+              data.addAll(Map<String, dynamic>.from(local));
               data
-                ..['text'] = local['text']
-                ..['replyTo'] = local['replyTo']
-                ..['forwardedFrom'] = local['forwardedFrom']
-                ..['forwardComment'] = local['forwardComment'];
+                ..remove('requiresE2ee')
+                ..remove('status');
               message['data'] = data;
             }
           }
           StorageService.removeOutboxMessage(user, id);
           _notifyHandlers({'type': 'outbox_sent', 'data': data});
+        }
+      }
+
+      if (const <String>{
+            'call_offer',
+            'call_answer',
+            'call_ice_candidate',
+          }.contains(type) &&
+          data['e2eeCall'] is Map) {
+        final from = data['from']?.toString().trim() ?? '';
+        final to = data['to']?.toString().trim() ?? '';
+        final id = data['callId']?.toString().trim() ?? '';
+        final active = currentUser != null && await isE2eeReadyWith(from);
+        if (!active) {
+          print('🔒 E2EE CALL: защищённый сигнал отклонён');
+          return;
+        }
+        try {
+          await SignalE2eeService.instance.initializeForUser(currentUser!);
+          final clear = await SignalE2eeService.instance.decrypt(
+            from,
+            Map<String, dynamic>.from(data['e2eeCall'] as Map),
+          );
+          if (clear['kind']?.toString() != type ||
+              clear['callId']?.toString() != id ||
+              clear['from']?.toString() != from ||
+              clear['to']?.toString() != to) {
+            throw const FormatException('E2EE call envelope mismatch');
+          }
+          data
+            ..addAll(clear)
+            ..remove('e2eeCall')
+            ..['callE2ee'] = true;
+          message['data'] = data;
+        } catch (error) {
+          print('🔒 E2EE CALL: сигнал не расшифрован ($error)');
+          // Do not leave the caller ringing forever when the peer has a
+          // stale/missing Signal session. The caller receives a clear end
+          // event and can recreate the session instead.
+          if (from.isNotEmpty && id.isNotEmpty) {
+            _send('call_reject', {
+              'to': from,
+              'callId': id,
+              'reason': 'e2ee_signal_error',
+            });
+          }
+          return;
         }
       }
 
@@ -704,7 +841,19 @@ class SocketService {
   // ПОТЕРЯ СОЕДИНЕНИЯ
   // ========================================
 
-  void _handleDisconnect({required String reason}) {
+  void _handleDisconnect({
+    required String reason,
+    int? generation,
+    WebSocketChannel? channel,
+  }) {
+    if (generation != null && generation != _connectionGeneration) {
+      print('ℹ️ Игнорировано отключение старого WebSocket');
+      return;
+    }
+    if (channel != null && !identical(channel, _channel)) {
+      print('ℹ️ Игнорировано событие заменённого WebSocket');
+      return;
+    }
     _heartbeatTimer?.cancel();
     _heartbeatTimer = null;
     _isConnected = false;
@@ -952,7 +1101,12 @@ class SocketService {
   // SPARTAN_STAGE25_GROUP_MESSAGES
   // ========================================
 
-  void getGroupMessages(String groupId, {String? before, int limit = 60}) {
+  void getGroupMessages(
+    String groupId, {
+    String? before,
+    int limit = 60,
+    String? callId,
+  }) {
     final id = groupId.trim();
     if (id.isEmpty) return;
 
@@ -962,6 +1116,8 @@ class SocketService {
     };
     final cursor = before?.trim() ?? '';
     if (cursor.isNotEmpty) data['before'] = cursor;
+    final scopedCallId = callId?.trim() ?? '';
+    if (scopedCallId.isNotEmpty) data['callId'] = scopedCallId;
 
     _send('get_group_messages', data);
   }
@@ -990,6 +1146,7 @@ class SocketService {
     String groupId,
     String text, {
     Map<String, dynamic>? replyTo,
+    String? callId,
   }) {
     final id = groupId.trim();
 
@@ -1004,6 +1161,10 @@ class SocketService {
       'groupId': id,
       'text': messageText,
       'time': DateTime.now().toIso8601String(),
+      if (callId?.trim().isNotEmpty == true) ...{
+        'scope': 'group_call',
+        'callId': callId!.trim(),
+      },
     };
 
     if (replyTo != null) {
@@ -1028,6 +1189,7 @@ class SocketService {
     required String text,
     int? voiceDurationMs,
     Map<String, dynamic>? replyTo,
+    String? callId,
   }) {
     final id = groupId.trim();
     final type = messageType.trim().toLowerCase();
@@ -1055,6 +1217,10 @@ class SocketService {
       'fileName': name,
       'fileSize': fileSize,
       'mimeType': mediaMime,
+      if (callId?.trim().isNotEmpty == true) ...{
+        'scope': 'group_call',
+        'callId': callId!.trim(),
+      },
     };
 
     if (type == 'voice' && voiceDurationMs != null && voiceDurationMs > 0) {
@@ -1131,6 +1297,71 @@ class SocketService {
   // ========================================
   // ОФЛАЙН-СООБЩЕНИЯ
   // ========================================
+
+  // ========================================
+  // ЗАПРОСЫ СВЯЗИ
+  // ========================================
+
+  Map<String, dynamic>? communicationState(String username) {
+    final user = username.trim().toLowerCase();
+    if (user.isEmpty) return null;
+    return _communicationStates[user];
+  }
+
+  bool isCommunicationAccepted(String username) {
+    return communicationState(username)?['status'] == 'accepted';
+  }
+
+  void requestCommunication(String username, {String message = ''}) {
+    final user = username.trim();
+    if (user.isEmpty) return;
+    final note = message.trim();
+    _send('communication_request', {
+      'to': user,
+      if (note.isNotEmpty) 'message': note,
+    });
+  }
+
+  void respondCommunicationRequest(String username, {required bool accepted}) {
+    final user = username.trim();
+    if (user.isEmpty) return;
+    _send('communication_request_response', {
+      'from': user,
+      'accepted': accepted,
+    });
+  }
+
+  void getCommunicationState(String username) {
+    final user = username.trim();
+    if (user.isEmpty) return;
+    _send('get_communication_state', {'contact': user});
+  }
+
+  void getCommunicationRequests() {
+    _send('get_communication_requests', const {});
+  }
+
+  Map<String, dynamic>? userProfile(String username) {
+    final value = _userProfiles[username.trim().toLowerCase()];
+    return value == null ? null : Map<String, dynamic>.from(value);
+  }
+
+  void getUserProfile(String username) {
+    final user = username.trim();
+    if (user.isNotEmpty) _send('get_user_profile', {'username': user});
+  }
+
+  void updateUserProfile({
+    required String about,
+    required String region,
+    required String statusText,
+  }) {
+    _send('update_user_profile', {
+      'about': about.trim(),
+      'region': region.trim(),
+      'statusText': statusText.trim(),
+    });
+  }
 
   void getOfflineMessages() {
     _receivingOfflineMessages = true;
@@ -1269,12 +1500,17 @@ class SocketService {
       final ready = await _prepareE2ee(user);
       if (!ready) return false;
     } else if (!enabled && isAuthenticated) {
-      for (final peer in _e2eeActivePeers) {
+      for (final peer in _e2eeActivePeers.toList()) {
         _send('e2ee_invite_response', {
           'to': peer,
           'accepted': false,
           'disabled': true,
         });
+        await SignalE2eeService.instance.resetPeerSession(peer);
+        await E2eeSettingsService.instance.clearFingerprintVerification(
+          user,
+          peer,
+        );
       }
       _send('e2ee_remove_bundle', const {});
     }
@@ -1312,6 +1548,13 @@ class SocketService {
       _e2eeActivePeers.remove(peer);
     }
     await E2eeSettingsService.instance.setPeerActive(user, peer, accepted);
+    if (!accepted) {
+      await SignalE2eeService.instance.resetPeerSession(peer);
+      await E2eeSettingsService.instance.clearFingerprintVerification(
+        user,
+        peer,
+      );
+    }
     return sent || !accepted;
   }
 
@@ -1431,6 +1674,17 @@ class SocketService {
       'forwardedFrom': message['forwardedFrom'],
     if (message['forwardComment'] != null)
       'forwardComment': message['forwardComment'],
+    if (message['messageType'] != null) 'messageType': message['messageType'],
+    if (message['mediaId'] != null) 'mediaId': message['mediaId'],
+    if (message['fileName'] != null) 'fileName': message['fileName'],
+    if (message['fileSize'] != null) 'fileSize': message['fileSize'],
+    if (message['mimeType'] != null) 'mimeType': message['mimeType'],
+    if (message['voiceDurationMs'] != null)
+      'voiceDurationMs': message['voiceDurationMs'],
+    if (message['voiceMimeType'] != null)
+      'voiceMimeType': message['voiceMimeType'],
+    if (message['e2eeMedia'] is Map)
+      'e2eeMedia': Map<String, dynamic>.from(message['e2eeMedia'] as Map),
   };
 
   // ========================================
@@ -1448,6 +1702,7 @@ class SocketService {
     Map<String, dynamic>? replyTo,
     String? forwardedFrom,
     String? forwardComment,
+    Map<String, dynamic>? e2eeMedia,
   }) {
     final target = to.trim();
     final type = messageType.trim().toLowerCase();
@@ -1493,6 +1748,25 @@ class SocketService {
     if (comment.isNotEmpty) {
       data['forwardComment'] = comment;
     }
+    final user = currentUser?.trim() ?? '';
+    final protectWithE2ee = isE2eeActiveWith(target);
+    if (protectWithE2ee && (e2eeMedia == null || user.isEmpty)) {
+      print('🔒 E2EE: незашифрованное вложение заблокировано');
+      return;
+    }
+    if (protectWithE2ee) {
+      data
+        ..['from'] = user
+        ..['e2eeMedia'] = Map<String, dynamic>.from(e2eeMedia!)
+        ..['requiresE2ee'] = true
+        ..['e2ee'] = true
+        ..['status'] = 'sending'
+        ..['isMe'] = true;
+      StorageService.saveOutboxMessage(user, data);
+      _notifyHandlers({'type': 'outbox_sending', 'data': data});
+      unawaited(_sendE2eeMessage(Map<String, dynamic>.from(data)));
+      return;
+    }
     _send('media_message', data);
   }
 
@@ -1510,6 +1784,7 @@ class SocketService {
     Map<String, dynamic>? replyTo,
     String? forwardedFrom,
     String? forwardComment,
+    Map<String, dynamic>? e2eeMedia,
   }) {
     final target = to.trim();
     final remoteId = mediaId.trim();
@@ -1555,6 +1830,26 @@ class SocketService {
     final comment = forwardComment?.trim() ?? '';
     if (comment.isNotEmpty) {
       messageData['forwardComment'] = comment;
+    }
+
+    final user = currentUser?.trim() ?? '';
+    final protectWithE2ee = isE2eeActiveWith(target);
+    if (protectWithE2ee && (e2eeMedia == null || user.isEmpty)) {
+      print('🔒 E2EE: незашифрованное голосовое заблокировано');
+      return;
+    }
+    if (protectWithE2ee) {
+      messageData
+        ..['from'] = user
+        ..['e2eeMedia'] = Map<String, dynamic>.from(e2eeMedia!)
+        ..['requiresE2ee'] = true
+        ..['e2ee'] = true
+        ..['status'] = 'sending'
+        ..['isMe'] = true;
+      StorageService.saveOutboxMessage(user, messageData);
+      _notifyHandlers({'type': 'outbox_sending', 'data': messageData});
+      unawaited(_sendE2eeMessage(Map<String, dynamic>.from(messageData)));
+      return;
     }
 
     _send('message', messageData);
@@ -1904,43 +2199,80 @@ class SocketService {
   void sendCallConnected({required String to, required String callId}) =>
       _send('call_connected', {'to': to, 'callId': callId});
 
-  void sendCallOffer({
+  Future<bool> _sendProtectedCallSignal(
+    String type, {
+    required String to,
+    required String callId,
+    required Map<String, dynamic> clear,
+  }) async {
+    final peer = to.trim();
+    final id = callId.trim();
+    final user = currentUser?.trim() ?? '';
+    if (peer.isEmpty || id.isEmpty || user.isEmpty) return false;
+    if (!await isE2eeReadyWith(peer)) {
+      return _send(type, {'to': peer, 'callId': id, ...clear});
+    }
+    try {
+      await SignalE2eeService.instance.initializeForUser(user);
+      final payload = <String, dynamic>{
+        'kind': type,
+        'callId': id,
+        'from': user,
+        'to': peer,
+        ...clear,
+      };
+      Map<String, dynamic> encrypted;
+      try {
+        encrypted = await SignalE2eeService.instance.encrypt(peer, payload);
+      } on E2eeSessionMissing {
+        await _requestE2eeBundle(peer);
+        encrypted = await SignalE2eeService.instance.encrypt(peer, payload);
+      }
+      return _send(type, {
+        'to': peer,
+        'callId': id,
+        if (clear['video'] != null) 'video': clear['video'],
+        'e2eeCall': encrypted,
+      });
+    } catch (_) {
+      print('🔒 E2EE CALL: защищённый сигнал не отправлен');
+      return false;
+    }
+  }
+
+  Future<bool> sendCallOffer({
     required String to,
     required String callId,
     required bool video,
     required Map<String, dynamic> sdp,
-  }) {
-    _send('call_offer', {
-      'to': to.trim(),
-      'callId': callId.trim(),
-      'video': video,
-      'sdp': sdp,
-    });
-  }
+  }) => _sendProtectedCallSignal(
+    'call_offer',
+    to: to,
+    callId: callId,
+    clear: {'video': video, 'sdp': sdp},
+  );
 
-  void sendCallAnswer({
+  Future<bool> sendCallAnswer({
     required String to,
     required String callId,
     required Map<String, dynamic> sdp,
-  }) {
-    _send('call_answer', {
-      'to': to.trim(),
-      'callId': callId.trim(),
-      'sdp': sdp,
-    });
-  }
+  }) => _sendProtectedCallSignal(
+    'call_answer',
+    to: to,
+    callId: callId,
+    clear: {'sdp': sdp},
+  );
 
-  void sendCallIceCandidate({
+  Future<bool> sendCallIceCandidate({
     required String to,
     required String callId,
     required Map<String, dynamic> candidate,
-  }) {
-    _send('call_ice_candidate', {
-      'to': to.trim(),
-      'callId': callId.trim(),
-      'candidate': candidate,
-    });
-  }
+  }) => _sendProtectedCallSignal(
+    'call_ice_candidate',
+    to: to,
+    callId: callId,
+    clear: {'candidate': candidate},
+  );
 
   void sendCallReject({
     required String to,

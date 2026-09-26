@@ -50,19 +50,22 @@ function createCallSignaling({ send, onlineUsers, registeredUsers, push,
       error('Некорректные данные звонка'); return true;
     }
     if (JSON.stringify(data).length > 200000) { error('Слишком большой пакет звонка'); return true; }
+    const protectedSignal = data.e2eeCall && data.e2eeCall.e2ee === true &&
+      typeof data.e2eeCall.ciphertext === 'string' && data.e2eeCall.ciphertext.length > 0;
     if (type === 'call_offer') {
-      if (data.sdp?.type !== 'offer' || typeof data.sdp.sdp !== 'string' || !data.sdp.sdp) {
+      if (!protectedSignal && (data.sdp?.type !== 'offer' || typeof data.sdp.sdp !== 'string' || !data.sdp.sdp)) {
         error('Некорректное предложение звонка'); return true;
       }
       const existing = calls.get(id);
       if (existing?.from === user && existing.to === to) return true;
-      if (existing || byUser.has(user) || byUser.has(to) || isExternallyBusy(user) || isExternallyBusy(to)) {
+      if (existing || byUser.has(user) || byUser.has(to) || isExternallyBusy(user) ) {
         send(ws, 'call_reject', { callId: id, from: to, reason: 'busy' }); return true;
       }
       const call = { id, from: user, to, state: 'ringing', expiresAt: now() + 75000,
         token: crypto.randomBytes(32).toString('hex'), candidates: [] };
       call.offer = { callId: id, from: user, to, video: data.video === true,
-        sdp: data.sdp, expiresAt: call.expiresAt, callToken: call.token };
+        ...(protectedSignal ? { e2eeCall: data.e2eeCall } : { sdp: data.sdp }),
+        expiresAt: call.expiresAt, callToken: call.token };
       calls.set(id, call); byUser.set(user, id); byUser.set(to, id); arm(call, 75000);
       emit(to, 'call_offer', call.offer);
       // Online does not mean foreground: a phone may have a suspended socket.
@@ -81,17 +84,20 @@ function createCallSignaling({ send, onlineUsers, registeredUsers, push,
       error('Звонок уже завершён'); return true;
     }
     if (type === 'call_answer') {
-      if (user !== call.to || call.state !== 'ringing' || data.sdp?.type !== 'answer' ||
-          typeof data.sdp.sdp !== 'string' || !data.sdp.sdp) {
+      if (user !== call.to || call.state !== 'ringing' ||
+          (!protectedSignal && (data.sdp?.type !== 'answer' ||
+          typeof data.sdp.sdp !== 'string' || !data.sdp.sdp))) {
         error('Некорректный ответ на звонок'); return true;
       }
       // Older foreground clients do not emit call_connected. Their own 45s
       // connection timeout sends call_end, so keep the wire protocol compatible.
       call.state = 'active'; call.candidates = []; cancel(call.timer);
-      emit(to, type, { callId: id, from: user, to, sdp: data.sdp });
+      emit(to, type, { callId: id, from: user, to,
+        ...(protectedSignal ? { e2eeCall: data.e2eeCall } : { sdp: data.sdp }) });
     } else if (type === 'call_ice_candidate') {
-      if (typeof data.candidate?.candidate !== 'string' || data.candidate.candidate.length > 8192) return true;
-      const packet = { callId: id, from: user, to, candidate: data.candidate };
+      if (!protectedSignal && (typeof data.candidate?.candidate !== 'string' || data.candidate.candidate.length > 8192)) return true;
+      const packet = { callId: id, from: user, to,
+        ...(protectedSignal ? { e2eeCall: data.e2eeCall } : { candidate: data.candidate }) };
       if (user === call.from && call.state === 'ringing' && call.candidates.length < 256) call.candidates.push(packet);
       emit(to, type, packet);
     } else if (type === 'call_connected') {
