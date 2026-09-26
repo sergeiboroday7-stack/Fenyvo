@@ -231,6 +231,19 @@ class SignalE2eeService {
     );
   }
 
+  /// Forgets a peer after the user explicitly disables protection for that
+  /// chat. This is required when the peer reinstalled the app or changed
+  /// phones and therefore has a new Signal identity.
+  Future<void> resetPeerSession(String username) async {
+    final remote = username.trim();
+    if (remote.isEmpty || _store == null) return;
+    await _lockFor(remote).synchronized(() async {
+      final address = ProtocolAddress(name: remote, deviceId: deviceId);
+      await _store!.deleteSession(address);
+      await _store!.deleteRemoteIdentity(address);
+    });
+  }
+
   Future<Map<String, dynamic>> encrypt(
     String username,
     Map<String, dynamic> plaintext,

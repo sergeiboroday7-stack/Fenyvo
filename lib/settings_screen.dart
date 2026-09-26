@@ -40,6 +40,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   int _selectedTextColor = 0xFFFFFFFF;
   bool _e2eeEnabled = false;
   bool _changingE2ee = false;
+  String _profileAbout = '';
+  String _profileRegion = '';
+  String _profileStatus = '';
 
   void _showSupportDialog() {
     final language = AppLanguageService.instance;
@@ -95,6 +98,88 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _loadBackgroundOpacity();
     _loadTextColor();
     _loadE2ee();
+    SocketService.instance.addMessageHandler(_handleProfileMessage);
+    SocketService.instance.getUserProfile(widget.username);
+  }
+
+  @override
+  void dispose() {
+    SocketService.instance.removeMessageHandler(_handleProfileMessage);
+    super.dispose();
+  }
+
+  void _handleProfileMessage(Map<String, dynamic> packet) {
+    final type = packet['type']?.toString() ?? '';
+    if (type != 'user_profile' && type != 'user_profile_updated') return;
+    final raw = packet['data'];
+    if (raw is! Map) return;
+    final data = Map<String, dynamic>.from(raw);
+    if ((data['username']?.toString() ?? '') != widget.username || !mounted) {
+      return;
+    }
+    setState(() {
+      _profileAbout = data['about']?.toString() ?? '';
+      _profileRegion = data['region']?.toString() ?? '';
+      _profileStatus = data['statusText']?.toString() ?? '';
+    });
+  }
+
+  Future<void> _editProfile() async {
+    final status = TextEditingController(text: _profileStatus);
+    final about = TextEditingController(text: _profileAbout);
+    final region = TextEditingController(text: _profileRegion);
+    final save = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Профиль'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              TextField(
+                controller: status,
+                maxLength: 80,
+                decoration: const InputDecoration(
+                  labelText: 'Статус',
+                  hintText: 'Например: Сила в людях',
+                ),
+              ),
+              TextField(
+                controller: about,
+                maxLength: 160,
+                maxLines: 3,
+                decoration: const InputDecoration(labelText: 'О себе'),
+              ),
+              TextField(
+                controller: region,
+                maxLength: 80,
+                decoration: const InputDecoration(labelText: 'Регион'),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Сохранить'),
+          ),
+        ],
+      ),
+    );
+    if (save == true) {
+      SocketService.instance.updateUserProfile(
+        about: about.text,
+        region: region.text,
+        statusText: status.text,
+      );
+    }
+    status.dispose();
+    about.dispose();
+    region.dispose();
   }
 
   Future<void> _loadE2ee() async {
@@ -905,6 +990,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
 
+            _buildSection('Профиль', [
+              _buildSectionTile(
+                icon: Icons.manage_accounts_rounded,
+                title: 'Заполнить профиль',
+                subtitle: [
+                  if (_profileStatus.isNotEmpty) _profileStatus,
+                  if (_profileRegion.isNotEmpty) _profileRegion,
+                  if (_profileStatus.isEmpty && _profileRegion.isEmpty)
+                    'Статус, о себе и регион',
+                ].join(' · '),
+                onTap: _editProfile,
+              ),
+            ]),
+
             _buildSection(t('supportSection'), [
               _SpartanSupportTile(
                 title: t('supportSpartan'),
@@ -952,7 +1051,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             _buildSection(t('appearance'), [
               ListTile(
                 leading: const Icon(Icons.light_mode_outlined),
-                title: const Text('SPARTAN · BLUE GOLD'),
+                title: const Text('FENYVO · BLUE GOLD'),
                 subtitle: Text(t('themeSubtitle')),
               ),
               SwitchListTile.adaptive(

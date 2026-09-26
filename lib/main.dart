@@ -39,6 +39,8 @@ Future<void> main() async {
   CallService.instance.initialize();
   CallService.instance.externalCallBusy = () =>
       GroupCallService.instance.hasCall;
+  CallService.instance.leaveExternalCall = () =>
+      GroupCallService.instance.leave();
   GroupCallService.instance.initialize();
   PulseService.instance.initialize();
   CallHistoryService.initialize();
@@ -63,7 +65,7 @@ class SpartanChatApp extends StatelessWidget {
       builder: (context, _, _) => MaterialApp(
         navigatorKey: spartanNavigatorKey,
         scaffoldMessengerKey: spartanMessengerKey,
-        title: 'SPARTAN CHAT',
+        title: 'FENYVO',
         debugShowCheckedModeBanner: false,
         theme: SpartanPalette.blueGoldTheme,
         locale: AppLanguageService.instance.locale,

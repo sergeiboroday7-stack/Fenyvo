@@ -233,6 +233,101 @@ void main() {
     expect(f.service.hasCall, false);
   });
   test(
+    'viewer upgrade sends join and ignores the expected old-session exit',
+    () async {
+      final f = Fixture();
+      f.service.supported = true;
+      final watchingRoom = {
+        'id': 'call',
+        'groupId': 'g',
+        'name': 'Spartan 1',
+        'startedBy': 'B',
+        'owner': 'B',
+        'participants': [
+          {'user': 'B', 'sessionId': 'host', 'role': 'host'},
+          {'user': 'A', 'sessionId': 'viewer-a', 'role': 'viewer'},
+        ],
+      };
+      f.service.rooms['g'] = GroupCallState.parse(watchingRoom)!;
+      await f.service.watch('g', 'Spartan 1', 'call');
+      final watchRequest = f.sent.last['data']['requestId'];
+      await f.service.handlePacket({
+        'type': 'group_call_watching',
+        'data': {
+          'requestId': watchRequest,
+          'sessionId': 'viewer-a',
+          'call': watchingRoom,
+        },
+      });
+      f.service.requestJoin('g', 'Spartan 1', 'call');
+      await f.service.handlePacket({
+        'type': 'group_call_join_response',
+        'data': {'groupId': 'g', 'callId': 'call', 'accepted': true},
+      });
+      expect(
+        f.sent.map((item) => item['type']),
+        contains('group_call_unwatch'),
+      );
+      expect(f.sent.map((item) => item['type']), contains('group_call_join'));
+      await f.service.handlePacket({
+        'type': 'group_call_left',
+        'data': {
+          'callId': 'call',
+          'sessionId': 'viewer-a',
+          'reason': 'Вы вышли из просмотра',
+        },
+      });
+      expect(f.service.phase, GroupCallPhase.joining);
+      final joinPacket = f.sent.lastWhere(
+        (item) => item['type'] == 'group_call_join',
+      );
+      await f.service.handlePacket({
+        'type': 'group_call_joined',
+        'data': {
+          'requestId': joinPacket['data']['requestId'],
+          'sessionId': 'stage-a',
+          'call': room(local: 'stage-a', remote: 'host'),
+        },
+      });
+      expect(f.service.phase, GroupCallPhase.active);
+
+      // The viewer-removal snapshot can be handled after group_call_joined.
+      // It belongs to the old lease and must not evict the new stage session.
+      await f.service.handlePacket({
+        'type': 'group_call_state',
+        'data': {
+          'groupId': 'g',
+          'call': {
+            'id': 'call',
+            'groupId': 'g',
+            'name': 'Spartan 1',
+            'startedBy': 'B',
+            'owner': 'B',
+            'participants': [
+              {'user': 'B', 'sessionId': 'host', 'role': 'host'},
+            ],
+          },
+        },
+      });
+      expect(f.service.phase, GroupCallPhase.active);
+      expect(
+        f.sent.where((item) => item['type'] == 'group_call_leave'),
+        isEmpty,
+      );
+
+      // The first snapshot carrying the new lease confirms the transition.
+      await f.service.handlePacket({
+        'type': 'group_call_state',
+        'data': {
+          'groupId': 'g',
+          'call': room(local: 'stage-a', remote: 'host'),
+        },
+      });
+      expect(f.service.phase, GroupCallPhase.active);
+      await f.service.leave();
+    },
+  );
+  test(
     'leaving participant closes only its connection, not the room',
     () async {
       final f = Fixture();

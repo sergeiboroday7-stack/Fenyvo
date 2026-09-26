@@ -5,8 +5,17 @@ plugins {
     id "com.google.gms.google-services"
 }
 
+def keystoreProperties = new Properties()
+def keystorePropertiesFile = rootProject.file("key.properties")
+
+if (!keystorePropertiesFile.exists()) {
+    throw new GradleException("Missing android/key.properties")
+}
+
+keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+
 android {
-    namespace "com.example.spartan_chat_final"
+    namespace "com.fenyvo.app"
 
     compileSdk 36
     ndkVersion "28.2.13676358"
@@ -28,18 +37,28 @@ android {
     }
 
     defaultConfig {
-        applicationId "com.example.spartan_chat_final"
+        applicationId "com.fenyvo.app"
 
         minSdk = 24
         targetSdkVersion 36
 
-        versionCode 4207
-        versionName "1.7.7"
+        // Keep Android version synchronized with pubspec.yaml automatically.
+        versionCode flutter.versionCode
+        versionName flutter.versionName
+    }
+
+    signingConfigs {
+        release {
+            keyAlias keystoreProperties["keyAlias"]
+            keyPassword keystoreProperties["keyPassword"]
+            storeFile rootProject.file(keystoreProperties["storeFile"])
+            storePassword keystoreProperties["storePassword"]
+        }
     }
 
     buildTypes {
         release {
-            signingConfig signingConfigs.debug
+            signingConfig signingConfigs.release
             minifyEnabled false
             shrinkResources false
         }

@@ -486,13 +486,13 @@ class _AuthScreenState extends State<AuthScreen> {
                         'assets/images/spartan_brand.png',
                         width: 80,
                         height: 80,
-                        semanticLabel: 'SPARTAN',
+                        semanticLabel: 'FENYVO',
                       ),
 
                       const SizedBox(height: 14),
 
                       const Text(
-                        'SPARTAN CHAT',
+                        'FENYVO',
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           color: SpartanPalette.ink,

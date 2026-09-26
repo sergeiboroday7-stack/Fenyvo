@@ -78,4 +78,13 @@ class E2eeSettingsService {
     final preferences = await SharedPreferences.getInstance();
     await preferences.setString(_verifiedKey(username, peer), fingerprint);
   }
+
+  Future<void> clearFingerprintVerification(
+    String username,
+    String peer,
+  ) async {
+    if (username.trim().isEmpty || peer.trim().isEmpty) return;
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.remove(_verifiedKey(username, peer));
+  }
 }

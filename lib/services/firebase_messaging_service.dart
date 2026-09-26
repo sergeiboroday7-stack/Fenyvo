@@ -10,14 +10,11 @@ import 'socket_service.dart';
 class FirebaseMessagingService {
   FirebaseMessagingService._();
 
-  static final FirebaseMessagingService instance =
-      FirebaseMessagingService._();
+  static final FirebaseMessagingService instance = FirebaseMessagingService._();
 
-  FirebaseMessaging get _messaging =>
-      FirebaseMessaging.instance;
+  FirebaseMessaging get _messaging => FirebaseMessaging.instance;
 
-  final StreamController<String>
-      _notificationTapController =
+  final StreamController<String> _notificationTapController =
       StreamController<String>.broadcast();
 
   String? _token;
@@ -26,14 +23,11 @@ class FirebaseMessagingService {
 
   String? get token => _token;
 
-  Stream<String> get notificationTapStream =>
-      _notificationTapController.stream;
+  Stream<String> get notificationTapStream => _notificationTapController.stream;
 
   Future<void> initialize() async {
     if (Platform.isWindows) {
-      print(
-        '🪟 Windows: FCM отключён',
-      );
+      print('🪟 Windows: FCM отключён');
       return;
     }
 
@@ -51,8 +45,7 @@ class FirebaseMessagingService {
   }
 
   Future<void> _requestPermission() async {
-    final settings =
-        await _messaging.requestPermission(
+    final settings = await _messaging.requestPermission(
       alert: true,
       badge: true,
       sound: true,
@@ -66,16 +59,12 @@ class FirebaseMessagingService {
 
   Future<void> _loadToken() async {
     try {
-      _token =
-          await _messaging.getToken();
+      _token = await _messaging.getToken();
 
-      if (_token != null &&
-          _token!.isNotEmpty) {
+      if (_token != null && _token!.isNotEmpty) {
         print('🔥 FCM token получен');
       } else {
-        print(
-          '⚠️ FCM token не получен',
-        );
+        print('⚠️ FCM token не получен');
       }
     } catch (error) {
       print(
@@ -91,25 +80,19 @@ class FirebaseMessagingService {
 
   Future<void> _loadInitialMessage() async {
     try {
-      final message =
-          await _messaging.getInitialMessage();
+      final message = await _messaging.getInitialMessage();
 
       if (message == null) {
         return;
       }
 
-      final payload =
-          _buildPayload(
-        message,
-      );
+      final payload = _buildPayload(message);
 
-      if (payload == null ||
-          payload.isEmpty) {
+      if (payload == null || payload.isEmpty) {
         return;
       }
 
-      _initialPayload =
-          payload;
+      _initialPayload = payload;
 
       print(
         '🔥 Приложение запущено через FCM: '
@@ -129,16 +112,10 @@ class FirebaseMessagingService {
 
   void _listenNotificationTaps() {
     FirebaseMessaging.onMessageOpenedApp.listen(
-      (
-        RemoteMessage message,
-      ) {
-        final payload =
-            _buildPayload(
-          message,
-        );
+      (RemoteMessage message) {
+        final payload = _buildPayload(message);
 
-        if (payload == null ||
-            payload.isEmpty) {
+        if (payload == null || payload.isEmpty) {
           return;
         }
 
@@ -147,9 +124,7 @@ class FirebaseMessagingService {
           '$payload',
         );
 
-        _notificationTapController.add(
-          payload,
-        );
+        _notificationTapController.add(payload);
       },
       onError: (Object error) {
         print(
@@ -164,23 +139,17 @@ class FirebaseMessagingService {
   // ФОРМИРОВАНИЕ PAYLOAD
   // ========================================
 
-  String? _buildPayload(
-    RemoteMessage message,
-  ) {
-    final data =
-        message.data;
+  String? _buildPayload(RemoteMessage message) {
+    final data = message.data;
 
-    final type =
-        data['type']
-            ?.toString()
-            .trim() ??
-        '';
+    final type = data['type']?.toString().trim() ?? '';
 
-    final sender =
-        data['sender']
-            ?.toString()
-            .trim() ??
-        '';
+    if (type == 'group_call_started') {
+      final groupId = data['groupId']?.toString().trim() ?? '';
+      return groupId.isEmpty ? null : 'group:$groupId';
+    }
+
+    final sender = data['sender']?.toString().trim() ?? '';
 
     if (sender.isEmpty) {
       return null;
@@ -198,8 +167,7 @@ class FirebaseMessagingService {
   // ========================================
 
   String? takeInitialPayload() {
-    final payload =
-        _initialPayload;
+    final payload = _initialPayload;
 
     _initialPayload = null;
 
@@ -208,11 +176,8 @@ class FirebaseMessagingService {
 
   void _listenTokenRefresh() {
     _messaging.onTokenRefresh.listen(
-      (
-        newToken,
-      ) {
-        _token =
-            newToken;
+      (newToken) {
+        _token = newToken;
 
         print('🔄 FCM token обновлён');
         SocketService.instance.registerCurrentFcmToken();
@@ -227,103 +192,91 @@ class FirebaseMessagingService {
   }
 
   void _listenForegroundMessages() {
-    FirebaseMessaging.onMessage.listen(
-      (
-        RemoteMessage message,
-      ) {
-        if (message.data['type'] == 'call_invite' || message.data['type'] == 'call_cancel') {
-          unawaited(SystemCallService.instance.foregroundPush(message.data));
-          return;
-        }
+    FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+      if (message.data['type'] == 'call_invite' ||
+          message.data['type'] == 'call_cancel') {
+        unawaited(SystemCallService.instance.foregroundPush(message.data));
+        return;
+      }
+      print(
+        '📩 FCM сообщение получено '
+        'при открытом приложении',
+      );
+
+      print(
+        'FCM data: '
+        '${message.data}',
+      );
+
+      final notification = message.notification;
+
+      if (notification != null) {
         print(
-          '📩 FCM сообщение получено '
-          'при открытом приложении',
+          'FCM title: '
+          '${notification.title}',
         );
 
         print(
-          'FCM data: '
-          '${message.data}',
+          'FCM body: '
+          '${notification.body}',
         );
+      }
 
-        final notification =
-            message.notification;
+      final type = message.data['type']?.toString().trim() ?? 'message';
 
-        if (notification != null) {
-          print(
-            'FCM title: '
-            '${notification.title}',
-          );
-
-          print(
-            'FCM body: '
-            '${notification.body}',
-          );
-        }
-
-        final sender =
-            message.data['sender']
-                    ?.toString()
-                    .trim() ??
-                '';
-
-        if (sender.isEmpty) {
-          return;
-        }
-
-        final type =
-            message.data['type']
-                    ?.toString()
-                    .trim() ??
-                'message';
-
-        if (type == 'reaction') {
+      if (type == 'group_call_started') {
+        final groupId = message.data['groupId']?.toString().trim() ?? '';
+        final startedBy = message.data['startedBy']?.toString().trim() ?? '';
+        if (groupId.isNotEmpty && startedBy.isNotEmpty) {
           unawaited(
-            NotificationService.instance
-                .showReactionNotification(
-              from: sender,
+            NotificationService.instance.showGroupMessageNotification(
+              groupId: groupId,
+              from: startedBy,
+              message: notification?.body?.trim().isNotEmpty == true
+                  ? notification!.body!.trim()
+                  : '$startedBy начал(а) групповой видеозвонок',
             ),
           );
-
-          return;
         }
+        return;
+      }
 
-        final messageType =
-            message.data['messageType']
-                    ?.toString()
-                    .trim() ??
-                'text';
+      final sender = message.data['sender']?.toString().trim() ?? '';
 
-        final voiceDurationMs =
-            int.tryParse(
-          message.data['voiceDurationMs']
-                  ?.toString() ??
-              '',
-        );
+      if (sender.isEmpty) {
+        return;
+      }
 
-        final fileName =
-            message.data['fileName']
-                    ?.toString()
-                    .trim();
-
-        final body =
-            notification?.body?.trim().isNotEmpty == true
-                ? notification!.body!.trim()
-                : message.data['preview']
-                        ?.toString()
-                        .trim() ??
-                    'Новое сообщение';
-
+      if (type == 'reaction') {
         unawaited(
-          NotificationService.instance
-              .showMessageNotification(
-            from: sender,
-            message: body,
-            messageType: messageType,
-            voiceDurationMs: voiceDurationMs,
-            fileName: fileName,
-          ),
+          NotificationService.instance.showReactionNotification(from: sender),
         );
-      },
-    );
+
+        return;
+      }
+
+      final messageType =
+          message.data['messageType']?.toString().trim() ?? 'text';
+
+      final voiceDurationMs = int.tryParse(
+        message.data['voiceDurationMs']?.toString() ?? '',
+      );
+
+      final fileName = message.data['fileName']?.toString().trim();
+
+      final body = notification?.body?.trim().isNotEmpty == true
+          ? notification!.body!.trim()
+          : message.data['preview']?.toString().trim() ?? 'Новое сообщение';
+
+      unawaited(
+        NotificationService.instance.showMessageNotification(
+          from: sender,
+          message: body,
+          messageType: messageType,
+          voiceDurationMs: voiceDurationMs,
+          fileName: fileName,
+        ),
+      );
+    });
   }
 }

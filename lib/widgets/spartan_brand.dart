@@ -13,12 +13,12 @@ class SpartanBrand extends StatelessWidget {
         'assets/images/spartan_brand.png',
         width: 36,
         height: 36,
-        semanticLabel: 'SPARTAN',
+        semanticLabel: 'FENYVO',
       ),
       if (!compact) ...[
         const SizedBox(width: 10),
         const Text(
-          'SPARTAN',
+          'FENYVO',
           style: TextStyle(
             color: SpartanPalette.gold,
             fontSize: 17,

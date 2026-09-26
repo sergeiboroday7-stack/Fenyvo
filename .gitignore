@@ -76,8 +76,12 @@ service-account*.json
 
 # Local build environment and diagnostic output
 /.android_user_home/
+/.android_sdk/
+/.android_sdk_build/
 /.build_tools/
 /.gradle_call_build/
+/.gradle_safety_build/
+/.gradle_probe/
 /.ndk_local_*/
 /test/failures/
 *.bak
@@ -85,5 +89,8 @@ service-account*.json
 **/*BEFORE*
 
 # Machine-specific launchers: kept locally, never used from a source clone
-/START_SPARTAN_SERVER.ps1
+/START_FENYVO_SERVER.ps1
 /SET_OPENAI_API_KEY.ps1
+
+android/keystore/fenyvo-release.jks
+windows_audio_diag.txt

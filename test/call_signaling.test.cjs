@@ -95,6 +95,27 @@ test('invalid recipients and oversized/malformed SDP rejected', () => {
 test('ordinary chat traffic not intercepted', () => {
   const f = fixture(); assert.equal(f.send('Alice', 'message', {}), false);
 });
+test('encrypted call signaling is relayed without plaintext SDP or ICE', () => {
+  const f = fixture();
+  const encrypted = { e2ee: true, e2eeVersion: 2, e2eeProtocol: 'signal',
+    cipherType: 3, ciphertext: 'opaque-ciphertext' };
+  f.send('Alice', 'call_offer', {
+    to: 'Bob', callId: 'secure', video: true, e2eeCall: encrypted
+  });
+  assert.deepEqual(f.sent[0].data.e2eeCall, encrypted);
+  assert.equal(f.sent[0].data.sdp, undefined);
+  f.send('Alice', 'call_ice_candidate', {
+    to: 'Bob', callId: 'secure', e2eeCall: encrypted
+  });
+  assert.deepEqual(f.sent.at(-1).data.e2eeCall, encrypted);
+  assert.equal(f.sent.at(-1).data.candidate, undefined);
+  f.send('Bob', 'call_answer', {
+    to: 'Alice', callId: 'secure', e2eeCall: encrypted
+  });
+  assert.deepEqual(f.sent.at(-1).data.e2eeCall, encrypted);
+  assert.equal(f.sent.at(-1).data.sdp, undefined);
+  f.api.dispose();
+});
 test('callee suspension keeps ringing; caller disconnect cancels', () => {
   const f = fixture(); f.offer(); const count = f.timers.length;
   f.onlineUsers.delete('Bob'); f.api.disconnected('Bob'); assert.equal(f.timers.length, count);

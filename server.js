@@ -136,6 +136,10 @@ const TRUST_DECISIONS_FILE = path.join(
   DATA_DIR,
   'trust_decisions.json',
 );
+const COMMUNICATION_REQUESTS_FILE = path.join(
+  __dirname,
+  'communication_requests.json',
+);
 
 // Public Signal pre-key bundles only. Private keys never leave devices.
 const E2EE_BUNDLES_FILE = path.join(
@@ -238,6 +242,12 @@ const trustDecisions =
   loadJsonObjectFile(
     TRUST_DECISIONS_FILE,
     'решений доверия',
+  );
+
+const communicationRequests =
+  loadJsonObjectFile(
+    COMMUNICATION_REQUESTS_FILE,
+    'запросов связи',
   );
 
 const e2eeBundles =
@@ -2197,6 +2207,18 @@ const { createGroupCallSignaling } = require('./group_call_signaling');
 const groupCallSignaling = createGroupCallSignaling({
   send, onlineUsers, getGroup: getGroupById, getMembers: getGroupMembers,
   isPrivateBusy: username => callSignaling.isBusy(username),
+  notifyStarted: async (username, room) => sendFcmPush({
+    username,
+    title: room.name || 'Групповой звонок',
+    body: `${room.startedBy} начал(а) групповой видеозвонок`,
+    data: {
+      type: 'group_call_started',
+      groupId: room.groupId,
+      callId: room.id,
+      sender: room.startedBy,
+      startedBy: room.startedBy,
+    },
+  }),
 });
 
 const { createPulseSignaling } = require('./pulse_signaling');
@@ -4379,7 +4401,7 @@ function scheduleChatGptAutoReply({
 console.log('');
 
 console.log(
-  '⚔️ SPARTAN CHAT SERVER',
+  '⚔️ FENYVO SERVER',
 );
 
 console.log('');
@@ -4432,7 +4454,7 @@ wss.on(
       'connected',
       {
         message:
-          'Connected to Spartan Chat server',
+          'Connected to Fenyvo server',
       },
     );
 
@@ -4454,6 +4476,196 @@ wss.on(
           const data =
             msg.data ||
             {};
+
+          // ====================================
+          // COMMUNICATION REQUESTS
+          // ====================================
+
+          if (type === 'communication_request') {
+            if (!currentUser) {
+              send(ws, 'communication_request_status', {
+                sent: false,
+                reason: 'Требуется вход',
+              });
+              return;
+            }
+
+            const to = data.to?.toString().trim() || '';
+            if (!to || to === currentUser || !registeredUsers[to]) {
+              send(ws, 'communication_request_status', {
+                to,
+                sent: false,
+                reason: 'Некорректный пользователь',
+              });
+              return;
+            }
+
+            const requestMessage = data.message?.toString().trim() || '';
+            if (!requestMessage || requestMessage.length > 300) {
+              send(ws, 'communication_request_status', {
+                to,
+                sent: false,
+                reason: requestMessage.length > 300
+                  ? 'Сообщение запроса слишком длинное'
+                  : 'Напишите короткое сообщение',
+              });
+              return;
+            }
+
+            const pair = [currentUser.toLowerCase(), to.toLowerCase()]
+              .sort()
+              .join('::');
+            const existing = communicationRequests[pair];
+
+            if (existing?.status === 'accepted') {
+              send(ws, 'communication_request_status', {
+                to,
+                sent: false,
+                accepted: true,
+                reason: 'Связь уже подтверждена',
+              });
+              return;
+            }
+
+            const record = {
+              from: currentUser,
+              to,
+              message: requestMessage,
+              status: 'pending',
+              updatedAt: new Date().toISOString(),
+            };
+            communicationRequests[pair] = record;
+            saveJsonObjectFile(
+              COMMUNICATION_REQUESTS_FILE,
+              communicationRequests,
+              'запросов связи',
+            );
+
+            const receiver = onlineUsers.get(to);
+            if (receiver?.readyState === WebSocket.OPEN) {
+              send(receiver, 'communication_request', record);
+            }
+
+            send(ws, 'communication_request_status', {
+              to,
+              sent: true,
+              pending: true,
+            });
+            console.log(`🤝 Запрос связи: ${currentUser} → ${to}`);
+            return;
+          }
+          // ====================================
+          if (type === 'communication_request_response') {
+            if (!currentUser) {
+              send(ws, 'communication_request_status', {
+                sent: false,
+                reason: 'Требуется вход',
+              });
+              return;
+            }
+
+            const from = data.from?.toString().trim() || '';
+            const accepted = data.accepted === true;
+
+            if (!from || from === currentUser || !registeredUsers[from]) {
+              send(ws, 'communication_request_status', {
+                sent: false,
+                reason: 'Некорректный пользователь',
+              });
+              return;
+            }
+
+            const pair = [currentUser.toLowerCase(), from.toLowerCase()]
+              .sort()
+              .join('::');
+            const existing = communicationRequests[pair];
+
+            if (
+              !existing ||
+              existing.status !== 'pending' ||
+              existing.from.toLowerCase() !== from.toLowerCase() ||
+              existing.to.toLowerCase() !== currentUser.toLowerCase()
+            ) {
+              send(ws, 'communication_request_status', {
+                to: from,
+                sent: false,
+                reason: 'Активный запрос связи не найден',
+              });
+              return;
+            }
+
+            const record = {
+              ...existing,
+              status: accepted ? 'accepted' : 'declined',
+              respondedAt: new Date().toISOString(),
+              updatedAt: new Date().toISOString(),
+            };
+
+            communicationRequests[pair] = record;
+            saveJsonObjectFile(
+              COMMUNICATION_REQUESTS_FILE,
+              communicationRequests,
+              'запросов связи',
+            );
+
+            send(ws, 'communication_request_response', record);
+
+            const requester = onlineUsers.get(from);
+            if (requester?.readyState === WebSocket.OPEN) {
+              send(requester, 'communication_request_response', record);
+            }
+
+            console.log(
+              `🤝 ${currentUser} ${accepted ? 'принял' : 'отклонил'} запрос связи от ${from}`,
+            );
+            return;
+          }
+
+          // ====================================
+          if (type === 'get_communication_state') {
+            if (!currentUser) {
+              send(ws, 'communication_state', {
+                status: 'none',
+                reason: 'Требуется вход',
+              });
+              return;
+            }
+
+            const contact = data.contact?.toString().trim() || '';
+
+            if (
+              !contact ||
+              contact === currentUser ||
+              !registeredUsers[contact]
+            ) {
+              send(ws, 'communication_state', {
+                contact,
+                status: 'none',
+                reason: 'Некорректный пользователь',
+              });
+              return;
+            }
+
+            const pair = [currentUser.toLowerCase(), contact.toLowerCase()]
+              .sort()
+              .join('::');
+            const record = communicationRequests[pair];
+
+            send(ws, 'communication_state', {
+              contact,
+              status: record?.status || 'none',
+              from: record?.from || null,
+              to: record?.to || null,
+              incoming:
+                record?.status === 'pending' &&
+                record?.to?.toLowerCase() === currentUser.toLowerCase(),
+              outgoing:
+                record?.status === 'pending' &&
+                record?.from?.toLowerCase() === currentUser.toLowerCase(),
+              updatedAt: record?.updatedAt || null,
+            });
+            return;
+          }
 
           // ====================================
           // TRUST SYNC (metadata only)
@@ -4669,6 +4881,53 @@ wss.on(
             return;
           }
 
+          if (type === 'get_user_profile') {
+            if (!currentUser) {
+              send(ws, 'user_profile', { reason: 'Требуется вход' });
+              return;
+            }
+            const username = data.username?.toString().trim() || '';
+            const account = registeredUsers[username];
+            if (!account) {
+              send(ws, 'user_profile', { username, reason: 'Пользователь не найден' });
+              return;
+            }
+            send(ws, 'user_profile', {
+              username,
+              about: account.profile?.about || '',
+              region: account.profile?.region || '',
+              statusText: account.profile?.statusText || '',
+              updatedAt: account.profile?.updatedAt || null,
+            });
+            return;
+          }
+
+          if (type === 'update_user_profile') {
+            if (!currentUser || !registeredUsers[currentUser]) {
+              send(ws, 'user_profile_error', { reason: 'Требуется вход' });
+              return;
+            }
+            const about = data.about?.toString().trim() || '';
+            const region = data.region?.toString().trim() || '';
+            const statusText = data.statusText?.toString().trim() || '';
+            if (about.length > 160 || region.length > 80 || statusText.length > 80) {
+              send(ws, 'user_profile_error', { reason: 'Данные профиля слишком длинные' });
+              return;
+            }
+            registeredUsers[currentUser].profile = {
+              about,
+              region,
+              statusText,
+              updatedAt: new Date().toISOString(),
+            };
+            saveUsers(registeredUsers);
+            send(ws, 'user_profile_updated', {
+              username: currentUser,
+              ...registeredUsers[currentUser].profile,
+            });
+            return;
+          }
+
           // ====================================
           // LOGIN
           // ====================================
@@ -4829,6 +5088,33 @@ wss.on(
             return;
           }
 
+          // ====================================
+          // GET COMMUNICATION REQUESTS
+          // ====================================
+
+          if (type === 'get_communication_requests') {
+            if (!currentUser) {
+              send(ws, 'communication_requests', {
+                requests: [],
+                reason: 'Требуется вход',
+              });
+              return;
+            }
+
+            const currentLower = currentUser.toLowerCase();
+            const requests = Object.values(communicationRequests).filter(
+              (record) =>
+                record &&
+                record.status === 'pending' &&
+                typeof record.to === 'string' &&
+                record.to.toLowerCase() === currentLower,
+            );
+
+            send(ws, 'communication_requests', {
+              requests,
+            });
+            return;
+          }
           // ====================================
           // GET OFFLINE MESSAGES
           // ====================================
@@ -5945,7 +6231,21 @@ wss.on(
               : 60;
             const before = data.before?.toString().trim() || '';
             const beforeTime = before ? Date.parse(before) : NaN;
+            const callId = data.callId?.toString().trim() || '';
             let history = getGroupHistory(groupId);
+            if (callId) {
+              const activeCallUsers = groupCallSignaling.activeUsers(groupId, callId);
+              if (!activeCallUsers.includes(currentUser)) {
+                send(ws, 'group_error', {
+                  reason: 'Чат звонка доступен только присутствующим в эфире',
+                  groupId,
+                });
+                return;
+              }
+              history = history.filter(
+                (item) => item?.scope === 'group_call' && item?.callId === callId,
+              );
+            }
             if (before && Number.isFinite(beforeTime)) {
               history = history.filter((item) => {
                 const time = Date.parse(item?.time || '');
@@ -6127,6 +6427,21 @@ wss.on(
               }
             }
 
+            const callScoped = data.scope === 'group_call';
+            const messageCallId = callScoped
+              ? data.callId?.toString().trim() || ''
+              : '';
+            const activeCallUsers = callScoped
+              ? groupCallSignaling.activeUsers(groupId, messageCallId)
+              : [];
+            if (callScoped && (!messageCallId || !activeCallUsers.includes(currentUser))) {
+              send(ws, 'group_error', {
+                reason: 'Чат звонка доступен только присутствующим в эфире',
+                groupId,
+              });
+              return;
+            }
+
             const messageData = {
               id: messageId,
               groupId,
@@ -6134,6 +6449,7 @@ wss.on(
               text,
               time: new Date().toISOString(),
               messageType,
+              ...(callScoped ? { scope: 'group_call', callId: messageCallId } : {}),
               ...(acceptedMedia
                 ? {
                     mediaId: acceptedMedia.id,
@@ -6153,13 +6469,21 @@ wss.on(
             };
 
             appendGroupMessage(groupId, messageData);
-            group.lastMessage = text;
-            group.lastMessageFrom = currentUser;
-            group.lastMessageTime = messageData.time;
-            saveGroups();
-
-            sendToGroupMembers(group, 'group_message', messageData);
-            sendToGroupMembers(group, 'group_updated', { group });
+            if (callScoped) {
+              for (const member of activeCallUsers) {
+                const socket = onlineUsers.get(member);
+                if (socket?.readyState === WebSocket.OPEN) {
+                  send(socket, 'group_message', messageData);
+                }
+              }
+            } else {
+              group.lastMessage = text;
+              group.lastMessageFrom = currentUser;
+              group.lastMessageTime = messageData.time;
+              saveGroups();
+              sendToGroupMembers(group, 'group_message', messageData);
+              sendToGroupMembers(group, 'group_updated', { group });
+            }
             console.log(
               LOG_MESSAGE_CONTENT
                 ? `👥💬 ${currentUser} → ${group.name}: ${text} [${messageType}]`
