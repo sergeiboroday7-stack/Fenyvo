@@ -18,6 +18,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 
 import '../services/socket_service.dart';
 import '../services/call_service.dart';
+import '../services/call_history_service.dart';
 import '../services/pulse_service.dart';
 import '../services/spartan_shield_service.dart';
 import '../services/spartan_trust_service.dart';
@@ -725,6 +726,7 @@ class _ChatScreenState extends State<ChatScreen>
       HardwareKeyboard.instance.addHandler(_handleWindowsTypeToPrivateChat);
     }
     AppLanguageService.instance.code.addListener(_refreshLanguage);
+    CallHistoryService.changes.addListener(_refreshCallHistory);
     _draftKey =
         '${SocketService.instance.currentUser ?? ''}::${widget.targetUser}';
     _messageController.text = _drafts[_draftKey] ?? '';
@@ -814,6 +816,7 @@ class _ChatScreenState extends State<ChatScreen>
       HardwareKeyboard.instance.removeHandler(_handleWindowsTypeToPrivateChat);
     }
     AppLanguageService.instance.code.removeListener(_refreshLanguage);
+    CallHistoryService.changes.removeListener(_refreshCallHistory);
     SocketService.instance.clearActiveChatUser(widget.targetUser);
 
     if (_typingSent) {
@@ -1281,6 +1284,8 @@ class _ChatScreenState extends State<ChatScreen>
         _messages.add(message);
       }
 
+      _messages.addAll(_callHistoryMessages(currentUser));
+
       _sortMessagesChronologically();
     });
 
@@ -1305,6 +1310,33 @@ class _ChatScreenState extends State<ChatScreen>
     _messages.sort(compare);
   }
 
+  List<Map<String, dynamic>> _callHistoryMessages(String owner) {
+    return CallHistoryService.items(owner)
+        .where((item) => item['peer']?.toString() == widget.targetUser)
+        .map(
+          (item) => <String, dynamic>{
+            'id': 'local-call-${item['id']}',
+            'time': item['time'],
+            'isMe': item['incoming'] != true,
+            'from': item['incoming'] == true ? widget.targetUser : owner,
+            'messageType': 'call',
+            'localCallEntry': true,
+            'call': Map<String, dynamic>.from(item),
+          },
+        )
+        .toList();
+  }
+
+  void _refreshCallHistory() {
+    if (!mounted) return;
+    final owner = SocketService.instance.currentUser ?? '';
+    setState(() {
+      _messages.removeWhere((item) => item['localCallEntry'] == true);
+      _messages.addAll(_callHistoryMessages(owner));
+      _sortMessagesChronologically();
+    });
+  }
+
   // ========================================
   // \u0421\u041E\u0425\u0420\u0410\u041D\u0415\u041D\u0418\u0415 \u0421\u041E\u041E\u0411\u0429\u0415\u041D\u0418\u0419
   // ========================================
@@ -1316,7 +1348,11 @@ class _ChatScreenState extends State<ChatScreen>
       return;
     }
 
-    StorageService.saveMessages(currentUser, widget.targetUser, _messages);
+    StorageService.saveMessages(
+      currentUser,
+      widget.targetUser,
+      _messages.where((message) => message['localCallEntry'] != true).toList(),
+    );
   }
 
   // ========================================
@@ -9205,6 +9241,9 @@ class _ChatScreenState extends State<ChatScreen>
   // ========================================
 
   Widget _buildMessageBubble(Map<String, dynamic> message) {
+    if (message['localCallEntry'] == true) {
+      return _buildCallHistoryBubble(message);
+    }
     final isMe = message['isMe'] == true;
 
     final isAiGenerated =
@@ -9797,6 +9836,86 @@ class _ChatScreenState extends State<ChatScreen>
                   ),
                 ),
               ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCallHistoryBubble(Map<String, dynamic> message) {
+    final raw = message['call'];
+    final call = raw is Map
+        ? Map<String, dynamic>.from(raw)
+        : <String, dynamic>{};
+    final missed = call['outcome'] == 'missed';
+    final incoming = call['incoming'] == true;
+    final video = call['video'] == true;
+    final accent = missed ? Colors.redAccent : _gold;
+    return Align(
+      alignment: Alignment.center,
+      child: Padding(
+        padding: const EdgeInsets.only(top: 4, bottom: 14),
+        child: Material(
+          color: SpartanPalette.surface.withValues(alpha: 0.94),
+          borderRadius: BorderRadius.circular(18),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(18),
+            onTap: () => unawaited(
+              CallService.instance.startCall(
+                peer: widget.targetUser,
+                video: video,
+              ),
+            ),
+            child: Container(
+              constraints: const BoxConstraints(maxWidth: 340),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: accent.withValues(alpha: 0.42)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    video ? Icons.videocam_rounded : Icons.call_rounded,
+                    color: accent,
+                  ),
+                  const SizedBox(width: 11),
+                  Flexible(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          CallHistoryService.title(call),
+                          style: TextStyle(
+                            color: missed
+                                ? Colors.redAccent
+                                : SpartanPalette.ink,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          CallHistoryService.status(call),
+                          style: const TextStyle(
+                            color: SpartanPalette.secondary,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Icon(
+                    incoming
+                        ? Icons.call_received_rounded
+                        : Icons.call_made_rounded,
+                    color: accent,
+                    size: 19,
+                  ),
+                ],
+              ),
             ),
           ),
         ),

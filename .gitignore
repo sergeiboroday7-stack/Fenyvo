@@ -1,5 +1,7 @@
 # Firebase Admin вЂ” СЃРµРєСЂРµС‚РЅС‹Р№ РєР»СЋС‡ СЃРµСЂРІРµСЂР°
 firebase-service-account.json
+android/app/google-services.json
+google-services.json
 
 # Node.js
 node_modules/

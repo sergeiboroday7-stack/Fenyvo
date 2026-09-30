@@ -4,8 +4,10 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'services/socket_service.dart';
@@ -51,8 +53,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       builder: (context) => AlertDialog(
         title: Text(language.text('supportSpartan')),
         content: SizedBox(
-          width: 360,
-          height: 330,
+          width: 420,
+          height: MediaQuery.sizeOf(context).height * 0.68,
           child: _SupportPaymentCard(language: language),
         ),
         actions: [
@@ -71,16 +73,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
       context: context,
       builder: (context) => SimpleDialog(
         title: Text(language.text('language')),
-        children: AppLanguageService.languages
-            .map(
-              (item) => RadioListTile<String>(
-                value: item.code,
-                groupValue: language.code.value,
-                title: Text('${item.flag}  ${item.label}'),
-                onChanged: (value) => Navigator.pop(context, value),
-              ),
-            )
-            .toList(),
+        children: [
+          RadioGroup<String>(
+            groupValue: language.code.value,
+            onChanged: (value) {
+              if (value != null) {
+                Navigator.pop(context, value);
+              }
+            },
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: AppLanguageService.languages
+                  .map(
+                    (item) => RadioListTile<String>(
+                      value: item.code,
+                      title: Text('${item.flag}  ${item.label}'),
+                    ),
+                  )
+                  .toList(),
+            ),
+          ),
+        ],
       ),
     );
     if (selected != null) {
@@ -1141,56 +1154,304 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 }
 
-class _SupportPaymentCard extends StatelessWidget {
+class _CryptoNetwork {
+  const _CryptoNetwork({
+    required this.name,
+    required this.address,
+    required this.explorerBaseUrl,
+    required this.color,
+    required this.icon,
+  });
+
+  final String name;
+  final String address;
+  final String explorerBaseUrl;
+  final Color color;
+  final IconData icon;
+
+  Uri get explorerUri => Uri.parse('$explorerBaseUrl$address');
+}
+
+class _SupportPaymentCard extends StatefulWidget {
   const _SupportPaymentCard({required this.language});
 
   final AppLanguageService language;
-  static final Uri _monobankUri = Uri.parse(
-    'https://send.monobank.ua/jar/Aejkjg4K1k',
-  );
+
+  @override
+  State<_SupportPaymentCard> createState() => _SupportPaymentCardState();
+}
+
+class _SupportPaymentCardState extends State<_SupportPaymentCard> {
+  static const _evmAddress = '0x8d9BC28A0AD9CfE9D64C468080f23D1433124366';
+
+  static const List<_CryptoNetwork> _networks = [
+    _CryptoNetwork(
+      name: 'Ethereum',
+      address: _evmAddress,
+      explorerBaseUrl: 'https://etherscan.io/address/',
+      color: Color(0xFF627EEA),
+      icon: Icons.diamond_outlined,
+    ),
+    _CryptoNetwork(
+      name: 'Bitcoin',
+      address: 'bc1qy3t7a0fgy807vxzwhl6u6kvtj3pvgy2m2cn07y',
+      explorerBaseUrl: 'https://mempool.space/address/',
+      color: Color(0xFFF7931A),
+      icon: Icons.currency_bitcoin_rounded,
+    ),
+    _CryptoNetwork(
+      name: 'Solana',
+      address: '3ziAr67waBVgBrPyQ1zefMWobJhKUGsY9zBE8DUJDYVS',
+      explorerBaseUrl: 'https://solscan.io/account/',
+      color: Color(0xFF111111),
+      icon: Icons.blur_on_rounded,
+    ),
+    _CryptoNetwork(
+      name: 'Tron',
+      address: 'TRJEfFX5yN1rYsiLXxb8eWChTsG2TK2f9p',
+      explorerBaseUrl: 'https://tronscan.org/#/address/',
+      color: Color(0xFFEF0027),
+      icon: Icons.change_history_rounded,
+    ),
+    _CryptoNetwork(
+      name: 'Linea',
+      address: _evmAddress,
+      explorerBaseUrl: 'https://lineascan.build/address/',
+      color: Color(0xFF55DDE0),
+      icon: Icons.crop_square_rounded,
+    ),
+    _CryptoNetwork(
+      name: 'Arbitrum',
+      address: _evmAddress,
+      explorerBaseUrl: 'https://arbiscan.io/address/',
+      color: Color(0xFF213147),
+      icon: Icons.layers_rounded,
+    ),
+    _CryptoNetwork(
+      name: 'Arc',
+      address: _evmAddress,
+      explorerBaseUrl: 'https://explorer.arc.io/address/',
+      color: Color(0xFF10283B),
+      icon: Icons.route_rounded,
+    ),
+    _CryptoNetwork(
+      name: 'BNB Chain',
+      address: _evmAddress,
+      explorerBaseUrl: 'https://bscscan.com/address/',
+      color: Color(0xFFF3BA2F),
+      icon: Icons.token_rounded,
+    ),
+    _CryptoNetwork(
+      name: 'Base',
+      address: _evmAddress,
+      explorerBaseUrl: 'https://basescan.org/address/',
+      color: Color(0xFF0052FF),
+      icon: Icons.horizontal_rule_rounded,
+    ),
+    _CryptoNetwork(
+      name: 'Monad',
+      address: _evmAddress,
+      explorerBaseUrl: 'https://monadscan.com/address/',
+      color: Color(0xFF836EF9),
+      icon: Icons.hexagon_outlined,
+    ),
+    _CryptoNetwork(
+      name: 'Polygon',
+      address: _evmAddress,
+      explorerBaseUrl: 'https://polygonscan.com/address/',
+      color: Color(0xFF8247E5),
+      icon: Icons.hub_rounded,
+    ),
+    _CryptoNetwork(
+      name: 'Optimism',
+      address: _evmAddress,
+      explorerBaseUrl: 'https://optimistic.etherscan.io/address/',
+      color: Color(0xFFFF0420),
+      icon: Icons.circle_outlined,
+    ),
+  ];
+
+  String _shortAddress(String value) {
+    if (value.length <= 18) return value;
+    return '${value.substring(0, 9)}...${value.substring(value.length - 6)}';
+  }
+
+  Future<void> _copyAddress(
+    BuildContext context,
+    _CryptoNetwork network,
+  ) async {
+    await Clipboard.setData(ClipboardData(text: network.address));
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(widget.language.text('addressCopied'))),
+    );
+  }
+
+  Future<void> _showQr(BuildContext context, _CryptoNetwork network) async {
+    String t(String key) => widget.language.text(key);
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(24, 4, 24, 28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Account 1 / ${network.name}',
+                style: Theme.of(sheetContext).textTheme.titleLarge
+                    ?.copyWith(fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 20),
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: QrImageView(
+                  data: network.address,
+                  size: 250,
+                  backgroundColor: Colors.white,
+                  eyeStyle: const QrEyeStyle(
+                    eyeShape: QrEyeShape.square,
+                    color: Colors.black,
+                  ),
+                  dataModuleStyle: const QrDataModuleStyle(
+                    dataModuleShape: QrDataModuleShape.square,
+                    color: Colors.black,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 18),
+              Text(
+                '${t('cryptoAddress')} · ${network.name}',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 10),
+              SelectableText(
+                network.address,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 15, height: 1.35),
+              ),
+              const SizedBox(height: 14),
+              FilledButton.icon(
+                style: FilledButton.styleFrom(
+                  backgroundColor: SpartanPalette.gold,
+                  foregroundColor: const Color(0xFF091B2D),
+                  minimumSize: const Size.fromHeight(48),
+                ),
+                onPressed: () => _copyAddress(sheetContext, network),
+                icon: const Icon(Icons.copy_rounded),
+                label: Text(t('copyAddress')),
+              ),
+              const SizedBox(height: 8),
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  minimumSize: const Size.fromHeight(48),
+                ),
+                onPressed: () async {
+                  await launchUrl(
+                    network.explorerUri,
+                    mode: LaunchMode.externalApplication,
+                  );
+                },
+                icon: const Icon(Icons.open_in_new_rounded),
+                label: Text(t('openExplorer')),
+              ),
+              const SizedBox(height: 14),
+              Text(
+                t('cryptoWarning'),
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: Colors.orange,
+                  fontSize: 12,
+                  height: 1.35,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    String t(String key) => language.text(key);
+    String t(String key) => widget.language.text(key);
 
     return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
       children: [
-        Container(
-          width: 92,
-          height: 92,
-          padding: const EdgeInsets.all(12),
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: const Color(0xFF091B2D),
-            border: Border.all(color: SpartanPalette.gold, width: 2),
-          ),
-          child: Image.asset('assets/images/spartan_brand.png'),
-        ),
-        const SizedBox(height: 22),
         Text(
-          t('monobankInstruction'),
+          t('cryptoInstruction'),
           textAlign: TextAlign.center,
-          style: const TextStyle(fontSize: 16),
+          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
         ),
-        const SizedBox(height: 18),
-        SelectableText(
-          _monobankUri.toString(),
-          textAlign: TextAlign.center,
-          style: const TextStyle(color: SpartanPalette.secondary, fontSize: 12),
-        ),
-        const SizedBox(height: 22),
-        FilledButton.icon(
-          style: FilledButton.styleFrom(
-            backgroundColor: SpartanPalette.gold,
-            foregroundColor: const Color(0xFF091B2D),
-            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 14),
+        const SizedBox(height: 8),
+        Expanded(
+          child: ListView.separated(
+            itemCount: _networks.length,
+            separatorBuilder: (_, __) => const Divider(height: 1),
+            itemBuilder: (context, index) {
+              final network = _networks[index];
+              return ListTile(
+                contentPadding: const EdgeInsets.symmetric(
+                  horizontal: 2,
+                  vertical: 5,
+                ),
+                onTap: () => _showQr(context, network),
+                leading: Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: network.color,
+                    borderRadius: BorderRadius.circular(13),
+                  ),
+                  child: Icon(network.icon, color: Colors.white, size: 27),
+                ),
+                title: Text(
+                  network.name,
+                  style: const TextStyle(fontWeight: FontWeight.w600),
+                ),
+                subtitle: Text(
+                  _shortAddress(network.address),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      tooltip: t('copyAddress'),
+                      onPressed: () => _copyAddress(context, network),
+                      icon: const Icon(Icons.copy_rounded),
+                    ),
+                    IconButton(
+                      tooltip: 'QR · ${network.name}',
+                      onPressed: () => _showQr(context, network),
+                      icon: const Icon(Icons.qr_code_rounded),
+                    ),
+                  ],
+                ),
+              );
+            },
           ),
-          onPressed: () async {
-            await launchUrl(_monobankUri, mode: LaunchMode.externalApplication);
-          },
-          icon: const Icon(Icons.account_balance_rounded),
-          label: Text(t('openMonobank')),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          t('cryptoWarning'),
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            color: Colors.orange,
+            fontSize: 11,
+            height: 1.3,
+          ),
         ),
       ],
     );

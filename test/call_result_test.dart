@@ -42,5 +42,13 @@ void main() {
       '01:05',
     );
     expect(CallHistoryService.status({}), 'Без соединения');
+    expect(
+      CallHistoryService.title({'incoming': false, 'video': false}),
+      'Исходящий аудиозвонок',
+    );
+    expect(
+      CallHistoryService.title({'incoming': true, 'video': true}),
+      'Входящий видеозвонок',
+    );
   });
 }

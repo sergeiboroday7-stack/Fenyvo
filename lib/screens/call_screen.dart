@@ -285,6 +285,39 @@ class _CallScreenState extends State<CallScreen> {
               fontWeight: FontWeight.w600,
             ),
           ),
+          if (service.connectionQualityText.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Container(
+              key: const ValueKey('call-connection-quality'),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.orange.withValues(alpha: 0.16),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: Colors.orangeAccent.withValues(alpha: 0.72),
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(
+                    Icons.signal_cellular_connected_no_internet_0_bar_rounded,
+                    color: Colors.orangeAccent,
+                    size: 16,
+                  ),
+                  const SizedBox(width: 6),
+                  Text(
+                    service.connectionQualityText,
+                    style: const TextStyle(
+                      color: Colors.orangeAccent,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
           const SizedBox(height: 6),
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
@@ -297,13 +330,20 @@ class _CallScreenState extends State<CallScreen> {
                 size: 16,
               ),
               const SizedBox(width: 5),
-              Text(
-                service.callE2ee
-                    ? 'Защищённый звонок'
-                    : 'Защита E2EE не подтверждена',
-                style: TextStyle(
-                  color: service.callE2ee ? Colors.greenAccent : Colors.orange,
-                  fontSize: 12,
+              Flexible(
+                child: Text(
+                  service.callE2ee
+                      ? 'Защищённый звонок'
+                      : 'Защита E2EE не подтверждена',
+                  textAlign: TextAlign.center,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: service.callE2ee
+                        ? Colors.greenAccent
+                        : Colors.orange,
+                    fontSize: 12,
+                  ),
                 ),
               ),
             ],

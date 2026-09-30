@@ -53,7 +53,9 @@ class GroupCallScreen extends StatefulWidget {
 class _GroupCallScreenState extends State<GroupCallScreen> {
   final TextEditingController _chatController = TextEditingController();
   final ImagePicker _imagePicker = ImagePicker();
-  final AudioRecorder _audioRecorder = AudioRecorder();
+  AudioRecorder? _audioRecorder;
+
+  AudioRecorder get _recorder => _audioRecorder ??= AudioRecorder();
   bool _recordingVoice = false;
   DateTime? _voiceStartedAt;
   bool? _callMicWasEnabledBeforeVoice;
@@ -632,7 +634,7 @@ class _GroupCallScreenState extends State<GroupCallScreen> {
     if (_recordingVoice) return;
 
     try {
-      if (!await _audioRecorder.hasPermission()) {
+      if (!await _recorder.hasPermission()) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
             const SnackBar(content: Text('Нет разрешения на микрофон')),
@@ -653,7 +655,7 @@ class _GroupCallScreenState extends State<GroupCallScreen> {
         final path =
             '${temp.path}${Platform.pathSeparator}spartan_group_call_voice_${DateTime.now().microsecondsSinceEpoch}.m4a';
 
-        await _audioRecorder.start(
+        await _recorder.start(
           const RecordConfig(
             encoder: AudioEncoder.aacLc,
             bitRate: 96000,
@@ -692,7 +694,7 @@ class _GroupCallScreenState extends State<GroupCallScreen> {
     String? path;
 
     try {
-      path = await _audioRecorder.stop();
+      path = await _recorder.stop();
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1330,6 +1332,19 @@ class _GroupCallScreenState extends State<GroupCallScreen> {
     return true;
   }
 
+  Future<void> _setWakelock(bool enabled) async {
+    try {
+      if (enabled) {
+        await WakelockPlus.enable();
+      } else {
+        await WakelockPlus.disable();
+      }
+    } catch (_) {
+      // Wakelock is optional; the call must continue if the platform
+      // implementation is unavailable.
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -1343,7 +1358,7 @@ class _GroupCallScreenState extends State<GroupCallScreen> {
     SocketService.instance.addMessageHandler(_handleCommunicationMessage);
     SocketService.instance.addMessageHandler(_handleProfileMessage);
     SocketService.instance.addMessageHandler(_handleJoinRequestMessage);
-    unawaited(WakelockPlus.enable());
+    unawaited(_setWakelock(true));
   }
 
   @override
@@ -1368,8 +1383,11 @@ class _GroupCallScreenState extends State<GroupCallScreen> {
     _profileNotifier.dispose();
     _chatController.dispose();
     _chatFocusNode.dispose();
-    unawaited(_audioRecorder.dispose());
-    unawaited(WakelockPlus.disable());
+    final recorder = _audioRecorder;
+    if (recorder != null) {
+      unawaited(recorder.dispose());
+    }
+    unawaited(_setWakelock(false));
     super.dispose();
   }
 
@@ -2888,72 +2906,74 @@ class _TopAndBottomChrome extends StatelessWidget {
       context: context,
       showDragHandle: true,
       builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const ListTile(
-              title: Text(
-                'Действия звонка',
-                style: TextStyle(fontWeight: FontWeight.w700),
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const ListTile(
+                title: Text(
+                  'Действия звонка',
+                  style: TextStyle(fontWeight: FontWeight.w700),
+                ),
               ),
-            ),
-            ListTile(
-              leading: Icon(
-                call.microphoneEnabled
-                    ? Icons.mic_rounded
-                    : Icons.mic_off_rounded,
-              ),
-              title: Text(
-                call.microphoneEnabled
-                    ? 'Выключить микрофон'
-                    : 'Включить микрофон',
-              ),
-              onTap: () {
-                Navigator.pop(context);
-                call.toggleMicrophone();
-              },
-            ),
-            ListTile(
-              leading: Icon(
-                call.videoEnabled
-                    ? Icons.videocam_rounded
-                    : Icons.videocam_off_rounded,
-              ),
-              title: Text(
-                call.videoEnabled ? 'Выключить камеру' : 'Включить камеру',
-              ),
-              onTap: () {
-                Navigator.pop(context);
-                call.toggleVideo();
-              },
-            ),
-            if ((Platform.isAndroid || Platform.isIOS) && call.videoEnabled)
               ListTile(
-                leading: const Icon(Icons.cameraswitch_rounded),
-                title: const Text('Переключить камеру'),
+                leading: Icon(
+                  call.microphoneEnabled
+                      ? Icons.mic_rounded
+                      : Icons.mic_off_rounded,
+                ),
+                title: Text(
+                  call.microphoneEnabled
+                      ? 'Выключить микрофон'
+                      : 'Включить микрофон',
+                ),
                 onTap: () {
                   Navigator.pop(context);
-                  unawaited(call.switchCamera());
+                  call.toggleMicrophone();
                 },
               ),
-            ListTile(
-              leading: const Icon(Icons.grid_view_rounded),
-              title: const Text('Раскладка участников'),
-              onTap: () {
-                Navigator.pop(context);
-                _showLayoutSheet(context);
-              },
-            ),
-            ListTile(
-              leading: const Icon(Icons.call_end_rounded),
-              title: const Text('Выйти из звонка'),
-              onTap: () async {
-                Navigator.pop(context);
-                await onLeave();
-              },
-            ),
-            const SizedBox(height: 8),
-          ],
+              ListTile(
+                leading: Icon(
+                  call.videoEnabled
+                      ? Icons.videocam_rounded
+                      : Icons.videocam_off_rounded,
+                ),
+                title: Text(
+                  call.videoEnabled ? 'Выключить камеру' : 'Включить камеру',
+                ),
+                onTap: () {
+                  Navigator.pop(context);
+                  call.toggleVideo();
+                },
+              ),
+              if ((Platform.isAndroid || Platform.isIOS) && call.videoEnabled)
+                ListTile(
+                  leading: const Icon(Icons.cameraswitch_rounded),
+                  title: const Text('Переключить камеру'),
+                  onTap: () {
+                    Navigator.pop(context);
+                    unawaited(call.switchCamera());
+                  },
+                ),
+              ListTile(
+                leading: const Icon(Icons.grid_view_rounded),
+                title: const Text('Раскладка участников'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _showLayoutSheet(context);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.call_end_rounded),
+                title: const Text('Выйти из звонка'),
+                onTap: () async {
+                  Navigator.pop(context);
+                  await onLeave();
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
         ),
       ),
     );

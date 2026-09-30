@@ -65,15 +65,12 @@ class SystemCallService {
   static Future<void> configure(String url, String user, int mediaPort) async {
     if (!Platform.isAndroid) return;
     final uri = Uri.parse(url);
-    final endpoint = uri
-        .replace(
-          scheme: uri.scheme == 'wss' ? 'https' : 'http',
-          port: mediaPort,
-          path: '',
-          query: '',
-          fragment: '',
-        )
-        .toString();
+    final isSecure = uri.scheme.toLowerCase() == 'wss';
+    final endpoint = Uri(
+      scheme: isSecure ? 'https' : 'http',
+      host: uri.host,
+      port: isSecure ? null : mediaPort,
+    ).toString();
     await _preferences.setString('call_server', endpoint);
     await _preferences.setString('call_user', user);
   }
@@ -120,7 +117,9 @@ class SystemCallService {
         final call = unanswered.first;
         await showMissedCall(
           id: id,
-          from: call.nameCaller ?? 'Собеседник',
+          from:
+              call.nameCaller ??
+              '\u0421\u043e\u0431\u0435\u0441\u0435\u0434\u043d\u0438\u043a',
           video: call.type == 1,
         );
       }
@@ -143,16 +142,18 @@ class SystemCallService {
             nameCaller: from,
             appName: 'FENYVO',
             type: video ? 1 : 0,
-            handle: video ? 'Пропущенный видеозвонок' : 'Пропущенный звонок',
+            handle: video
+                ? '\u041f\u0440\u043e\u043f\u0443\u0449\u0435\u043d\u043d\u044b\u0439 \u0432\u0438\u0434\u0435\u043e\u0437\u0432\u043e\u043d\u043e\u043a'
+                : '\u041f\u0440\u043e\u043f\u0443\u0449\u0435\u043d\u043d\u044b\u0439 \u0437\u0432\u043e\u043d\u043e\u043a',
             missedCallNotification: NotificationParams(
               showNotification: true,
               isShowCallback: false,
               subtitle: video
-                  ? 'Пропущенный видеозвонок'
-                  : 'Пропущенный звонок',
+                  ? '\u041f\u0440\u043e\u043f\u0443\u0449\u0435\u043d\u043d\u044b\u0439 \u0432\u0438\u0434\u0435\u043e\u0437\u0432\u043e\u043d\u043e\u043a'
+                  : '\u041f\u0440\u043e\u043f\u0443\u0449\u0435\u043d\u043d\u044b\u0439 \u0437\u0432\u043e\u043d\u043e\u043a',
             ),
             android: const AndroidParams(
-              missedCallNotificationChannelName: 'Пропущенные звонки',
+              missedCallNotificationChannelName: 'Р СџРЎР‚Р С•Р С—РЎС“РЎвЂ°Р ВµР Р…Р Р…РЎвЂ№Р Вµ Р В·Р Р†Р С•Р Р…Р С”Р С‘',
             ),
           ),
         );
@@ -220,8 +221,8 @@ class SystemCallService {
         nameCaller: data['sender'].toString(),
         appName: 'FENYVO',
         handle: data['video'].toString() == 'true'
-            ? 'Видеозвонок'
-            : 'Аудиозвонок',
+            ? '\u0412\u0438\u0434\u0435\u043e\u0437\u0432\u043e\u043d\u043e\u043a'
+            : '\u0410\u0443\u0434\u0438\u043e\u0437\u0432\u043e\u043d\u043e\u043a',
         avatar: avatar,
         type: data['video'].toString() == 'true' ? 1 : 0,
         duration: remaining,
@@ -234,13 +235,13 @@ class SystemCallService {
         missedCallNotification: const NotificationParams(
           showNotification: true,
           isShowCallback: false,
-          subtitle: 'Пропущенный звонок',
+          subtitle: 'Р СџРЎР‚Р С•Р С—РЎС“РЎвЂ°Р ВµР Р…Р Р…РЎвЂ№Р в„– Р В·Р Р†Р С•Р Р…Р С•Р С”',
         ),
         callingNotification: const NotificationParams(
           showNotification: true,
           isShowCallback: true,
-          callbackText: 'Завершить',
-          subtitle: 'Звонок SPARTAN',
+          callbackText: 'Р вЂ”Р В°Р Р†Р ВµРЎР‚РЎв‚¬Р С‘РЎвЂљРЎРЉ',
+          subtitle: 'Р вЂ”Р Р†Р С•Р Р…Р С•Р С” SPARTAN',
         ),
         android: AndroidParams(
           isCustomNotification: true,
@@ -251,10 +252,11 @@ class SystemCallService {
           backgroundUrl: avatar,
           actionColor: '#D4AF37',
           textColor: '#FFFFFF',
-          incomingCallNotificationChannelName: 'Звонки SPARTAN',
-          missedCallNotificationChannelName: 'Пропущенные звонки',
-          textAccept: 'Принять',
-          textDecline: 'Отклонить',
+          incomingCallNotificationChannelName:
+              'Р вЂ”Р Р†Р С•Р Р…Р С”Р С‘ SPARTAN',
+          missedCallNotificationChannelName: '\u041f\u0440\u043e\u043f\u0443\u0449\u0435\u043d\u043d\u044b\u0435 \u0437\u0432\u043e\u043d\u043a\u0438',
+          textAccept: '\u041f\u0440\u0438\u043d\u044f\u0442\u044c',
+          textDecline: '\u041e\u0442\u043a\u043b\u043e\u043d\u0438\u0442\u044c',
           isShowFullLockedScreen: true,
         ),
       ),
@@ -342,18 +344,20 @@ class SystemCallService {
       final open = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
-          title: const Text('Входящие звонки'),
+          title: const Text(
+            'Р вЂ™РЎвЂ¦Р С•Р Т‘РЎРЏРЎвЂ°Р С‘Р Вµ Р В·Р Р†Р С•Р Р…Р С”Р С‘',
+          ),
           content: const Text(
-            'Разреши FENYVO показывать звонок поверх заблокированного экрана. Без этого Android может показать только уведомление.',
+            'Р В Р В°Р В·РЎР‚Р ВµРЎв‚¬Р С‘ FENYVO Р С—Р С•Р С”Р В°Р В·РЎвЂ№Р Р†Р В°РЎвЂљРЎРЉ Р В·Р Р†Р С•Р Р…Р С•Р С” Р С—Р С•Р Р†Р ВµРЎР‚РЎвЂ¦ Р В·Р В°Р В±Р В»Р С•Р С”Р С‘РЎР‚Р С•Р Р†Р В°Р Р…Р Р…Р С•Р С–Р С• РЎРЊР С”РЎР‚Р В°Р Р…Р В°. Р вЂР ВµР В· РЎРЊРЎвЂљР С•Р С–Р С• Android Р СР С•Р В¶Р ВµРЎвЂљ Р С—Р С•Р С”Р В°Р В·Р В°РЎвЂљРЎРЉ РЎвЂљР С•Р В»РЎРЉР С”Р С• РЎС“Р Р†Р ВµР Т‘Р С•Р СР В»Р ВµР Р…Р С‘Р Вµ.',
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text('Позже'),
+              child: const Text('Р СџР С•Р В·Р В¶Р Вµ'),
             ),
             TextButton(
               onPressed: () => Navigator.pop(context, true),
-              child: const Text('Настроить'),
+              child: const Text('Р СњР В°РЎРѓРЎвЂљРЎР‚Р С•Р С‘РЎвЂљРЎРЉ'),
             ),
           ],
         ),

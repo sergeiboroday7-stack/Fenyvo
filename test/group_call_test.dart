@@ -409,7 +409,8 @@ void main() {
       final f = Fixture();
       await f.join();
       await f.service.handlePacket({'type': 'disconnected', 'data': {}});
-      expect(f.service.hasCall, false);
+      expect(f.service.hasCall, true);
+      expect(f.service.phase, GroupCallPhase.joining);
       expect(f.service.supported, false);
       expect(f.stream.track.stopped, true);
     },
@@ -435,14 +436,21 @@ void main() {
           home: GroupCallScreen(service: f.service),
         ),
       );
-      expect(
-        find.byKey(const ValueKey('group-leave')).hitTestable(),
-        findsOneWidget,
-      );
-      expect(
-        find.byKey(const ValueKey('group-mic')).hitTestable(),
-        findsOneWidget,
-      );
+      expect(find.byTooltip('Завершить звонок').hitTestable(), findsOneWidget);
+      expect(find.byTooltip('Ещё').hitTestable(), findsOneWidget);
+
+      await tester.tap(find.byTooltip('Ещё'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Выключить микрофон').hitTestable(), findsOneWidget);
+      final exitFinder = find.text('Выйти из звонка');
+      await tester.ensureVisible(exitFinder);
+      await tester.pumpAndSettle();
+      expect(exitFinder.hitTestable(), findsOneWidget);
+
+      Navigator.of(tester.element(find.text('Выключить микрофон'))).pop();
+      await tester.pumpAndSettle();
+
       expect(tester.takeException(), isNull);
       if (size.width == 320 && hasFonts)
         await expectLater(

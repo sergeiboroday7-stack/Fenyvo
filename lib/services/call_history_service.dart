@@ -9,6 +9,12 @@ import 'call_clock.dart';
 
 /// Observes calls without changing WebRTC or signaling.
 class CallHistoryService {
+  static String title(Map<String, dynamic> item) {
+    final direction = item['incoming'] == true ? 'Входящий' : 'Исходящий';
+    final kind = item['video'] == true ? 'видеозвонок' : 'аудиозвонок';
+    return '$direction $kind';
+  }
+
   static String status(Map<String, dynamic> item) {
     if (item['connected'] == true) {
       return CallClock.format(

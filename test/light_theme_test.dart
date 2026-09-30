@@ -19,6 +19,7 @@ import 'package:spartan_chat_final/screens/group_chat_screen.dart';
 import 'package:spartan_chat_final/settings_screen.dart';
 import 'package:spartan_chat_final/services/storage_service.dart';
 import 'package:spartan_chat_final/services/socket_service.dart';
+import 'package:spartan_chat_final/services/app_language_service.dart';
 import 'package:spartan_chat_final/theme/spartan_theme.dart';
 
 class _TestPaths extends PathProviderPlatform {
@@ -84,6 +85,7 @@ void main() {
       'chat_background': 'preserved-wallpaper.jpg',
       'spartan_group_pins_light-group': ['light1'],
     });
+    await AppLanguageService.instance.select('ru');
     demo.first['isPinned'] = true;
     final now = DateTime.now();
     for (var i = 0; i < demo.length; i++) {
@@ -375,11 +377,7 @@ void main() {
               'members': ['Acer', 'Sparta', 'Alla'],
             },
           ),
-          'settings' => SettingsScreen(
-            username: 'Acer',
-            onLogout: () {},
-            onDeleteAccount: () {},
-          ),
+          'settings' => SettingsScreen(username: 'Acer', onLogout: () {}),
           _ => const AuthScreen(),
         };
         await pumpScreen(
@@ -413,7 +411,7 @@ void main() {
           final controller = tester.widget<TextField>(input).controller!;
           controller.selection = const TextSelection.collapsed(offset: 6);
           final beforeSend = sent.where((e) => e['type'] == 'message').length;
-          await tester.tap(find.byTooltip('Смайлики'));
+          await tester.tap(find.byIcon(Icons.emoji_emotions_outlined).first);
           await tester.pump();
           await tester.pump(const Duration(milliseconds: 500));
           await tester.tap(find.text('😊').first);

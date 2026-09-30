@@ -6,6 +6,7 @@ import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
+import 'package:audioplayers/audioplayers.dart';
 
 import 'socket_service.dart';
 import 'incoming_call_alert_service.dart';
@@ -15,12 +16,16 @@ import 'storage_service.dart';
 import 'system_call_service.dart';
 import 'notification_service.dart';
 import 'call_result.dart';
+import 'call_connection_quality.dart';
 
 enum CallPhase { idle, incoming, outgoing, connecting, active, ended }
 
 class CallService extends ChangeNotifier {
   CallService._();
   static final CallService instance = CallService._();
+  static const MethodChannel _outgoingToneChannel = MethodChannel(
+    'spartan_chat/outgoing_call_tone',
+  );
   final RTCVideoRenderer localRenderer = RTCVideoRenderer();
   final RTCVideoRenderer remoteRenderer = RTCVideoRenderer();
   RTCPeerConnection? _peerConnection;
@@ -33,6 +38,10 @@ class CallService extends ChangeNotifier {
   Timer? _timeout;
   Timer? _disconnectTimeout;
   Timer? _clockTick;
+  Timer? _qualityTimer;
+  AudioPlayer? _ringbackPlayer;
+  String? _ringbackCallId;
+  final Map<String, ({int received, int lost})> _previousInboundStats = {};
   final CallClock clock = CallClock();
   Uint8List? avatarBytes;
   Map<String, dynamic>? _incomingData;
@@ -59,6 +68,12 @@ class CallService extends ChangeNotifier {
   bool get canSwitchSpeaker =>
       (Platform.isAndroid || Platform.isIOS) && _mediaReady;
   String statusText = '';
+  CallConnectionQuality connectionQuality = CallConnectionQuality.unknown;
+  String get connectionQualityText => switch (connectionQuality) {
+    CallConnectionQuality.poor => 'Слабое соединение',
+    CallConnectionQuality.reconnecting => 'Восстанавливаем связь…',
+    _ => '',
+  };
   bool get hasCall => phase != CallPhase.idle;
   bool get shouldShowCallScreen => hasCall && phase != CallPhase.ended;
   bool Function() externalCallBusy = () => false;
@@ -172,6 +187,7 @@ class CallService extends ChangeNotifier {
       _flushLocalCandidates(id);
       statusText = 'Ожидание ответа…';
       notifyListeners();
+      unawaited(_startRingback(id));
     } catch (error) {
       if (_isCurrent(id)) {
         _sendEnd(id);
@@ -184,7 +200,8 @@ class CallService extends ChangeNotifier {
     if (phase != CallPhase.incoming ||
         _pendingOffer == null ||
         peerUser == null ||
-        callId == null) return;
+        callId == null)
+      return;
     final offer = _pendingOffer!;
     final target = peerUser!;
     final id = callId!;
@@ -258,13 +275,15 @@ class CallService extends ChangeNotifier {
   }
 
   Future<void> hangUp() async {
+    final endingId = callId;
+    if (endingId != null) unawaited(_playCallProgressTone('ended', endingId));
     if (callId != null) _sendEnd(callId!);
     _recordFinished(
       clock.connected
           ? CallOutcome.completed
           : isIncoming
-              ? CallOutcome.declined
-              : CallOutcome.cancelled,
+          ? CallOutcome.declined
+          : CallOutcome.cancelled,
       'Звонок завершён',
     );
     await _cleanup();
@@ -363,26 +382,28 @@ class CallService extends ChangeNotifier {
     _rendererInitialization ??= _initializeRenderers();
     await _rendererInitialization;
     if (!_isCurrent(id)) return null;
-    final stream = await navigator.mediaDevices.getUserMedia({
-      'audio': {
-        'echoCancellation': true,
-        'noiseSuppression': true,
-        'autoGainControl': true,
-      },
-      'video': video
-          ? {
-              'facingMode': 'user',
-              'width': {'ideal': 1280},
-              'height': {'ideal': 720},
-              'frameRate': {'ideal': 30},
-            }
-          : false,
-    }).timeout(
-      const Duration(seconds: 20),
-      onTimeout: () => throw TimeoutException(
-        'Камера или микрофон не ответили за 20 секунд',
-      ),
-    );
+    final stream = await navigator.mediaDevices
+        .getUserMedia({
+          'audio': {
+            'echoCancellation': true,
+            'noiseSuppression': true,
+            'autoGainControl': true,
+          },
+          'video': video
+              ? {
+                  'facingMode': 'user',
+                  'width': {'ideal': 1280},
+                  'height': {'ideal': 720},
+                  'frameRate': {'ideal': 30},
+                }
+              : false,
+        })
+        .timeout(
+          const Duration(seconds: 20),
+          onTimeout: () => throw TimeoutException(
+            'Камера или микрофон не ответили за 20 секунд',
+          ),
+        );
     // A permission dialog can outlive the call. Never retain its camera/mic.
     if (!_isCurrent(id)) {
       await _disposeStream(stream);
@@ -452,10 +473,12 @@ class CallService extends ChangeNotifier {
       if (!_isCurrent(id)) return;
       switch (state) {
         case RTCPeerConnectionState.RTCPeerConnectionStateConnected:
+          unawaited(_stopRingback());
           _timeout?.cancel();
           _disconnectTimeout?.cancel();
           phase = CallPhase.active;
           statusText = 'Соединено';
+          connectionQuality = CallConnectionQuality.good;
           if (!clock.connected) {
             clock.connect();
             _clockTick = Timer.periodic(const Duration(seconds: 1), (_) {
@@ -463,12 +486,14 @@ class CallService extends ChangeNotifier {
             });
             SocketService.instance.sendCallConnected(to: peerUser!, callId: id);
             unawaited(SystemCallService.instance.connected(id));
+            _startQualityMonitoring(id);
           }
           notifyListeners();
           break;
         case RTCPeerConnectionState.RTCPeerConnectionStateDisconnected:
           phase = CallPhase.connecting;
           statusText = 'Восстановление соединения…';
+          connectionQuality = CallConnectionQuality.reconnecting;
           _disconnectTimeout?.cancel();
           _disconnectTimeout = Timer(const Duration(seconds: 15), () {
             if (_isCurrent(id)) {
@@ -511,8 +536,9 @@ class CallService extends ChangeNotifier {
       debugPrint('Remote Android track arrived without a MediaStream');
       return;
     }
-    MediaStream? stream =
-        event.streams.isNotEmpty ? event.streams.first : _fallbackRemoteStream;
+    MediaStream? stream = event.streams.isNotEmpty
+        ? event.streams.first
+        : _fallbackRemoteStream;
     if (stream == null) {
       try {
         stream = await createLocalMediaStream('spartan_remote_$id');
@@ -591,15 +617,29 @@ class CallService extends ChangeNotifier {
         unawaited(_handleIceCandidate(data));
         break;
       case 'call_reject':
+        if (_matchesCurrentCall(data)) {
+          unawaited(
+            _playCallProgressTone(
+              data['reason'] == 'busy' ? 'busy' : 'ended',
+              data['callId']?.toString(),
+            ),
+          );
+        }
         _handleRemoteEnd(
           data,
           data['reason'] == 'busy' ? 'Пользователь занят' : 'Вызов отклонён',
         );
         break;
       case 'call_unavailable':
+        if (_matchesCurrentCall(data)) {
+          unawaited(_playCallProgressTone('ended', data['callId']?.toString()));
+        }
         _handleRemoteEnd(data, 'Пользователь не в сети');
         break;
       case 'call_end':
+        if (_matchesCurrentCall(data)) {
+          unawaited(_playCallProgressTone('ended', data['callId']?.toString()));
+        }
         _handleRemoteEnd(data, 'Звонок завершён');
         break;
       case 'call_error':
@@ -628,12 +668,14 @@ class CallService extends ChangeNotifier {
       return;
     }
     final rawSdp = data['sdp'];
-    final sdp =
-        rawSdp is Map ? Map<String, dynamic>.from(rawSdp) : <String, dynamic>{};
+    final sdp = rawSdp is Map
+        ? Map<String, dynamic>.from(rawSdp)
+        : <String, dynamic>{};
     if (id.isEmpty ||
         from.isEmpty ||
         sdp['type'] != 'offer' ||
-        sdp['sdp']?.toString().isNotEmpty != true) return;
+        sdp['sdp']?.toString().isNotEmpty != true)
+      return;
     if (externalCallBusy() && leaveExternalCall == null) {
       SocketService.instance.sendCallReject(
         to: from,
@@ -741,15 +783,19 @@ class CallService extends ChangeNotifier {
     if (!_matchesCurrentCall(data) ||
         isIncoming ||
         _answerApplying ||
-        _remoteDescriptionSet) return;
+        _remoteDescriptionSet)
+      return;
     final rawSdp = data['sdp'];
-    final sdp =
-        rawSdp is Map ? Map<String, dynamic>.from(rawSdp) : <String, dynamic>{};
+    final sdp = rawSdp is Map
+        ? Map<String, dynamic>.from(rawSdp)
+        : <String, dynamic>{};
     final connection = _peerConnection;
     if (connection == null ||
         sdp['type'] != 'answer' ||
-        sdp['sdp']?.toString().isNotEmpty != true) return;
+        sdp['sdp']?.toString().isNotEmpty != true)
+      return;
     final id = callId!;
+    unawaited(_stopRingback());
     _answerApplying = true;
     phase = CallPhase.connecting;
     statusText = 'Соединение…';
@@ -876,6 +922,7 @@ class CallService extends ChangeNotifier {
     );
     phase = CallPhase.ended;
     statusText = message;
+    connectionQuality = CallConnectionQuality.unknown;
     notifyListeners();
     if (result == CallOutcome.missed) {
       unawaited(
@@ -974,6 +1021,7 @@ class CallService extends ChangeNotifier {
       }
       phase = CallPhase.ended;
       _clockTick?.cancel();
+      _qualityTimer?.cancel();
       _timeout?.cancel();
       _disconnectTimeout?.cancel();
       notifyListeners();
@@ -984,6 +1032,7 @@ class CallService extends ChangeNotifier {
         );
       }
       await _cleanupStep(IncomingCallAlertService.instance.stop());
+      await _cleanupStep(_stopRingback());
       await _cleanupStep(SystemCallService.instance.end(endingCallId));
       await _cleanupStep(_releaseMedia(), timeout: const Duration(seconds: 4));
     } finally {
@@ -1005,12 +1054,131 @@ class CallService extends ChangeNotifier {
       _speakerChanging = false;
       microphoneEnabled = true;
       cameraEnabled = true;
+      connectionQuality = CallConnectionQuality.unknown;
+      _previousInboundStats.clear();
       statusText = '';
       phase = CallPhase.idle;
       _cleaning = false;
       notifyListeners();
     }
   }
+
+  Future<void> _startRingback(String id) async {
+    if (!_isCurrent(id) || isIncoming) return;
+    _ringbackCallId = id;
+    if (Platform.isAndroid) {
+      try {
+        await _outgoingToneChannel.invokeMethod<void>('start', {'callId': id});
+        if (_ringbackCallId != id || !_isCurrent(id)) {
+          await _outgoingToneChannel.invokeMethod<void>('stop', {'callId': id});
+        }
+        return;
+      } catch (error) {
+        debugPrint('Native Android ringback is unavailable: $error');
+      }
+    }
+    try {
+      final player = _ringbackPlayer ??= AudioPlayer();
+      await player.setReleaseMode(ReleaseMode.loop);
+      if (_ringbackCallId != id || !_isCurrent(id)) return;
+      await player.play(
+        AssetSource('sounds/spartan_phoenix_call.wav'),
+        volume: 0.24,
+      );
+      if (_ringbackCallId != id || !_isCurrent(id)) await player.stop();
+    } catch (error) {
+      debugPrint('Call ringback is unavailable: $error');
+    }
+  }
+
+  Future<void> _stopRingback() async {
+    final id = _ringbackCallId;
+    _ringbackCallId = null;
+    if (Platform.isAndroid && id != null) {
+      try {
+        await _outgoingToneChannel.invokeMethod<void>('stop', {'callId': id});
+      } catch (error) {
+        debugPrint('Native Android ringback could not be stopped: $error');
+      }
+    }
+    try {
+      await _ringbackPlayer?.stop();
+    } catch (error) {
+      debugPrint('Call ringback could not be stopped: $error');
+    }
+  }
+
+  Future<void> _playCallProgressTone(String tone, String? id) async {
+    if (!Platform.isAndroid || id == null || id.isEmpty) return;
+    _ringbackCallId = null;
+    try {
+      await _outgoingToneChannel.invokeMethod<void>(tone, {'callId': id});
+    } catch (error) {
+      debugPrint('Android $tone call tone is unavailable: $error');
+    }
+  }
+
+  void _startQualityMonitoring(String id) {
+    _qualityTimer?.cancel();
+    _previousInboundStats.clear();
+    _qualityTimer = Timer.periodic(const Duration(seconds: 3), (_) {
+      unawaited(_updateConnectionQuality(id));
+    });
+  }
+
+  Future<void> _updateConnectionQuality(String id) async {
+    final connection = _peerConnection;
+    if (connection == null || !_isCurrent(id) || phase != CallPhase.active) {
+      return;
+    }
+    try {
+      final reports = await connection.getStats();
+      if (!_isCurrent(id) || phase != CallPhase.active) return;
+      var receivedDelta = 0;
+      var lostDelta = 0;
+      double? rttMs;
+      double? jitterMs;
+      for (final report in reports) {
+        final values = report.values;
+        if (report.type == 'inbound-rtp' && values['isRemote'] != true) {
+          final received = _statsInt(values['packetsReceived']);
+          final lost = _statsInt(values['packetsLost']);
+          final previous = _previousInboundStats[report.id];
+          if (previous != null) {
+            receivedDelta += (received - previous.received).clamp(0, 1 << 31);
+            lostDelta += (lost - previous.lost).clamp(0, 1 << 31);
+          }
+          _previousInboundStats[report.id] = (received: received, lost: lost);
+          final jitter = _statsDouble(values['jitter']);
+          if (jitter != null) jitterMs = jitter * 1000;
+        }
+        if (report.type == 'candidate-pair' &&
+            (values['nominated'] == true || values['selected'] == true)) {
+          final rtt = _statsDouble(values['currentRoundTripTime']);
+          if (rtt != null) rttMs = rtt * 1000;
+        }
+      }
+      final totalDelta = receivedDelta + lostDelta;
+      final lossPercent = totalDelta > 0 ? lostDelta * 100 / totalDelta : null;
+      final next = evaluateCallConnectionQuality(
+        packetLossPercent: lossPercent,
+        roundTripTimeMs: rttMs,
+        jitterMs: jitterMs,
+      );
+      if (next != CallConnectionQuality.unknown && next != connectionQuality) {
+        connectionQuality = next;
+        notifyListeners();
+      }
+    } catch (error) {
+      debugPrint('Call quality stats are unavailable: $error');
+    }
+  }
+
+  int _statsInt(Object? value) =>
+      value is num ? value.toInt() : int.tryParse('$value') ?? 0;
+
+  double? _statsDouble(Object? value) =>
+      value is num ? value.toDouble() : double.tryParse('$value');
 
   String _readableError(Object error) {
     final text = error.toString().replaceFirst('Bad state: ', '').trim();

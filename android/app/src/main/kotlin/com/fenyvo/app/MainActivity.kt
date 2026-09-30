@@ -12,6 +12,8 @@ class MainActivity: FlutterActivity() {
     private var alert: IncomingCallAlertController? = null
     private var alertChannel: MethodChannel? = null
     private var callWindowChannel: MethodChannel? = null
+    private var ringbackChannel: MethodChannel? = null
+    private var ringback: OutgoingRingbackController? = null
     private var visibleCallId: String? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -60,6 +62,24 @@ class MainActivity: FlutterActivity() {
                 }
             }
         }
+        ringback = OutgoingRingbackController()
+        ringbackChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger,
+            "spartan_chat/outgoing_call_tone").also { channel ->
+            channel.setMethodCallHandler { call, result ->
+                val id = call.argument<String>("callId")
+                if (id.isNullOrBlank() || id.length > 100) {
+                    result.error("INVALID_CALL", "A valid call ID is required", null)
+                } else {
+                    when (call.method) {
+                        "start" -> { ringback?.start(id); result.success(null) }
+                        "stop" -> { ringback?.stopRingback(id); result.success(null) }
+                        "busy" -> { ringback?.busy(id); result.success(null) }
+                        "ended" -> { ringback?.ended(id); result.success(null) }
+                        else -> result.notImplemented()
+                    }
+                }
+            }
+        }
     }
 
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
@@ -69,11 +89,16 @@ class MainActivity: FlutterActivity() {
         alertChannel = null
         alert?.stop()
         alert = null
+        ringbackChannel?.setMethodCallHandler(null)
+        ringbackChannel = null
+        ringback?.stop()
+        ringback = null
         super.cleanUpFlutterEngine(flutterEngine)
     }
 
     override fun onDestroy() {
         alert?.stop()
+        ringback?.stop()
         super.onDestroy()
     }
 }

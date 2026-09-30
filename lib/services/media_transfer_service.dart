@@ -43,8 +43,13 @@ class MediaTransferService {
       return;
     }
 
-    final scheme = ws.scheme.toLowerCase() == 'wss' ? 'https' : 'http';
-    _baseUri = Uri(scheme: scheme, host: ws.host, port: mediaPort);
+    final isSecure = ws.scheme.toLowerCase() == 'wss';
+    final scheme = isSecure ? 'https' : 'http';
+    _baseUri = Uri(
+      scheme: scheme,
+      host: ws.host,
+      port: isSecure ? null : mediaPort,
+    );
     _token = token.trim();
   }
 
@@ -71,21 +76,23 @@ class MediaTransferService {
     bool encryptForE2ee = false,
   }) async {
     if (!isReady) {
-      throw StateError('Медиа-сервер не готов. Перезайдите в аккаунт.');
+      throw StateError(
+        'РњРµРґРёР°-СЃРµСЂРІРµСЂ РЅРµ РіРѕС‚РѕРІ. РџРµСЂРµР·Р°Р№РґРёС‚Рµ РІ Р°РєРєР°СѓРЅС‚.',
+      );
     }
 
     final file = File(path);
     if (!await file.exists()) {
-      throw FileSystemException('Файл не найден', path);
+      throw FileSystemException('Р¤Р°Р№Р» РЅРµ РЅР°Р№РґРµРЅ', path);
     }
 
     final size = await file.length();
     if (size <= 0) {
-      throw FileSystemException('Файл пустой', path);
+      throw FileSystemException('Р¤Р°Р№Р» РїСѓСЃС‚РѕР№', path);
     }
     if (size > maxBytes) {
       throw FileSystemException(
-        'Файл слишком большой. Максимум ${(maxBytes / (1024 * 1024)).round()} МБ',
+        'Р¤Р°Р№Р» СЃР»РёС€РєРѕРј Р±РѕР»СЊС€РѕР№. РњР°РєСЃРёРјСѓРј ${(maxBytes / (1024 * 1024)).round()} РњР‘',
         path,
       );
     }
@@ -139,7 +146,8 @@ class MediaTransferService {
       final response = await request.close();
       final body = await utf8.decoder.bind(response).join();
       if (response.statusCode < 200 || response.statusCode >= 300) {
-        String reason = 'Ошибка загрузки файла (${response.statusCode})';
+        String reason =
+            'РћС€РёР±РєР° Р·Р°РіСЂСѓР·РєРё С„Р°Р№Р»Р° (${response.statusCode})';
         try {
           final decoded = jsonDecode(body);
           if (decoded is Map && decoded['error'] != null) {
@@ -151,13 +159,17 @@ class MediaTransferService {
 
       final decoded = jsonDecode(body);
       if (decoded is! Map) {
-        throw const FormatException('Некорректный ответ медиа-сервера');
+        throw const FormatException(
+          'РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ РѕС‚РІРµС‚ РјРµРґРёР°-СЃРµСЂРІРµСЂР°',
+        );
       }
 
       final data = Map<String, dynamic>.from(decoded);
       final mediaId = data['mediaId']?.toString().trim() ?? '';
       if (mediaId.isEmpty) {
-        throw const FormatException('Медиа-сервер не вернул mediaId');
+        throw const FormatException(
+          'РњРµРґРёР°-СЃРµСЂРІРµСЂ РЅРµ РІРµСЂРЅСѓР» mediaId',
+        );
       }
 
       return SpartanMediaUpload(
@@ -186,12 +198,14 @@ class MediaTransferService {
     void Function(int receivedBytes, int? totalBytes)? onProgress,
   }) async {
     if (!isReady) {
-      throw StateError('Медиа-сервер не готов. Перезайдите в аккаунт.');
+      throw StateError(
+        'РњРµРґРёР°-СЃРµСЂРІРµСЂ РЅРµ РіРѕС‚РѕРІ. РџРµСЂРµР·Р°Р№РґРёС‚Рµ РІ Р°РєРєР°СѓРЅС‚.',
+      );
     }
 
     final uri = mediaUri(mediaId);
     if (uri == null) {
-      throw ArgumentError('Некорректный mediaId');
+      throw ArgumentError('РќРµРєРѕСЂСЂРµРєС‚РЅС‹Р№ mediaId');
     }
 
     final target = File(targetPath);
@@ -213,7 +227,7 @@ class MediaTransferService {
         final body = await utf8.decoder.bind(response).join();
         throw HttpException(
           body.trim().isEmpty
-              ? 'Ошибка скачивания (${response.statusCode})'
+              ? 'РћС€РёР±РєР° СЃРєР°С‡РёРІР°РЅРёСЏ (${response.statusCode})'
               : body,
           uri: uri,
         );
