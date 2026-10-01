@@ -17,6 +17,7 @@ import 'system_call_service.dart';
 import 'notification_service.dart';
 import 'call_result.dart';
 import 'call_connection_quality.dart';
+import 'turn_credential_service.dart';
 
 enum CallPhase { idle, incoming, outgoing, connecting, active, ended }
 
@@ -422,14 +423,7 @@ class CallService extends ChangeNotifier {
     _mediaReady = true;
     final connection = await createPeerConnection({
       'sdpSemantics': 'unified-plan',
-      'iceServers': [
-        {
-          'urls': [
-            'stun:stun.l.google.com:19302',
-            'stun:stun1.l.google.com:19302',
-          ],
-        },
-      ],
+      'iceServers': TurnCredentialService.iceServers,
     });
     if (!_isCurrent(id)) {
       await connection.close();

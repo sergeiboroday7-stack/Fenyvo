@@ -3949,8 +3949,122 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
     );
   }
 
+  static final DateTime _groupChatsOpenAt = DateTime.utc(2026, 10, 8, 9, 56);
+
+  Widget _buildGroupMaintenance() {
+    return StreamBuilder<DateTime>(
+      stream: Stream<DateTime>.periodic(
+        const Duration(seconds: 1),
+        (_) => DateTime.now().toUtc(),
+      ),
+      initialData: DateTime.now().toUtc(),
+      builder: (context, snapshot) {
+        final now = snapshot.data ?? DateTime.now().toUtc();
+        final remaining = _groupChatsOpenAt.difference(now);
+
+        if (remaining <= Duration.zero) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted) setState(() {});
+          });
+          return const SizedBox.shrink();
+        }
+
+        final days = remaining.inDays;
+        final hours = remaining.inHours.remainder(24);
+        final minutes = remaining.inMinutes.remainder(60);
+        final seconds = remaining.inSeconds.remainder(60);
+
+        String two(int value) => value.toString().padLeft(2, '0');
+
+        return Scaffold(
+          backgroundColor: SpartanPalette.canvas,
+          appBar: AppBar(
+            backgroundColor: SpartanPalette.canvas,
+            foregroundColor: SpartanPalette.ink,
+            elevation: 0,
+          ),
+          body: SafeArea(
+            child: Center(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 28,
+                  vertical: 32,
+                ),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 520),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(
+                        Icons.groups_rounded,
+                        size: 78,
+                        color: SpartanPalette.blue,
+                      ),
+                      const SizedBox(height: 24),
+                      const Text(
+                        'Групповые чаты обновляются',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: SpartanPalette.ink,
+                          fontSize: 26,
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      const Text(
+                        'Сейчас мы работаем над улучшением групповых чатов. '
+                        'Личные чаты и остальные возможности FENYVO продолжают работать.',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: SpartanPalette.secondary,
+                          fontSize: 16,
+                          height: 1.45,
+                        ),
+                      ),
+                      const SizedBox(height: 34),
+                      const Text(
+                        'До открытия',
+                        style: TextStyle(
+                          color: SpartanPalette.secondary,
+                          fontSize: 14,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        '$days дн.  ${two(hours)}:${two(minutes)}:${two(seconds)}',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: SpartanPalette.ink,
+                          fontSize: 30,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 1.2,
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      const Text(
+                        '8 октября 2026 · 12:56',
+                        style: TextStyle(
+                          color: SpartanPalette.secondary,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
+    if (DateTime.now().toUtc().isBefore(_groupChatsOpenAt)) {
+      return _buildGroupMaintenance();
+    }
+
     final members = _members();
     final creator = _group['createdBy']?.toString().trim() ?? '';
 

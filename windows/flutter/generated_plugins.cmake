@@ -3,6 +3,7 @@
 #
 
 list(APPEND FLUTTER_PLUGIN_LIST
+  app_links
   audioplayers_windows
   file_selector_windows
   firebase_core
@@ -11,6 +12,7 @@ list(APPEND FLUTTER_PLUGIN_LIST
   permission_handler_windows
   public_file_saver
   record_windows
+  share_plus
   url_launcher_windows
   video_player_win
 )

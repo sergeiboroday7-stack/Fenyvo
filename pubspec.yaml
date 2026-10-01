@@ -40,7 +40,7 @@ dependencies:
   video_player_win: ^3.2.2
   # 1.5+ applies the legacy Kotlin Gradle Plugin only when AGP built-in
   # Kotlin is disabled, allowing the project to complete that migration later.
-  flutter_webrtc: 1.6.1
+  flutter_webrtc: 1.6.2+hotfix.3
   flutter_callkit_incoming: ^3.1.5
   permission_handler: 11.3.1
   # Official Signal Protocol core (X3DH/PQXDH + Double Ratchet).
@@ -51,6 +51,8 @@ dependencies:
   # Local QR rendering for Signal safety-number verification.
   qr_flutter: ^4.1.0
   wakelock_plus: ^1.5.2
+  app_links: ^7.2.1
+  share_plus: ^12.0.2
 
 dev_dependencies:
   flutter_test:

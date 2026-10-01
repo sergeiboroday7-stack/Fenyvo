@@ -10,6 +10,7 @@ import 'call_service.dart';
 import 'group_call_state.dart';
 import 'incoming_call_alert_service.dart';
 import 'socket_service.dart';
+import 'turn_credential_service.dart';
 
 enum GroupCallPhase { idle, invited, joining, active, leaving }
 
@@ -21,44 +22,38 @@ class _GroupPeer {
   final RTCPeerConnection connection;
   final List<Map<String, dynamic>> localIce = [], remoteIce = [];
   bool localSet = false, remoteSet = false;
+  bool ready = false;
   String status = 'Подключение…';
   Timer? timeout;
 }
 
 class GroupCallService extends ChangeNotifier {
   GroupCallService._()
-      : _send = SocketService.instance.sendGroupCall,
-        _user = (() => SocketService.instance.currentUser ?? ''),
-        _authenticated = (() => SocketService.instance.isAuthenticated),
-        _privateBusy = (() => CallService.instance.hasCall),
-        _foreground = (() => AppVisibility.instance.foreground),
-        _renderLocalVideo = true,
-        _media = ((withVideo) => navigator.mediaDevices.getUserMedia({
-              'audio': {
-                'echoCancellation': true,
-                'noiseSuppression': true,
-                'autoGainControl': true,
-              },
-              'video': withVideo
-                  ? {
-                      'facingMode': 'user',
-                      'width': {'ideal': 640},
-                      'height': {'ideal': 480},
-                      'frameRate': {'ideal': 20, 'max': 24},
-                    }
-                  : false,
-            })),
-        _connection = (() => createPeerConnection({
-              'sdpSemantics': 'unified-plan',
-              'iceServers': [
-                {
-                  'urls': [
-                    'stun:stun.l.google.com:19302',
-                    'stun:stun1.l.google.com:19302',
-                  ],
-                },
-              ],
-            }));
+    : _send = SocketService.instance.sendGroupCall,
+      _user = (() => SocketService.instance.currentUser ?? ''),
+      _authenticated = (() => SocketService.instance.isAuthenticated),
+      _privateBusy = (() => CallService.instance.hasCall),
+      _foreground = (() => AppVisibility.instance.foreground),
+      _renderLocalVideo = true,
+      _media = ((withVideo) => navigator.mediaDevices.getUserMedia({
+        'audio': {
+          'echoCancellation': true,
+          'noiseSuppression': true,
+          'autoGainControl': true,
+        },
+        'video': withVideo
+            ? {
+                'facingMode': 'user',
+                'width': {'ideal': 640},
+                'height': {'ideal': 480},
+                'frameRate': {'ideal': 20, 'max': 24},
+              }
+            : false,
+      })),
+      _connection = (() => createPeerConnection({
+        'sdpSemantics': 'unified-plan',
+        'iceServers': TurnCredentialService.iceServers,
+      }));
 
   @visibleForTesting
   GroupCallService.forTesting({
@@ -66,14 +61,14 @@ class GroupCallService extends ChangeNotifier {
     required String user,
     required Future<MediaStream> Function() media,
     required Future<RTCPeerConnection> Function() connection,
-  })  : _send = send,
-        _user = (() => user),
-        _authenticated = (() => true),
-        _privateBusy = (() => false),
-        _foreground = (() => false),
-        _renderLocalVideo = false,
-        _media = ((_) => media()),
-        _connection = connection;
+  }) : _send = send,
+       _user = (() => user),
+       _authenticated = (() => true),
+       _privateBusy = (() => false),
+       _foreground = (() => false),
+       _renderLocalVideo = false,
+       _media = ((_) => media()),
+       _connection = connection;
 
   static final instance = GroupCallService._();
   final void Function(String, Map<String, dynamic>) _send;
@@ -299,8 +294,8 @@ class GroupCallService extends ChangeNotifier {
 
     try {
       await IncomingCallAlertService.instance.stop().timeout(
-            const Duration(seconds: 2),
-          );
+        const Duration(seconds: 2),
+      );
     } catch (_) {}
 
     for (final peer in peers) {
@@ -396,8 +391,8 @@ class GroupCallService extends ChangeNotifier {
     try {
       try {
         await IncomingCallAlertService.instance.stop().timeout(
-              const Duration(seconds: 2),
-            );
+          const Duration(seconds: 2),
+        );
       } catch (_) {}
       if (epoch != _epoch) return;
       if (Platform.isAndroid)
@@ -448,8 +443,7 @@ class GroupCallService extends ChangeNotifier {
     } catch (_) {
       if (epoch == _epoch)
         await leave(
-          message:
-              'Не удалось подключить микрофон. Проверьте разрешение и закройте другие звонки.',
+          message: 'Не удалось подключить микрофон. Проверьте разрешение и закройте другие звонки.',
         );
     }
   }
@@ -467,10 +461,10 @@ class GroupCallService extends ChangeNotifier {
   }
 
   Map<String, dynamic> get _lease => {
-        'groupId': groupId,
-        'callId': current?.id,
-        'sessionId': sessionId,
-      };
+    'groupId': groupId,
+    'callId': current?.id,
+    'sessionId': sessionId,
+  };
 
   void setMicrophoneEnabled(bool enabled) {
     if (_stream == null || phase != GroupCallPhase.active) return;
@@ -580,7 +574,8 @@ class GroupCallService extends ChangeNotifier {
     final member = current?.member(target);
     if (member == null ||
         !canModerate(member) ||
-        phase != GroupCallPhase.active) return;
+        phase != GroupCallPhase.active)
+      return;
     _send('group_call_moderate', {
       ..._lease,
       'target': target,
@@ -647,12 +642,12 @@ class GroupCallService extends ChangeNotifier {
 
   @visibleForTesting
   Future<void> handlePacket(Map<String, dynamic> packet) {
-    _events = _events.then((_) => _handle(packet)).catchError((Object _) {
+    _events = _events.then((_) => _handle(packet)).catchError((Object error) {
+      debugPrint('GROUP_CALL_PACKET_ERROR: $error');
       if (hasCall)
         unawaited(
           leave(
-            message:
-                'Не удалось установить групповой звонок. Попробуйте войти снова.',
+            message: 'Не удалось установить групповой звонок. Попробуйте войти снова.',
           ),
         );
     });
@@ -838,7 +833,8 @@ class GroupCallService extends ChangeNotifier {
           hasCall ||
           _privateBusy() ||
           _dismissed.contains(room.id) ||
-          room.startedBy == user) return;
+          room.startedBy == user)
+        return;
       supported = true;
       current = room;
       groupId = room.groupId;
@@ -858,7 +854,8 @@ class GroupCallService extends ChangeNotifier {
       final lease = data['sessionId']?.toString();
       if (room == null ||
           lease == null ||
-          room.member(user)?.sessionId != lease) return;
+          room.member(user)?.sessionId != lease)
+        return;
       if (phase != GroupCallPhase.joining || data['requestId'] != _requestId) {
         if (lease != sessionId)
           _send('group_call_leave', {
@@ -917,7 +914,7 @@ class GroupCallService extends ChangeNotifier {
         data['callId'] == current?.id &&
         data['toSession'] == sessionId) {
       final peer = _peers[data['from']];
-      if (peer == null) {
+      if (peer == null || !peer.ready) {
         final from = data['from']?.toString() ?? '';
         if (from.isNotEmpty && data['signal'] is Map) {
           final queue = _pendingSignals.putIfAbsent(from, () => []);
@@ -974,8 +971,8 @@ class GroupCallService extends ChangeNotifier {
     final localMakesOffer = localMember?.isViewer == true
         ? false
         : peer.member.isViewer
-            ? true
-            : GroupCallState.makesOffer(sessionId!, peer.member.sessionId);
+        ? true
+        : GroupCallState.makesOffer(sessionId!, peer.member.sessionId);
     if (peer.remoteSet || offer == localMakesOffer) {
       return;
     }
@@ -1002,7 +999,7 @@ class GroupCallService extends ChangeNotifier {
   Future<void> _applyState(GroupCallState room) async {
     final epoch = _epoch;
     if (room.member(user)?.sessionId != sessionId) {
-      await leave(message: 'Вы больше не участвуете в звонке');
+      debugPrint('GROUP_CALL_STALE_STATE_IGNORED');
       return;
     }
     current = room;
@@ -1040,8 +1037,14 @@ class GroupCallService extends ChangeNotifier {
         };
         if (peer.localSet)
           _signal(peer, {'kind': 'ice', 'candidate': candidate});
-        else if (peer.localIce.length < 256) peer.localIce.add(candidate);
+        else if (peer.localIce.length < 256)
+          peer.localIce.add(candidate);
       };
+      pc.onAddStream = (stream) {
+        if (!valid() || Platform.isAndroid) return;
+        unawaited(_attachRemoteVideo(peer.member.user, stream));
+      };
+
       pc.onTrack = (event) {
         if (!valid()) return;
 
@@ -1090,8 +1093,8 @@ class GroupCallService extends ChangeNotifier {
 
             if (event.streams.isEmpty &&
                 !remoteStream.getTracks().any(
-                      (track) => track.id == event.track.id,
-                    )) {
+                  (track) => track.id == event.track.id,
+                )) {
               try {
                 await remoteStream.addTrack(event.track);
               } catch (error) {
@@ -1140,21 +1143,37 @@ class GroupCallService extends ChangeNotifier {
           await pc.addTrack(track, stream);
         }
       }
-      final pending = _pendingSignals.remove(member.user) ?? const [];
-      for (final packet in pending) {
-        if (!valid()) return;
-        await _handlePeerSignal(peer, packet);
+      Future<void> drainPendingSignals() async {
+        while (valid()) {
+          final pending = _pendingSignals.remove(member.user);
+          if (pending == null || pending.isEmpty) return;
+
+          for (final packet in pending) {
+            if (!valid()) return;
+            await _handlePeerSignal(peer, packet);
+          }
+        }
       }
+
+      await drainPendingSignals();
+
       final shouldOffer = localMember?.isViewer == true
           ? false
           : member.isViewer
-              ? true
-              : GroupCallState.makesOffer(sessionId!, member.sessionId);
+          ? true
+          : GroupCallState.makesOffer(sessionId!, member.sessionId);
+
       if (valid() && shouldOffer) {
         final offer = await pc.createOffer();
         if (!valid()) return;
         await pc.setLocalDescription(offer);
         if (valid()) _sendDescription(peer, offer);
+      }
+
+      await drainPendingSignals();
+
+      if (valid()) {
+        peer.ready = true;
       }
     }
   }
@@ -1205,15 +1224,16 @@ class GroupCallService extends ChangeNotifier {
           for (final report in reports) {
             final values = report.values;
 
-            final kind =
-                '${values['kind'] ?? values['mediaType'] ?? ''}'.toLowerCase();
+            final kind = '${values['kind'] ?? values['mediaType'] ?? ''}'
+                .toLowerCase();
 
             if (kind != 'audio') continue;
 
             final raw = values['audioLevel'];
 
-            final level =
-                raw is num ? raw.toDouble() : double.tryParse('$raw') ?? 0.0;
+            final level = raw is num
+                ? raw.toDouble()
+                : double.tryParse('$raw') ?? 0.0;
 
             if (level <= 0) continue;
 
@@ -1453,8 +1473,8 @@ class GroupCallService extends ChangeNotifier {
     _stream = null;
     try {
       await IncomingCallAlertService.instance.stop().timeout(
-            const Duration(seconds: 2),
-          );
+        const Duration(seconds: 2),
+      );
     } catch (_) {}
     for (final peer in peers) {
       await _releasePeer(peer).timeout(const Duration(seconds: 3));

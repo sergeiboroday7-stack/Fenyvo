@@ -4,10 +4,12 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../services/socket_service.dart';
 import '../services/app_language_service.dart';
 import '../services/credential_storage_service.dart';
+import '../config/legal_config.dart';
 import '../config/server_config.dart';
 import 'chat_list_screen.dart';
 
@@ -26,6 +28,8 @@ class _AuthScreenState extends State<AuthScreen> {
   bool _isLoading = false;
   bool _isRegisterMode = false;
   bool _isAutoLogin = false;
+  bool _acceptedLegalDocuments = false;
+  bool _confirmedMinimumAge = false;
 
   String _error = '';
 
@@ -352,6 +356,21 @@ class _AuthScreenState extends State<AuthScreen> {
       return;
     }
 
+    if (!_acceptedLegalDocuments) {
+      setState(() {
+        _error = 'Примите Условия использования и подтвердите ознакомление с Политикой конфиденциальности';
+      });
+      return;
+    }
+
+    if (!_confirmedMinimumAge) {
+      setState(() {
+        _error =
+            'Подтвердите, что вам исполнилось ${LegalConfig.minimumAge} лет';
+      });
+      return;
+    }
+
     setState(() {
       _isLoading = true;
       _isAutoLogin = false;
@@ -377,7 +396,14 @@ class _AuthScreenState extends State<AuthScreen> {
 
       _startLoginTimeout();
 
-      SocketService.instance.register(username, password);
+      SocketService.instance.register(
+        username,
+        password,
+        termsAccepted: _acceptedLegalDocuments,
+        ageConfirmed: _confirmedMinimumAge,
+        termsVersion: LegalConfig.termsVersion,
+        privacyVersion: LegalConfig.privacyVersion,
+      );
     } catch (e) {
       print('❌ Ошибка регистрации: $e');
 
@@ -635,6 +661,83 @@ class _AuthScreenState extends State<AuthScreen> {
                                 ),
                               ),
 
+                            if (_isRegisterMode) ...[
+                              CheckboxListTile(
+                                value: _acceptedLegalDocuments,
+                                onChanged: _isLoading
+                                    ? null
+                                    : (value) {
+                                        setState(() {
+                                          _acceptedLegalDocuments =
+                                              value ?? false;
+                                          _error = '';
+                                        });
+                                      },
+                                controlAffinity:
+                                    ListTileControlAffinity.leading,
+                                contentPadding: EdgeInsets.zero,
+                                activeColor: SpartanPalette.blue,
+                                checkColor: SpartanPalette.ink,
+                                title: const Text(
+                                  'Я принимаю Условия использования и подтверждаю, что ознакомился с Политикой конфиденциальности',
+                                  style: TextStyle(
+                                    color: SpartanPalette.ink,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ),
+                              Wrap(
+                                alignment: WrapAlignment.center,
+                                spacing: 6,
+                                children: [
+                                  TextButton(
+                                    onPressed: _isLoading
+                                        ? null
+                                        : () => launchUrl(
+                                            LegalConfig.termsUri,
+                                            mode:
+                                                LaunchMode.externalApplication,
+                                          ),
+                                    child: const Text('Условия'),
+                                  ),
+                                  TextButton(
+                                    onPressed: _isLoading
+                                        ? null
+                                        : () => launchUrl(
+                                            LegalConfig.privacyUri,
+                                            mode:
+                                                LaunchMode.externalApplication,
+                                          ),
+                                    child: const Text('Конфиденциальность'),
+                                  ),
+                                ],
+                              ),
+                              CheckboxListTile(
+                                value: _confirmedMinimumAge,
+                                onChanged: _isLoading
+                                    ? null
+                                    : (value) {
+                                        setState(() {
+                                          _confirmedMinimumAge = value ?? false;
+                                          _error = '';
+                                        });
+                                      },
+                                controlAffinity:
+                                    ListTileControlAffinity.leading,
+                                contentPadding: EdgeInsets.zero,
+                                activeColor: SpartanPalette.blue,
+                                checkColor: SpartanPalette.ink,
+                                title: Text(
+                                  'Мне исполнилось ${LegalConfig.minimumAge} лет',
+                                  style: const TextStyle(
+                                    color: SpartanPalette.ink,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 8),
+                            ],
+
                             if (_isLoading)
                               Column(
                                 children: [
@@ -697,6 +800,8 @@ class _AuthScreenState extends State<AuthScreen> {
                                         _isRegisterMode = !_isRegisterMode;
 
                                         _error = '';
+                                        _acceptedLegalDocuments = false;
+                                        _confirmedMinimumAge = false;
                                       });
                                     },
                                     child: Text(

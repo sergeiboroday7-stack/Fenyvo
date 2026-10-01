@@ -7,6 +7,7 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'firebase_messaging_service.dart';
 import 'media_transfer_service.dart';
+import 'turn_credential_service.dart';
 import 'notification_service.dart';
 import 'storage_service.dart';
 import 'app_visibility.dart';
@@ -286,6 +287,10 @@ class SocketService {
           final mediaPort =
               int.tryParse(data['mediaPort']?.toString() ?? '') ?? 8081;
           final serverUrl = _serverUrl?.trim() ?? '';
+          final turnData = data['turn'];
+          TurnCredentialService.configure(
+            turnData is Map ? Map<String, dynamic>.from(turnData) : null,
+          );
           if (mediaToken.isNotEmpty && serverUrl.isNotEmpty) {
             MediaTransferService.configure(
               webSocketUrl: serverUrl,
@@ -1019,8 +1024,22 @@ class SocketService {
   // РЕГИСТРАЦИЯ
   // ========================================
 
-  void register(String username, String password) {
-    _send('register', {'username': username.trim(), 'password': password});
+  void register(
+    String username,
+    String password, {
+    required bool termsAccepted,
+    required bool ageConfirmed,
+    required String termsVersion,
+    required String privacyVersion,
+  }) {
+    _send('register', {
+      'username': username.trim(),
+      'password': password,
+      'termsAccepted': termsAccepted,
+      'ageConfirmed': ageConfirmed,
+      'termsVersion': termsVersion,
+      'privacyVersion': privacyVersion,
+    });
   }
 
   // ========================================
@@ -2087,6 +2106,13 @@ class SocketService {
       'action': cleanAction,
       'text': cleanText,
     });
+  }
+
+  void sendSupportAiRequest({required String requestId, required String text}) {
+    final id = requestId.trim();
+    final cleanText = text.trim();
+    if (id.isEmpty || cleanText.isEmpty) return;
+    _send('support_ai_request', {'requestId': id, 'text': cleanText});
   }
 
   // ========================================

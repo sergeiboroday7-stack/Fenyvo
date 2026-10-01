@@ -297,10 +297,17 @@ function createGroupCallSignaling({ send, onlineUsers, getGroup, getMembers,
       const returningAuthority = room && !existing &&
         (user === room.owner ||
          (room.awaitingHost === true && room.moderators.has(user)));
-      if (room && !existing && !room.approvedJoins.has(user) && !returningAuthority) {
+      const viewerInThisRoom =
+        existing?.viewer === true && byUser.get(user) === room;
+      if (
+        room &&
+        (!existing || existing.viewer === true) &&
+        !room.approvedJoins.has(user) &&
+        !returningAuthority
+      ) {
         error('Сначала запросите разрешение ведущего'); return true;
       }
-      if (byUser.has(user) || isPrivateBusy(user)) { error('Сначала завершите текущий звонок'); return true; }
+      if ((byUser.has(user) && !viewerInThisRoom) || isPrivateBusy(user)) { error('Сначала завершите текущий звонок'); return true; }
       const stageCount = room ? [...room.people.values()].filter(p => !p.viewer).length : 0;
       if (room && stageCount >= maxParticipants) { error(`В звонке уже ${maxParticipants} участника`); return true; }
       const created = !room;

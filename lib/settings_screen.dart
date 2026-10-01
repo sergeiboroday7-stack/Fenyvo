@@ -14,6 +14,8 @@ import 'services/socket_service.dart';
 import 'services/storage_service.dart';
 import 'services/app_language_service.dart';
 import 'services/e2ee_settings_service.dart';
+import 'screens/support_ai_screen.dart';
+import 'screens/my_contact_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   final String username;
@@ -1015,9 +1017,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ].join(' · '),
                 onTap: _editProfile,
               ),
+
+              _buildSectionTile(
+                icon: Icons.qr_code_rounded,
+                title: 'Мой контакт',
+                subtitle: 'QR-код и персональная ссылка',
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => MyContactScreen(username: widget.username),
+                  ),
+                ),
+              ),
             ]),
 
             _buildSection(t('supportSection'), [
+              _buildSectionTile(
+                icon: Icons.support_agent_rounded,
+                title: 'Помощник поддержки',
+                subtitle: 'ИИ отвечает на вопросы о Fenyvo',
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const SupportAiScreen(),
+                  ),
+                ),
+              ),
               _SpartanSupportTile(
                 title: t('supportSpartan'),
                 subtitle: t('supportSubtitle'),

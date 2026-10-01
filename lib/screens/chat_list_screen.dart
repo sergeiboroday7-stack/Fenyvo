@@ -16,6 +16,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/socket_service.dart';
+import '../services/contact_link_service.dart';
 import '../services/notification_service.dart';
 import '../services/firebase_messaging_service.dart';
 import '../services/storage_service.dart';
@@ -25,6 +26,7 @@ import 'auth_screen.dart';
 import 'chat_screen.dart';
 import 'group_chat_screen.dart';
 import 'group_create_screen.dart';
+import 'contact_add_screen.dart';
 
 class ChatListScreen extends StatefulWidget {
   const ChatListScreen({super.key});
@@ -78,9 +80,33 @@ class _ChatListScreenState extends State<ChatListScreen> {
 
   StreamSubscription<String>? _firebaseNotificationTapSubscription;
 
+  void _handlePendingContactLink() {
+    final username = ContactLinkService.instance.takePendingUsername()?.trim();
+
+    if (!mounted || username == null || username.isEmpty) {
+      return;
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => ContactAddScreen(initialUsername: username),
+        ),
+      );
+    });
+  }
+
   @override
   void initState() {
     super.initState();
+
+    ContactLinkService.instance.addListener(_handlePendingContactLink);
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _handlePendingContactLink();
+    });
 
     SocketService.instance.addMessageHandler(_handleMessage);
 
@@ -121,6 +147,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
 
   @override
   void dispose() {
+    ContactLinkService.instance.removeListener(_handlePendingContactLink);
     SocketService.instance.removeMessageHandler(_handleMessage);
 
     _notificationTapSubscription?.cancel();
@@ -426,6 +453,16 @@ class _ChatListScreenState extends State<ChatListScreen> {
       }
       return;
     }
+    if (type == 'communication_request_response') {
+      final status = data['status']?.toString().trim() ?? '';
+
+      if (status == 'accepted') {
+        SocketService.instance.getUsers();
+      }
+
+      return;
+    }
+
     // SPARTAN_STAGE24_GROUPS
     if (type == 'groups') {
       final rawGroups = data['groups'];
@@ -1210,6 +1247,70 @@ class _ChatListScreenState extends State<ChatListScreen> {
   // ========================================
 
   Future<void> _openCreateGroup() async {
+    final openAt = DateTime.utc(2026, 10, 8, 9, 56);
+    if (DateTime.now().toUtc().isBefore(openAt)) {
+      await showDialog<void>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: const Text('Групповые чаты обновляются'),
+          content: StreamBuilder<DateTime>(
+            stream: Stream<DateTime>.periodic(
+              const Duration(seconds: 1),
+              (_) => DateTime.now().toUtc(),
+            ),
+            initialData: DateTime.now().toUtc(),
+            builder: (context, snapshot) {
+              final now = snapshot.data ?? DateTime.now().toUtc();
+              final remaining = openAt.difference(now);
+              final safeRemaining = remaining.isNegative
+                  ? Duration.zero
+                  : remaining;
+
+              final days = safeRemaining.inDays;
+              final hours = safeRemaining.inHours.remainder(24);
+              final minutes = safeRemaining.inMinutes.remainder(60);
+              final seconds = safeRemaining.inSeconds.remainder(60);
+
+              String two(int value) => value.toString().padLeft(2, '0');
+
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Создание новых групп временно недоступно. '
+                    'Мы работаем над обновлением групповых чатов.',
+                  ),
+                  const SizedBox(height: 20),
+                  const Text(
+                    'До открытия:',
+                    style: TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    '$days дн.  ${two(hours)}:${two(minutes)}:${two(seconds)}',
+                    style: const TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  const Text('8 октября 2026 · 12:56'),
+                ],
+              );
+            },
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('Понятно'),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
     final result = await Navigator.push<Map<String, dynamic>>(
       context,
       MaterialPageRoute(builder: (_) => const GroupCreateScreen()),
@@ -2456,6 +2557,12 @@ class _ChatListScreenState extends State<ChatListScreen> {
                 onTap: () => Navigator.pop(context, 'pulse'),
               ),
               ListTile(
+                leading: const Icon(Icons.person_add_alt_1_rounded),
+                title: const Text('Добавить контакт'),
+                subtitle: const Text('Найти по точному имени пользователя'),
+                onTap: () => Navigator.pop(context, 'contact'),
+              ),
+              ListTile(
                 leading: const Icon(Icons.groups_rounded),
                 title: Text(_tr('createTeam')),
                 subtitle: Text(_tr('newGroupChat')),
@@ -2480,6 +2587,17 @@ class _ChatListScreenState extends State<ChatListScreen> {
     );
     if (!mounted || action == null) return;
     if (action == 'pulse') await _showPulseRequests();
+
+    if (action == 'contact') {
+      await Navigator.of(
+        context,
+      ).push(MaterialPageRoute<void>(builder: (_) => const ContactAddScreen()));
+
+      if (mounted) {
+        _loadOnlineUsers();
+      }
+    }
+
     if (action == 'group') await _openCreateGroup();
     if (action == 'refresh') await _refreshChats();
     if (action == 'settings') _selectSection(2);

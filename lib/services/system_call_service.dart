@@ -240,7 +240,7 @@ class SystemCallService {
         callingNotification: const NotificationParams(
           showNotification: true,
           isShowCallback: true,
-          callbackText: 'Р вЂ”Р В°Р Р†Р ВµРЎР‚РЎв‚¬Р С‘РЎвЂљРЎРЉ',
+          callbackText: 'Завершить',
           subtitle: 'Р вЂ”Р Р†Р С•Р Р…Р С•Р С” SPARTAN',
         ),
         android: AndroidParams(
