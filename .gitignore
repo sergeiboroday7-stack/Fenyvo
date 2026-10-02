@@ -11,6 +11,7 @@ yarn-error.log*
 
 # Flutter / Dart
 .dart_tool/
+.dart_appdata/
 .packages
 .pub/
 build/

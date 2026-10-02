@@ -100,6 +100,17 @@ const LEGAL_TERMS_VERSION = '2026-10-01';
 const LEGAL_PRIVACY_VERSION = '2026-10-01';
 const LEGAL_MINIMUM_AGE = 16;
 
+function hasCurrentLegalAcceptance(account) {
+  const acceptance = account?.legalAcceptance;
+  return Boolean(
+    acceptance &&
+      acceptance.termsVersion === LEGAL_TERMS_VERSION &&
+      acceptance.privacyVersion === LEGAL_PRIVACY_VERSION &&
+      acceptance.ageConfirmed === true &&
+      Number(acceptance.minimumAge) >= LEGAL_MINIMUM_AGE,
+  );
+}
+
 // ========================================
 // GROUPS - STAGE 25
 // SPARTAN_STAGE25_GROUP_MESSAGES
@@ -3534,8 +3545,11 @@ async function requestOpenAiSupport({ text }) {
     });
     const payload = await response.json();
     if (!response.ok) {
+      console.error(
+        `❌ Support AI provider error: HTTP ${response.status}`,
+      );
       throw new Error(
-        payload?.error?.message || `OpenAI HTTP ${response.status}`,
+        'Помощник временно недоступен. Повторите позже или напишите на support@fenyvo.com',
       );
     }
     const result = extractOpenAiText(payload);
@@ -5209,6 +5223,7 @@ wss.on(
             ws.__mediaToken = crypto.randomBytes(32).toString('hex');
             mediaTokens.set(ws.__mediaToken, username);
             const turnCredentials = createTurnCredentials(username);
+            const legalRequired = !hasCurrentLegalAcceptance(user);
 
             send(
               ws,
@@ -5218,6 +5233,10 @@ wss.on(
                 mediaToken: ws.__mediaToken,
                 mediaPort: MEDIA_PORT,
                 maxMediaBytes: MAX_MEDIA_BYTES,
+                legalRequired,
+                termsVersion: LEGAL_TERMS_VERSION,
+                privacyVersion: LEGAL_PRIVACY_VERSION,
+                minimumAge: LEGAL_MINIMUM_AGE,
                 ...(turnCredentials ? { turn: turnCredentials } : {}),
               },
             );
@@ -5234,6 +5253,51 @@ wss.on(
               username,
             );
 
+            return;
+          }
+
+          // Existing accounts receive a soft migration prompt in clients that
+          // understand this event. Older public clients can still sign in until
+          // a separately tested release makes the new documents mandatory.
+          if (type === 'accept_legal') {
+            if (!currentUser || !registeredUsers[currentUser]) {
+              send(ws, 'legal_acceptance_error', {
+                reason: 'Сначала необходимо войти',
+              });
+              return;
+            }
+
+            const termsAccepted = data.termsAccepted === true;
+            const ageConfirmed = data.ageConfirmed === true;
+            const termsVersion = data.termsVersion?.toString().trim() || '';
+            const privacyVersion = data.privacyVersion?.toString().trim() || '';
+
+            if (
+              !termsAccepted ||
+              !ageConfirmed ||
+              termsVersion !== LEGAL_TERMS_VERSION ||
+              privacyVersion !== LEGAL_PRIVACY_VERSION
+            ) {
+              send(ws, 'legal_acceptance_error', {
+                reason: `Примите актуальные документы и подтвердите возраст ${LEGAL_MINIMUM_AGE}+`,
+              });
+              return;
+            }
+
+            registeredUsers[currentUser].legalAcceptance = {
+              termsVersion: LEGAL_TERMS_VERSION,
+              privacyVersion: LEGAL_PRIVACY_VERSION,
+              acceptedAt: new Date().toISOString(),
+              minimumAge: LEGAL_MINIMUM_AGE,
+              ageConfirmed: true,
+            };
+            saveUsers(registeredUsers);
+
+            send(ws, 'legal_acceptance_success', {
+              termsVersion: LEGAL_TERMS_VERSION,
+              privacyVersion: LEGAL_PRIVACY_VERSION,
+              minimumAge: LEGAL_MINIMUM_AGE,
+            });
             return;
           }
 

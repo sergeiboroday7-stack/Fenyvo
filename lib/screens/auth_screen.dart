@@ -36,6 +36,7 @@ class _AuthScreenState extends State<AuthScreen> {
   Timer? _loginTimeout;
 
   bool _isNavigating = false;
+  bool _legalPromptOpen = false;
 
   @override
   void initState() {
@@ -116,15 +117,37 @@ class _AuthScreenState extends State<AuthScreen> {
     if (type == 'login_success') {
       _loginTimeout?.cancel();
 
-      _isNavigating = true;
-
       setState(() {
         _isLoading = false;
         _isAutoLogin = false;
         _error = '';
       });
 
-      _saveUserAndOpenChat();
+      if (data['legalRequired'] == true) {
+        unawaited(_showLegalMigrationPrompt());
+      } else {
+        _isNavigating = true;
+        unawaited(_saveUserAndOpenChat());
+      }
+
+      return;
+    }
+
+    if (type == 'legal_acceptance_success') {
+      _legalPromptOpen = false;
+      _isNavigating = true;
+      Navigator.of(context, rootNavigator: true).pop();
+      unawaited(_saveUserAndOpenChat());
+
+      return;
+    }
+
+    if (type == 'legal_acceptance_error') {
+      final reason =
+          data['reason']?.toString() ??
+          'Не удалось сохранить подтверждение документов';
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(reason)));
 
       return;
     }
@@ -184,6 +207,119 @@ class _AuthScreenState extends State<AuthScreen> {
       default:
         return 'Произошла ошибка';
     }
+  }
+
+  Future<void> _showLegalMigrationPrompt() async {
+    if (!mounted || _legalPromptOpen) {
+      return;
+    }
+
+    _legalPromptOpen = true;
+    var acceptedDocuments = false;
+    var confirmedAge = false;
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          final canAccept = acceptedDocuments && confirmedAge;
+          return AlertDialog(
+            backgroundColor: SpartanPalette.surface,
+            title: const Text(
+              'Обновлены условия Fenyvo',
+              style: TextStyle(color: SpartanPalette.ink),
+            ),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'Чтобы продолжить в новой версии, ознакомьтесь с актуальными документами.',
+                    style: TextStyle(color: SpartanPalette.secondary),
+                  ),
+                  CheckboxListTile(
+                    value: acceptedDocuments,
+                    contentPadding: EdgeInsets.zero,
+                    controlAffinity: ListTileControlAffinity.leading,
+                    title: const Text(
+                      'Я принимаю Условия использования и подтверждаю ознакомление с Политикой конфиденциальности',
+                      style: TextStyle(color: SpartanPalette.ink, fontSize: 13),
+                    ),
+                    onChanged: (value) => setDialogState(
+                      () => acceptedDocuments = value ?? false,
+                    ),
+                  ),
+                  Wrap(
+                    alignment: WrapAlignment.center,
+                    children: [
+                      TextButton(
+                        onPressed: () => launchUrl(
+                          LegalConfig.termsUri,
+                          mode: LaunchMode.externalApplication,
+                        ),
+                        child: const Text('Условия'),
+                      ),
+                      TextButton(
+                        onPressed: () => launchUrl(
+                          LegalConfig.privacyUri,
+                          mode: LaunchMode.externalApplication,
+                        ),
+                        child: const Text('Конфиденциальность'),
+                      ),
+                    ],
+                  ),
+                  CheckboxListTile(
+                    value: confirmedAge,
+                    contentPadding: EdgeInsets.zero,
+                    controlAffinity: ListTileControlAffinity.leading,
+                    title: Text(
+                      'Мне исполнилось ${LegalConfig.minimumAge} лет',
+                      style: const TextStyle(
+                        color: SpartanPalette.ink,
+                        fontSize: 13,
+                      ),
+                    ),
+                    onChanged: (value) =>
+                        setDialogState(() => confirmedAge = value ?? false),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () async {
+                  _legalPromptOpen = false;
+                  Navigator.of(dialogContext).pop();
+                  await SocketService.instance.disconnect();
+                  if (mounted) {
+                    setState(() {
+                      _isLoading = false;
+                      _isAutoLogin = false;
+                      _error = 'Для продолжения необходимо принять актуальные условия';
+                    });
+                  }
+                },
+                child: const Text('Выйти'),
+              ),
+              FilledButton(
+                onPressed: canAccept
+                    ? () {
+                        SocketService.instance.acceptLegal(
+                          termsAccepted: acceptedDocuments,
+                          ageConfirmed: confirmedAge,
+                          termsVersion: LegalConfig.termsVersion,
+                          privacyVersion: LegalConfig.privacyVersion,
+                        );
+                      }
+                    : null,
+                child: const Text('Принять и продолжить'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
   }
 
   // ========================================

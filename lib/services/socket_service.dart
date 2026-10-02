@@ -1064,6 +1064,20 @@ class SocketService {
     _send('login', {'username': user, 'password': password});
   }
 
+  void acceptLegal({
+    required bool termsAccepted,
+    required bool ageConfirmed,
+    required String termsVersion,
+    required String privacyVersion,
+  }) {
+    _send('accept_legal', {
+      'termsAccepted': termsAccepted,
+      'ageConfirmed': ageConfirmed,
+      'termsVersion': termsVersion,
+      'privacyVersion': privacyVersion,
+    });
+  }
+
   // ========================================
   // ПОЛЬЗОВАТЕЛИ
   // ========================================
