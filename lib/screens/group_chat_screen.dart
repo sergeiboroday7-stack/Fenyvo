@@ -2126,7 +2126,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
             children: [
               item(Icons.photo_library_outlined, 'Фото', _pickGroupImage),
               item(Icons.video_library_outlined, 'Видео', _pickGroupVideo),
-              item(Icons.attach_file_rounded, 'Р¤Р°Р№Р»', _pickGroupFile),
+              item(Icons.attach_file_rounded, 'Файл', _pickGroupFile),
             ],
           ),
         );
