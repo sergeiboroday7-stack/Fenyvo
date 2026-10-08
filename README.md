@@ -4,12 +4,13 @@ Fenyvo — кроссплатформенный мессенджер для Andr
 
 ## Текущая версия
 
-- Android: **1.8.0 / build 4224**
+- Android rollback-кандидат: **1.8.0 / build 4231**
 - Android package: `com.fenyvo.app`
 - Windows binary: `fenyvo.exe`
 - Публичный сайт: `https://fenyvo.com`
 - Android APK: `https://fenyvo.com/download/Fenyvo-1.8.0-arm64.apk`
-- SHA-256 build 4224: `281C1A9564CB48F8B839C86D7650191322645D000A65FD9CBA1FAE6B6BC3DF78`
+- Основа: проверенный GitHub-коммит `ec03efb` (публичный build 4224)
+- SHA-256 для локального build 4231 определяется после новой сборки и проверки.
 
 ## Публичный сайт
 

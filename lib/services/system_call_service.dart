@@ -153,7 +153,7 @@ class SystemCallService {
                   : '\u041f\u0440\u043e\u043f\u0443\u0449\u0435\u043d\u043d\u044b\u0439 \u0437\u0432\u043e\u043d\u043e\u043a',
             ),
             android: const AndroidParams(
-              missedCallNotificationChannelName: 'Р СџРЎР‚Р С•Р С—РЎС“РЎвЂ°Р ВµР Р…Р Р…РЎвЂ№Р Вµ Р В·Р Р†Р С•Р Р…Р С”Р С‘',
+              missedCallNotificationChannelName: 'Пропущенные звонки',
             ),
           ),
         );
@@ -235,13 +235,13 @@ class SystemCallService {
         missedCallNotification: const NotificationParams(
           showNotification: true,
           isShowCallback: false,
-          subtitle: 'Р СџРЎР‚Р С•Р С—РЎС“РЎвЂ°Р ВµР Р…Р Р…РЎвЂ№Р в„– Р В·Р Р†Р С•Р Р…Р С•Р С”',
+          subtitle: 'Пропущенный звонок',
         ),
         callingNotification: const NotificationParams(
           showNotification: true,
           isShowCallback: true,
-          callbackText: 'Р вЂ”Р В°Р Р†Р ВµРЎР‚РЎв‚¬Р С‘РЎвЂљРЎРЉ',
-          subtitle: 'Р вЂ”Р Р†Р С•Р Р…Р С•Р С” SPARTAN',
+          callbackText: 'Завершить',
+          subtitle: 'Звонок FENYVO',
         ),
         android: AndroidParams(
           isCustomNotification: true,
@@ -252,8 +252,7 @@ class SystemCallService {
           backgroundUrl: avatar,
           actionColor: '#D4AF37',
           textColor: '#FFFFFF',
-          incomingCallNotificationChannelName:
-              'Р вЂ”Р Р†Р С•Р Р…Р С”Р С‘ SPARTAN',
+          incomingCallNotificationChannelName: 'Звонки FENYVO',
           missedCallNotificationChannelName: '\u041f\u0440\u043e\u043f\u0443\u0449\u0435\u043d\u043d\u044b\u0435 \u0437\u0432\u043e\u043d\u043a\u0438',
           textAccept: '\u041f\u0440\u0438\u043d\u044f\u0442\u044c',
           textDecline: '\u041e\u0442\u043a\u043b\u043e\u043d\u0438\u0442\u044c',
@@ -344,20 +343,18 @@ class SystemCallService {
       final open = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
-          title: const Text(
-            'Р вЂ™РЎвЂ¦Р С•Р Т‘РЎРЏРЎвЂ°Р С‘Р Вµ Р В·Р Р†Р С•Р Р…Р С”Р С‘',
-          ),
+          title: const Text('Полноэкранные звонки'),
           content: const Text(
-            'Р В Р В°Р В·РЎР‚Р ВµРЎв‚¬Р С‘ FENYVO Р С—Р С•Р С”Р В°Р В·РЎвЂ№Р Р†Р В°РЎвЂљРЎРЉ Р В·Р Р†Р С•Р Р…Р С•Р С” Р С—Р С•Р Р†Р ВµРЎР‚РЎвЂ¦ Р В·Р В°Р В±Р В»Р С•Р С”Р С‘РЎР‚Р С•Р Р†Р В°Р Р…Р Р…Р С•Р С–Р С• РЎРЊР С”РЎР‚Р В°Р Р…Р В°. Р вЂР ВµР В· РЎРЊРЎвЂљР С•Р С–Р С• Android Р СР С•Р В¶Р ВµРЎвЂљ Р С—Р С•Р С”Р В°Р В·Р В°РЎвЂљРЎРЉ РЎвЂљР С•Р В»РЎРЉР С”Р С• РЎС“Р Р†Р ВµР Т‘Р С•Р СР В»Р ВµР Р…Р С‘Р Вµ.',
+            'Разрешите FENYVO показывать входящий звонок поверх заблокированного экрана. Без этого Android может показывать только уведомление.',
           ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text('Р СџР С•Р В·Р В¶Р Вµ'),
+              child: const Text('Позже'),
             ),
             TextButton(
               onPressed: () => Navigator.pop(context, true),
-              child: const Text('Р СњР В°РЎРѓРЎвЂљРЎР‚Р С•Р С‘РЎвЂљРЎРЉ'),
+              child: const Text('Настроить'),
             ),
           ],
         ),

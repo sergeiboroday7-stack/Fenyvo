@@ -159,7 +159,7 @@ class CallService extends ChangeNotifier {
     SocketService.instance.requestAvatar(target);
     isVideo = video;
     isIncoming = false;
-    callE2ee = await SocketService.instance.isE2eeReadyWith(target);
+    callE2ee = false;
     _accepted = false;
     outcome = null;
     speakerphoneEnabled = video;
@@ -706,7 +706,7 @@ class CallService extends ChangeNotifier {
     _loadAvatar(from);
     SocketService.instance.requestAvatar(from);
     _incomingData = data;
-    callE2ee = data['callE2ee'] == true;
+    callE2ee = false;
     isVideo = data['video'] == true;
     isIncoming = true;
     _accepted = false;

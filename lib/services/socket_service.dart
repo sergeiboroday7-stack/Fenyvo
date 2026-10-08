@@ -2207,37 +2207,8 @@ class SocketService {
   }) async {
     final peer = to.trim();
     final id = callId.trim();
-    final user = currentUser?.trim() ?? '';
-    if (peer.isEmpty || id.isEmpty || user.isEmpty) return false;
-    if (!await isE2eeReadyWith(peer)) {
-      return _send(type, {'to': peer, 'callId': id, ...clear});
-    }
-    try {
-      await SignalE2eeService.instance.initializeForUser(user);
-      final payload = <String, dynamic>{
-        'kind': type,
-        'callId': id,
-        'from': user,
-        'to': peer,
-        ...clear,
-      };
-      Map<String, dynamic> encrypted;
-      try {
-        encrypted = await SignalE2eeService.instance.encrypt(peer, payload);
-      } on E2eeSessionMissing {
-        await _requestE2eeBundle(peer);
-        encrypted = await SignalE2eeService.instance.encrypt(peer, payload);
-      }
-      return _send(type, {
-        'to': peer,
-        'callId': id,
-        if (clear['video'] != null) 'video': clear['video'],
-        'e2eeCall': encrypted,
-      });
-    } catch (_) {
-      print('🔒 E2EE CALL: защищённый сигнал не отправлен');
-      return false;
-    }
+    if (peer.isEmpty || id.isEmpty) return false;
+    return _send(type, {'to': peer, 'callId': id, ...clear});
   }
 
   Future<bool> sendCallOffer({
