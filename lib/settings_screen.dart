@@ -14,6 +14,9 @@ import 'services/socket_service.dart';
 import 'services/storage_service.dart';
 import 'services/app_language_service.dart';
 import 'services/e2ee_settings_service.dart';
+import 'screens/my_contact_screen.dart';
+import 'screens/support_ai_screen.dart';
+import 'widgets/my_fenyvo_dashboard.dart';
 
 class SettingsScreen extends StatefulWidget {
   final String username;
@@ -30,6 +33,13 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
+  final ScrollController _scrollController = ScrollController();
+  final GlobalKey _privacySectionKey = GlobalKey();
+  final GlobalKey _appearanceSectionKey = GlobalKey();
+  final ExpansibleController _privacyExpansionController =
+      ExpansibleController();
+  final ExpansibleController _appearanceExpansionController =
+      ExpansibleController();
   String? _avatarPath;
 
   bool _isUploadingAvatar = false;
@@ -45,6 +55,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   String _profileAbout = '';
   String _profileRegion = '';
   String _profileStatus = '';
+  String _profilePhone = '';
+  String _profileBirthDate = '';
+  bool _profilePhoneVisible = false;
+  bool _profileBirthDateVisible = false;
 
   void _showSupportDialog() {
     final language = AppLanguageService.instance;
@@ -118,7 +132,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void dispose() {
     SocketService.instance.removeMessageHandler(_handleProfileMessage);
+    _scrollController.dispose();
     super.dispose();
+  }
+
+  Future<void> _scrollToSection(GlobalKey key) async {
+    final sectionContext = key.currentContext;
+    if (sectionContext == null) return;
+    await Scrollable.ensureVisible(
+      sectionContext,
+      duration: const Duration(milliseconds: 420),
+      curve: Curves.easeOutCubic,
+      alignment: 0.08,
+    );
+  }
+
+  void _openMyContact() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => MyContactScreen(username: widget.username),
+      ),
+    );
   }
 
   void _handleProfileMessage(Map<String, dynamic> packet) {
@@ -134,6 +168,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _profileAbout = data['about']?.toString() ?? '';
       _profileRegion = data['region']?.toString() ?? '';
       _profileStatus = data['statusText']?.toString() ?? '';
+      _profilePhone = data['phone']?.toString() ?? '';
+      _profileBirthDate = data['birthDate']?.toString() ?? '';
+      _profilePhoneVisible = data['phoneVisible'] == true;
+      _profileBirthDateVisible = data['birthDateVisible'] == true;
     });
   }
 
@@ -141,46 +179,155 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final status = TextEditingController(text: _profileStatus);
     final about = TextEditingController(text: _profileAbout);
     final region = TextEditingController(text: _profileRegion);
+    final phone = TextEditingController(text: _profilePhone);
+    final birthDate = TextEditingController(text: _profileBirthDate);
+    var phoneVisible = _profilePhoneVisible;
+    var birthDateVisible = _profileBirthDateVisible;
     final save = await showDialog<bool>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Профиль'),
-        content: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: status,
-                maxLength: 80,
-                decoration: const InputDecoration(
-                  labelText: 'Статус',
-                  hintText: 'Например: Сила в людях',
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => Theme(
+          data: Theme.of(context).copyWith(
+            inputDecorationTheme: const InputDecorationTheme(
+              labelStyle: TextStyle(color: SpartanPalette.gold),
+              hintStyle: TextStyle(color: SpartanPalette.secondary),
+              enabledBorder: UnderlineInputBorder(
+                borderSide: BorderSide(color: SpartanPalette.secondary),
+              ),
+              focusedBorder: UnderlineInputBorder(
+                borderSide: BorderSide(color: SpartanPalette.gold, width: 2),
+              ),
+            ),
+          ),
+          child: AlertDialog(
+            contentPadding: const EdgeInsets.fromLTRB(24, 8, 24, 12),
+            titlePadding: const EdgeInsets.fromLTRB(24, 20, 24, 8),
+            actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+            backgroundColor: SpartanPalette.surfaceRaised,
+            surfaceTintColor: Colors.transparent,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(24),
+              side: BorderSide(
+                color: SpartanPalette.gold.withValues(alpha: 0.65),
+              ),
+            ),
+            titleTextStyle: const TextStyle(
+              color: SpartanPalette.gold,
+              fontSize: 21,
+              fontWeight: FontWeight.w800,
+            ),
+            title: const Text('Профиль'),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: status,
+                    maxLength: 80,
+                    decoration: const InputDecoration(
+                      labelText: 'Статус',
+                      hintText: 'Например: Сила в людях',
+                    ),
+                  ),
+                  TextField(
+                    controller: about,
+                    maxLength: 160,
+                    maxLines: 3,
+                    decoration: const InputDecoration(labelText: 'О себе'),
+                  ),
+                  TextField(
+                    controller: region,
+                    maxLength: 80,
+                    decoration: const InputDecoration(labelText: 'Регион'),
+                  ),
+                  TextField(
+                    controller: phone,
+                    maxLength: 32,
+                    keyboardType: TextInputType.phone,
+                    decoration: const InputDecoration(
+                      labelText: 'Телефон (необязательно)',
+                      hintText: '+380…',
+                    ),
+                  ),
+                  SwitchListTile.adaptive(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Показывать телефон в профиле'),
+                    value: phoneVisible,
+                    onChanged: (value) =>
+                        setDialogState(() => phoneVisible = value),
+                  ),
+                  TextField(
+                    controller: birthDate,
+                    readOnly: true,
+                    decoration: InputDecoration(
+                      labelText: 'Дата рождения',
+                      hintText: 'ГГГГ-ММ-ДД',
+                      suffixIcon: birthDate.text.isEmpty
+                          ? const Icon(Icons.calendar_month_outlined)
+                          : IconButton(
+                              tooltip: 'Очистить дату',
+                              onPressed: () => setDialogState(birthDate.clear),
+                              icon: const Icon(Icons.close_rounded),
+                            ),
+                    ),
+                    onTap: () async {
+                      final initial =
+                          DateTime.tryParse(birthDate.text) ?? DateTime(2000);
+                      final selected = await showDatePicker(
+                        context: dialogContext,
+                        initialDate: initial.isAfter(DateTime.now())
+                            ? DateTime.now()
+                            : initial,
+                        firstDate: DateTime(1900),
+                        lastDate: DateTime.now(),
+                      );
+                      if (selected == null) return;
+                      final month = selected.month.toString().padLeft(2, '0');
+                      final day = selected.day.toString().padLeft(2, '0');
+                      setDialogState(
+                        () => birthDate.text = '${selected.year}-$month-$day',
+                      );
+                    },
+                  ),
+                  SwitchListTile.adaptive(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('Показывать дату рождения в профиле'),
+                    value: birthDateVisible,
+                    onChanged: (value) =>
+                        setDialogState(() => birthDateVisible = value),
+                  ),
+                  const Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'Телефон и дата рождения скрыты, пока вы сами не включите их показ.',
+                      style: TextStyle(
+                        color: SpartanPalette.secondary,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                style: TextButton.styleFrom(
+                  foregroundColor: SpartanPalette.gold,
                 ),
+                child: const Text('Отмена'),
               ),
-              TextField(
-                controller: about,
-                maxLength: 160,
-                maxLines: 3,
-                decoration: const InputDecoration(labelText: 'О себе'),
-              ),
-              TextField(
-                controller: region,
-                maxLength: 80,
-                decoration: const InputDecoration(labelText: 'Регион'),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                style: FilledButton.styleFrom(
+                  backgroundColor: SpartanPalette.gold,
+                  foregroundColor: SpartanPalette.canvasDeep,
+                ),
+                child: const Text('Сохранить'),
               ),
             ],
           ),
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Отмена'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Сохранить'),
-          ),
-        ],
       ),
     );
     if (save == true) {
@@ -188,11 +335,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
         about: about.text,
         region: region.text,
         statusText: status.text,
+        phone: phone.text,
+        birthDate: birthDate.text,
+        phoneVisible: phoneVisible,
+        birthDateVisible: birthDateVisible,
       );
     }
     status.dispose();
     about.dispose();
     region.dispose();
+    phone.dispose();
+    birthDate.dispose();
   }
 
   Future<void> _loadE2ee() async {
@@ -671,7 +824,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
       if (avatarImage != null) {
         return CircleAvatar(
-          radius: 48,
+          radius: 36,
           backgroundColor: SpartanPalette.blue,
           backgroundImage: avatarImage,
         );
@@ -679,13 +832,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
 
     return CircleAvatar(
-      radius: 48,
+      radius: 36,
       backgroundColor: SpartanPalette.blue,
       child: Text(
         widget.username.isNotEmpty ? widget.username[0].toUpperCase() : '?',
         style: const TextStyle(
           color: SpartanPalette.ink,
-          fontSize: 32,
+          fontSize: 26,
           fontWeight: FontWeight.bold,
         ),
       ),
@@ -696,23 +849,38 @@ class _SettingsScreenState extends State<SettingsScreen> {
   // СЕКЦИИ
   // ========================================
 
-  Widget _buildSection(String title, List<Widget> children) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          child: Text(
-            title,
-            style: const TextStyle(
-              color: SpartanPalette.ink,
-              fontSize: 14,
-              fontWeight: FontWeight.bold,
-            ),
+  Widget _buildSection(
+    String title,
+    List<Widget> children, {
+    bool initiallyExpanded = false,
+    Key? sectionKey,
+    ExpansibleController? controller,
+  }) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 5, 16, 7),
+      decoration: BoxDecoration(
+        color: SpartanPalette.surfaceRaised,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: SpartanPalette.gold.withValues(alpha: 0.28)),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: ExpansionTile(
+        controller: controller,
+        key: sectionKey,
+        initiallyExpanded: initiallyExpanded,
+        maintainState: true,
+        iconColor: SpartanPalette.gold,
+        collapsedIconColor: SpartanPalette.gold,
+        title: Text(
+          title,
+          style: const TextStyle(
+            color: SpartanPalette.ink,
+            fontWeight: FontWeight.w700,
+            fontSize: 15,
           ),
         ),
-        ...children,
-      ],
+        children: children,
+      ),
     );
   }
 
@@ -915,7 +1083,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       appBar: AppBar(
         backgroundColor: SpartanPalette.canvas,
         title: Text(
-          t('settings'),
+          'Мой Fenyvo',
           style: const TextStyle(
             color: SpartanPalette.ink,
             fontWeight: FontWeight.bold,
@@ -934,90 +1102,45 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
 
         child: ListView(
+          controller: _scrollController,
           children: [
-            const SizedBox(height: 24),
-
-            Center(
-              child: GestureDetector(
-                onTap: _showAvatarActions,
-                child: Stack(
-                  clipBehavior: Clip.none,
-                  children: [
-                    _buildAvatar(),
-
-                    Positioned(
-                      right: -2,
-                      bottom: -2,
-                      child: Container(
-                        width: 32,
-                        height: 32,
-                        decoration: const BoxDecoration(
-                          color: SpartanPalette.blue,
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(
-                          Icons.camera_alt,
-                          color: SpartanPalette.ink,
-                          size: 18,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+            MyFenyvoDashboard(
+              username: widget.username,
+              avatar: _buildAvatar(),
+              status: _profileStatus,
+              about: _profileAbout,
+              region: _profileRegion,
+              phone: _profilePhone,
+              birthDate: _profileBirthDate,
+              uploadingAvatar: _isUploadingAvatar,
+              onAvatarTap: _showAvatarActions,
+              onEditProfile: _editProfile,
+              onOpenContact: _openMyContact,
+              onOpenAppearance: () {
+                _appearanceExpansionController.expand();
+                Future.delayed(const Duration(milliseconds: 300), () {
+                  if (mounted) _scrollToSection(_appearanceSectionKey);
+                });
+              },
+              onOpenPrivacy: () {
+                _privacyExpansionController.expand();
+                Future.delayed(const Duration(milliseconds: 300), () {
+                  if (mounted) _scrollToSection(_privacySectionKey);
+                });
+              },
             ),
 
-            if (_isUploadingAvatar)
-              const Padding(
-                padding: EdgeInsets.only(top: 8),
-                child: Center(
-                  child: Text(
-                    'Загрузка аватарки...',
-                    style: TextStyle(color: SpartanPalette.ink, fontSize: 12),
+            _buildSection('Помощь и обратная связь', [
+              _buildSectionTile(
+                icon: Icons.support_agent_rounded,
+                title: 'Помощник поддержки',
+                subtitle: 'ИИ отвечает на вопросы о Fenyvo',
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const SupportAiScreen(),
                   ),
                 ),
               ),
-
-            const SizedBox(height: 12),
-
-            Center(
-              child: Text(
-                widget.username,
-                style: const TextStyle(
-                  color: SpartanPalette.ink,
-                  fontSize: 20,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-            ),
-
-            const SizedBox(height: 4),
-
-            Center(
-              child: Text(
-                t('changePhoto'),
-                style: const TextStyle(
-                  color: SpartanPalette.secondary,
-                  fontSize: 12,
-                ),
-              ),
-            ),
-
-            _buildSection('Профиль', [
-              _buildSectionTile(
-                icon: Icons.manage_accounts_rounded,
-                title: 'Заполнить профиль',
-                subtitle: [
-                  if (_profileStatus.isNotEmpty) _profileStatus,
-                  if (_profileRegion.isNotEmpty) _profileRegion,
-                  if (_profileStatus.isEmpty && _profileRegion.isEmpty)
-                    'Статус, о себе и регион',
-                ].join(' · '),
-                onTap: _editProfile,
-              ),
-            ]),
-
-            _buildSection(t('supportSection'), [
               _SpartanSupportTile(
                 title: t('supportSpartan'),
                 subtitle: t('supportSubtitle'),
@@ -1039,79 +1162,85 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ]),
 
-            _buildSection(t('securitySection'), [
-              SwitchListTile.adaptive(
-                secondary: const Icon(Icons.lock_outline_rounded),
-                title: Text(t('e2eeTitle')),
-                subtitle: Text(
-                  _e2eeEnabled ? t('e2eeOnSubtitle') : t('e2eeOffSubtitle'),
+            KeyedSubtree(
+              key: _privacySectionKey,
+              child: _buildSection(t('securitySection'), [
+                SwitchListTile.adaptive(
+                  secondary: const Icon(Icons.lock_outline_rounded),
+                  title: Text(t('e2eeTitle')),
+                  subtitle: Text(
+                    _e2eeEnabled ? t('e2eeOnSubtitle') : t('e2eeOffSubtitle'),
+                  ),
+                  value: _e2eeEnabled,
+                  onChanged: _changingE2ee ? null : _changeE2ee,
                 ),
-                value: _e2eeEnabled,
-                onChanged: _changingE2ee ? null : _changeE2ee,
-              ),
-              if (_changingE2ee)
-                const Padding(
-                  padding: EdgeInsets.fromLTRB(16, 0, 16, 12),
-                  child: LinearProgressIndicator(),
-                ),
-            ]),
+                if (_changingE2ee)
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(16, 0, 16, 12),
+                    child: LinearProgressIndicator(),
+                  ),
+              ], controller: _privacyExpansionController),
+            ),
 
             const SizedBox(height: 12),
 
             // =================================
             // ВНЕШНИЙ ВИД
             // =================================
-            _buildSection(t('appearance'), [
-              ListTile(
-                leading: const Icon(Icons.light_mode_outlined),
-                title: const Text('FENYVO · BLUE GOLD'),
-                subtitle: Text(t('themeSubtitle')),
-              ),
-              SwitchListTile.adaptive(
-                title: Text(t('wallpaperToggle')),
-                subtitle: Text(t('wallpaperToggleSubtitle')),
-                value: _lightWallpaperEnabled,
-                onChanged: (value) async {
-                  await StorageService.setLightWallpaperEnabled(value);
-                  if (mounted) setState(() => _lightWallpaperEnabled = value);
-                },
-              ),
-              _buildSectionTile(
-                icon: Icons.wallpaper,
-                title: t('chatBackground'),
-                subtitle: _backgroundPath == null
-                    ? t('blueGoldTheme')
-                    : t('galleryPhoto'),
-                onTap: _pickBackground,
-              ),
-
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 16,
-                  vertical: 8,
+            KeyedSubtree(
+              key: _appearanceSectionKey,
+              child: _buildSection(t('appearance'), [
+                ListTile(
+                  leading: const Icon(Icons.light_mode_outlined),
+                  title: const Text('FENYVO · BLUE GOLD'),
+                  subtitle: Text(t('themeSubtitle')),
                 ),
-                child: _buildBackgroundPreview(),
-              ),
-
-              _buildBackgroundOpacityControl(),
-
-              if (_backgroundPath != null)
+                SwitchListTile.adaptive(
+                  title: Text(t('wallpaperToggle')),
+                  subtitle: Text(t('wallpaperToggleSubtitle')),
+                  value: _lightWallpaperEnabled,
+                  onChanged: (value) async {
+                    await StorageService.setLightWallpaperEnabled(value);
+                    if (mounted) setState(() => _lightWallpaperEnabled = value);
+                  },
+                ),
                 _buildSectionTile(
-                  icon: Icons.restart_alt,
-                  title: t('defaultBackground'),
-                  subtitle: t('restoreBlueBackground'),
-                  onTap: _removeBackground,
-                  iconColor: SpartanPalette.ink,
-                  titleColor: SpartanPalette.ink,
+                  icon: Icons.wallpaper,
+                  title: t('chatBackground'),
+                  subtitle: _backgroundPath == null
+                      ? t('blueGoldTheme')
+                      : t('galleryPhoto'),
+                  onTap: _pickBackground,
                 ),
 
-              _buildSectionTile(
-                icon: Icons.format_color_text,
-                title: t('textColor'),
-                subtitle: t('chooseTextColor'),
-                onTap: _showTextColorPicker,
-              ),
-            ]),
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
+                  child: _buildBackgroundPreview(),
+                ),
+
+                _buildBackgroundOpacityControl(),
+
+                if (_backgroundPath != null)
+                  _buildSectionTile(
+                    icon: Icons.restart_alt,
+                    title: t('defaultBackground'),
+                    subtitle: t('restoreBlueBackground'),
+                    onTap: _removeBackground,
+                    iconColor: SpartanPalette.ink,
+                    titleColor: SpartanPalette.ink,
+                  ),
+
+                _buildSectionTile(
+                  icon: Icons.format_color_text,
+                  title: t('textColor'),
+                  subtitle: t('chooseTextColor'),
+                  onTap: _showTextColorPicker,
+                ),
+              ], controller: _appearanceExpansionController),
+            ),
 
             const Divider(color: SpartanPalette.ink, height: 30),
 

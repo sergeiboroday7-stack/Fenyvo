@@ -1,5 +1,3 @@
-import '../theme/spartan_theme.dart';
-
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -16,7 +14,9 @@ class SplashScreen extends StatefulWidget {
   State<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends State<SplashScreen> {
+class _SplashScreenState extends State<SplashScreen>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _orbitController;
   String _statusText = 'Подготовка приложения...';
 
   bool _isLoading = true;
@@ -26,6 +26,10 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   void initState() {
     super.initState();
+    _orbitController = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 7),
+    )..repeat();
 
     SocketService.instance.addMessageHandler(_handleSocketMessage);
 
@@ -34,6 +38,7 @@ class _SplashScreenState extends State<SplashScreen> {
 
   @override
   void dispose() {
+    _orbitController.dispose();
     SocketService.instance.removeMessageHandler(_handleSocketMessage);
 
     super.dispose();
@@ -174,46 +179,153 @@ class _SplashScreenState extends State<SplashScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: SpartanPalette.canvas,
-
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.shield, size: 80, color: SpartanPalette.ink),
-
-            const SizedBox(height: 20),
-
-            const Text(
-              'FENYVO',
-              style: TextStyle(
-                color: SpartanPalette.ink,
-                fontSize: 28,
-                fontWeight: FontWeight.bold,
-              ),
-            ),
-
-            const SizedBox(height: 40),
-
-            if (_isLoading)
-              const CircularProgressIndicator(color: SpartanPalette.ink),
-
-            const SizedBox(height: 20),
-
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 30),
-              child: Text(
-                _statusText,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: SpartanPalette.secondary,
-                  fontSize: 14,
+      backgroundColor: const Color(0xFF091827),
+      body: Stack(
+        children: [
+          const Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: RadialGradient(
+                  center: Alignment(0, -.35),
+                  radius: 1.2,
+                  colors: [
+                    Color(0xFF1D3852),
+                    Color(0xFF102238),
+                    Color(0xFF091827),
+                  ],
                 ),
               ),
             ),
-          ],
-        ),
+          ),
+          SafeArea(
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 25),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SizedBox(
+                      width: 190,
+                      height: 190,
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          RotationTransition(
+                            turns: _orbitController,
+                            child: SizedBox(
+                              width: 170,
+                              height: 170,
+                              child: CustomPaint(
+                                painter: const _SplashRingPainter(),
+                              ),
+                            ),
+                          ),
+                          Container(
+                            width: 122,
+                            height: 122,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: const Color(0xFFE6BE69)
+                                      .withValues(alpha: .16),
+                                  blurRadius: 36,
+                                ),
+                              ],
+                            ),
+                            child: Image.asset(
+                              'assets/images/spartan_brand.png',
+                              semanticLabel: 'FENYVO',
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    const Text(
+                      'FENYVO',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 32,
+                        letterSpacing: 3,
+                        fontWeight: FontWeight.w900,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    const Text(
+                      'SPARTA • FENIX',
+                      style: TextStyle(
+                        color: Color(0xFFE6BE69),
+                        fontSize: 11,
+                        letterSpacing: 3,
+                      ),
+                    ),
+                    const SizedBox(height: 44),
+                    if (_isLoading)
+                      const SizedBox(
+                        width: 28,
+                        height: 28,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.7,
+                          color: Color(0xFFE6BE69),
+                        ),
+                      ),
+                    const SizedBox(height: 20),
+                    AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 250),
+                      child: Text(
+                        _statusText,
+                        key: ValueKey<String>(_statusText),
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Color(0xFFA6B6C8),
+                          fontSize: 14,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }
+}
+
+class _SplashRingPainter extends CustomPainter {
+  const _SplashRingPainter();
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = size.shortestSide * .47;
+    canvas.drawCircle(
+      center,
+      radius,
+      Paint()
+        ..color = const Color(0xFF7B96AE).withValues(alpha: .29)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.1,
+    );
+    canvas.drawArc(
+      Rect.fromCircle(center: center, radius: radius),
+      -.25,
+      1.3,
+      false,
+      Paint()
+        ..color = const Color(0xFFE6BE69)
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 2.5
+        ..strokeCap = StrokeCap.round,
+    );
+    canvas.drawCircle(
+      Offset(center.dx + radius, center.dy),
+      3.5,
+      Paint()..color = const Color(0xFFFFDF97),
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant _SplashRingPainter oldDelegate) => false;
 }

@@ -559,6 +559,8 @@ class _ChatScreenState extends State<ChatScreen>
 
   final ImagePicker _privateImagePicker = ImagePicker();
   bool _sendingPrivateMedia = false;
+  List<String> _registeredUsers = const [];
+  Completer<List<String>>? _registeredUsersCompleter;
 
   final AudioRecorder _voiceRecorder = AudioRecorder();
   final AudioPlayer _voicePlayer = AudioPlayer();
@@ -1850,6 +1852,26 @@ class _ChatScreenState extends State<ChatScreen>
 
     final currentUser = SocketService.instance.currentUser ?? '';
 
+    if (type == 'registered_users') {
+      final rawUsers = data['users'];
+      if (rawUsers is List) {
+        final me = currentUser.trim().toLowerCase();
+        final users =
+            rawUsers
+                .map((e) => e?.toString().trim() ?? '')
+                .where((e) => e.isNotEmpty && e.toLowerCase() != me)
+                .toSet()
+                .toList()
+              ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
+        _registeredUsers = users;
+        final completer = _registeredUsersCompleter;
+        if (completer != null && !completer.isCompleted) {
+          completer.complete(users);
+        }
+      }
+      return;
+    }
+
     if (type == 'e2ee_invite' &&
         data['from']?.toString().trim() == widget.targetUser) {
       unawaited(_showIncomingE2eeInvite(widget.targetUser));
@@ -2820,10 +2842,102 @@ class _ChatScreenState extends State<ChatScreen>
                 _chatText('file'),
                 _pickPrivateFile,
               ),
+              item(
+                Icons.person_outline_rounded,
+                'Контакт',
+                _showShareContactPicker,
+              ),
             ],
           ),
         );
       },
+    );
+  }
+
+  Future<void> _showShareContactPicker() async {
+    if (_sendingPrivateMedia || _isRecordingVoice) return;
+
+    final completer = Completer<List<String>>();
+    _registeredUsersCompleter = completer;
+    SocketService.instance.getRegisteredUsers();
+
+    List<String> users = _registeredUsers;
+    try {
+      users = await completer.future.timeout(const Duration(seconds: 8));
+    } on TimeoutException {
+      users = _registeredUsers;
+    } finally {
+      if (identical(_registeredUsersCompleter, completer)) {
+        _registeredUsersCompleter = null;
+      }
+    }
+
+    if (!mounted) return;
+    if (users.isEmpty) {
+      _privateMediaSnack('Контакты не найдены');
+      return;
+    }
+
+    final selected = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: SpartanPalette.surface,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: SizedBox(
+          height: MediaQuery.of(sheetContext).size.height * .65,
+          child: Column(
+            children: [
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 8, 16, 12),
+                child: Text(
+                  'Поделиться контактом',
+                  style: TextStyle(
+                    color: SpartanPalette.ink,
+                    fontSize: 20,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              Expanded(
+                child: ListView.separated(
+                  itemCount: users.length,
+                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  itemBuilder: (context, index) {
+                    final user = users[index];
+                    return ListTile(
+                      leading: CircleAvatar(
+                        child: Text(user.substring(0, 1).toUpperCase()),
+                      ),
+                      title: Text(
+                        user,
+                        style: const TextStyle(
+                          color: SpartanPalette.ink,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      subtitle: Text(
+                        '@$user',
+                        style: const TextStyle(color: SpartanPalette.secondary),
+                      ),
+                      trailing: Icon(Icons.send_rounded, color: _gold),
+                      onTap: () => Navigator.of(sheetContext).pop(user),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    if (!mounted || selected == null || selected.trim().isEmpty) return;
+
+    final username = selected.trim();
+    SocketService.instance.sendMessage(
+      widget.targetUser,
+      'Контакт: @$username',
+      sharedContact: <String, dynamic>{'username': username, 'name': username},
     );
   }
 
@@ -9240,6 +9354,80 @@ class _ChatScreenState extends State<ChatScreen>
   // \u041E\u0414\u041D\u041E \u0421\u041E\u041E\u0411\u0429\u0415\u041D\u0418\u0415
   // ========================================
 
+  Widget _buildSharedContactCard(
+    Map<String, dynamic> contact, {
+    required bool isMe,
+  }) {
+    final username = contact['username']?.toString().trim() ?? '';
+    final name = contact['name']?.toString().trim() ?? '';
+    final title = name.isNotEmpty ? name : username;
+    final initial = title.isNotEmpty
+        ? title.substring(0, 1).toUpperCase()
+        : '?';
+
+    return Container(
+      constraints: const BoxConstraints(minWidth: 220, maxWidth: 320),
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isMe
+            ? SpartanPalette.surface.withValues(alpha: .18)
+            : SpartanPalette.blue.withValues(alpha: .10),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: isMe ? SpartanPalette.line : _gold.withValues(alpha: .42),
+        ),
+      ),
+      child: Row(
+        children: [
+          CircleAvatar(
+            radius: 23,
+            backgroundColor: SpartanPalette.surfaceRaised,
+            child: Text(
+              initial,
+              style: const TextStyle(
+                color: _gold,
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ),
+          const SizedBox(width: 11),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: SpartanPalette.ink,
+                    fontSize: 15,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                if (username.isNotEmpty) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    '@$username',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: SpartanPalette.secondary,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          const Icon(Icons.person_rounded, color: _gold, size: 22),
+        ],
+      ),
+    );
+  }
+
   Widget _buildMessageBubble(Map<String, dynamic> message) {
     if (message['localCallEntry'] == true) {
       return _buildCallHistoryBubble(message);
@@ -9261,6 +9449,14 @@ class _ChatScreenState extends State<ChatScreen>
         privateMessageType == 'file';
 
     final text = message['text']?.toString() ?? '';
+    Map<String, dynamic>? sharedContact;
+    final rawSharedContact = message['sharedContact'];
+    if (rawSharedContact is Map) {
+      final parsed = Map<String, dynamic>.from(rawSharedContact);
+      if (parsed['username']?.toString().trim().isNotEmpty == true) {
+        sharedContact = parsed;
+      }
+    }
 
     final from = message['from']?.toString() ?? '';
 
@@ -9280,8 +9476,8 @@ class _ChatScreenState extends State<ChatScreen>
 
     final bubbleMaxWidth = isWindowsDesktop
         ? forwardedFrom.isNotEmpty
-              ? 680.0
-              : 620.0
+              ? 520.0
+              : 480.0
         : MediaQuery.of(context).size.width * 0.7;
 
     final timeStr = _formatTime(message['time']);
@@ -9313,15 +9509,25 @@ class _ChatScreenState extends State<ChatScreen>
                 : SpartanPalette.line.withValues(alpha: .88),
             width: .75,
           );
-    final signalShape = BeveledRectangleBorder(
-      borderRadius: BorderRadius.only(
-        topLeft: Radius.circular(isMe ? 13 : 5),
-        topRight: Radius.circular(isMe ? 5 : 13),
-        bottomRight: Radius.circular(isMe ? 13 : 5),
-        bottomLeft: Radius.circular(isMe ? 5 : 13),
-      ),
-      side: signalBorder,
-    );
+    final signalShape = isWindowsDesktop
+        ? RoundedRectangleBorder(
+            borderRadius: BorderRadius.only(
+              topLeft: Radius.circular(isMe ? 18 : 6),
+              topRight: Radius.circular(isMe ? 6 : 18),
+              bottomLeft: const Radius.circular(18),
+              bottomRight: const Radius.circular(18),
+            ),
+            side: signalBorder,
+          )
+        : BeveledRectangleBorder(
+            borderRadius: BorderRadius.only(
+              topLeft: Radius.circular(isMe ? 13 : 5),
+              topRight: Radius.circular(isMe ? 5 : 13),
+              bottomRight: Radius.circular(isMe ? 13 : 5),
+              bottomLeft: Radius.circular(isMe ? 5 : 13),
+            ),
+            side: signalBorder,
+          );
 
     return Align(
       alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
@@ -9367,8 +9573,8 @@ class _ChatScreenState extends State<ChatScreen>
               : null,
           child: Padding(
             padding: EdgeInsets.only(
-              top: isWindowsDesktop ? 3 : 4,
-              bottom: isWindowsDesktop ? 12 : 18,
+              top: isWindowsDesktop ? 2 : 4,
+              bottom: isWindowsDesktop ? 8 : 18,
             ),
             child: Stack(
               clipBehavior: Clip.none,
@@ -9482,7 +9688,9 @@ class _ChatScreenState extends State<ChatScreen>
                         const SizedBox(height: 3),
                       ],
 
-                      if (isVoiceMessage)
+                      if (sharedContact != null)
+                        _buildSharedContactCard(sharedContact, isMe: isMe)
+                      else if (isVoiceMessage)
                         _buildVoiceMessagePlayer(message, isMe: isMe)
                       else if (isPrivateMediaMessage)
                         _buildPrivateMediaBody(message, isMe: isMe)
@@ -9800,7 +10008,7 @@ class _ChatScreenState extends State<ChatScreen>
                     ),
                   ),
 
-                if (isMe)
+                if (isMe && !isWindowsDesktop)
                   Positioned(
                     right: 2,
                     top: 12,
@@ -9868,7 +10076,9 @@ class _ChatScreenState extends State<ChatScreen>
               ),
             ),
             child: Container(
-              constraints: const BoxConstraints(maxWidth: 340),
+              constraints: BoxConstraints(
+                maxWidth: Platform.isWindows ? 310 : 340,
+              ),
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(18),
@@ -10500,26 +10710,27 @@ class _ChatScreenState extends State<ChatScreen>
 
     return Stack(
       children: [
-        Positioned(
-          left: isWindowsDesktop ? 33 : 27,
-          top: 0,
-          bottom: 0,
-          child: Container(
-            width: 1.2,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  Colors.transparent,
-                  SpartanPalette.line.withValues(alpha: .82),
-                  SpartanPalette.line.withValues(alpha: .82),
-                  Colors.transparent,
-                ],
+        if (!isWindowsDesktop)
+          Positioned(
+            left: 27,
+            top: 0,
+            bottom: 0,
+            child: Container(
+              width: 1.2,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Colors.transparent,
+                    SpartanPalette.line.withValues(alpha: .82),
+                    SpartanPalette.line.withValues(alpha: .82),
+                    Colors.transparent,
+                  ],
+                ),
               ),
             ),
           ),
-        ),
         Positioned.fill(
           child: isWindowsDesktop
               ? ScrollbarTheme(
@@ -10561,7 +10772,7 @@ class _ChatScreenState extends State<ChatScreen>
                     child: ListView.builder(
                       controller: _messageScrollController,
                       reverse: true,
-                      padding: const EdgeInsets.fromLTRB(30, 18, 18, 18),
+                      padding: const EdgeInsets.fromLTRB(28, 22, 28, 22),
                       itemCount: _messages.length,
                       keyboardDismissBehavior:
                           ScrollViewKeyboardDismissBehavior.onDrag,
@@ -10641,7 +10852,9 @@ class _ChatScreenState extends State<ChatScreen>
               minimum: const EdgeInsets.only(bottom: 1),
               child: Center(
                 child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 920),
+                  constraints: BoxConstraints(
+                    maxWidth: Platform.isWindows ? 800 : 920,
+                  ),
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [

@@ -104,6 +104,7 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
 
   switch (message) {
     case WM_CLOSE:
+      SavePlacement();
       if (!exiting_) {
         ShowWindow(hwnd, SW_HIDE);
         NotifyVisibility(false);

@@ -1337,6 +1337,12 @@ class SocketService {
     _send('get_communication_state', {'contact': user});
   }
 
+  /// Запрашивает список подтверждённых контактов
+  /// текущего пользователя с сервера Fenyvo.
+  void getContacts() {
+    _send('get_contacts', const {});
+  }
+
   void getCommunicationRequests() {
     _send('get_communication_requests', const {});
   }
@@ -1355,11 +1361,19 @@ class SocketService {
     required String about,
     required String region,
     required String statusText,
+    required String phone,
+    required String birthDate,
+    required bool phoneVisible,
+    required bool birthDateVisible,
   }) {
     _send('update_user_profile', {
       'about': about.trim(),
       'region': region.trim(),
       'statusText': statusText.trim(),
+      'phone': phone.trim(),
+      'birthDate': birthDate.trim(),
+      'phoneVisible': phoneVisible,
+      'birthDateVisible': birthDateVisible,
     });
   }
 
@@ -1411,6 +1425,7 @@ class SocketService {
     Map<String, dynamic>? replyTo,
     String? forwardedFrom,
     String? forwardComment,
+    Map<String, dynamic>? sharedContact,
   }) {
     final target = to.trim();
 
@@ -1454,6 +1469,13 @@ class SocketService {
 
     if (comment.isNotEmpty) {
       messageData['forwardComment'] = comment;
+    }
+
+    if (sharedContact != null) {
+      final username = sharedContact['username']?.toString().trim() ?? '';
+      if (username.isNotEmpty) {
+        messageData['sharedContact'] = Map<String, dynamic>.from(sharedContact);
+      }
     }
 
     final user = currentUser?.trim() ?? '';
@@ -1675,6 +1697,10 @@ class SocketService {
     if (message['forwardComment'] != null)
       'forwardComment': message['forwardComment'],
     if (message['messageType'] != null) 'messageType': message['messageType'],
+    if (message['sharedContact'] is Map)
+      'sharedContact': Map<String, dynamic>.from(
+        message['sharedContact'] as Map,
+      ),
     if (message['mediaId'] != null) 'mediaId': message['mediaId'],
     if (message['fileName'] != null) 'fileName': message['fileName'],
     if (message['fileSize'] != null) 'fileSize': message['fileSize'],
@@ -2086,6 +2112,43 @@ class SocketService {
       'requestId': id,
       'action': cleanAction,
       'text': cleanText,
+    });
+  }
+
+  void sendSupportAiRequest({required String requestId, required String text}) {
+    final id = requestId.trim();
+    final cleanText = text.trim();
+
+    if (id.isEmpty || cleanText.isEmpty) {
+      return;
+    }
+
+    _send('support_ai_request', {'requestId': id, 'text': cleanText});
+  }
+
+  bool sendSupportTicketRequest({
+    required String requestId,
+    required String text,
+    required String email,
+    required bool consent,
+  }) {
+    final id = requestId.trim();
+    final body = text.trim();
+    final contact = email.trim();
+    if (!isAuthenticated ||
+        consent != true ||
+        !RegExp(r'^[a-zA-Z0-9_-]{8,100}$').hasMatch(id) ||
+        body.length < 5 ||
+        body.length > 2000 ||
+        contact.length > 254 ||
+        !RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(contact)) {
+      return false;
+    }
+    return _send('support_ticket_request', {
+      'requestId': id,
+      'text': body,
+      'email': contact,
+      'consent': true,
     });
   }
 

@@ -7,7 +7,7 @@
 abstract final class ServerConfig {
   static const String url = String.fromEnvironment(
     'SPARTAN_SERVER_URL',
-    defaultValue: 'ws://192.168.0.117:8080',
+    defaultValue: 'wss://fenyvo.com/ws',
   );
 
   static Uri get websocketUri {

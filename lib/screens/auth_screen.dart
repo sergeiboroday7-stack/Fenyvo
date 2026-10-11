@@ -1,6 +1,5 @@
-import '../theme/spartan_theme.dart';
-
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -22,10 +21,15 @@ class _AuthScreenState extends State<AuthScreen> {
   final TextEditingController _usernameController = TextEditingController();
 
   final TextEditingController _passwordController = TextEditingController();
+  final TextEditingController _confirmPasswordController =
+      TextEditingController();
+  bool _passwordVisible = false;
+  bool _confirmPasswordVisible = false;
 
   bool _isLoading = false;
   bool _isRegisterMode = false;
   bool _isAutoLogin = false;
+  bool _showWelcome = false;
 
   String _error = '';
 
@@ -50,6 +54,7 @@ class _AuthScreenState extends State<AuthScreen> {
 
     _usernameController.dispose();
     _passwordController.dispose();
+    _confirmPasswordController.dispose();
     super.dispose();
   }
 
@@ -81,6 +86,9 @@ class _AuthScreenState extends State<AuthScreen> {
       });
 
       await _connectAndLogin();
+    } else {
+      // A first-time or signed-out user chooses registration or sign-in.
+      setState(() => _showWelcome = true);
     }
   }
 
@@ -352,6 +360,13 @@ class _AuthScreenState extends State<AuthScreen> {
       return;
     }
 
+    if (password != _confirmPasswordController.text) {
+      setState(() {
+        _error = 'Пароли не совпадают';
+      });
+      return;
+    }
+
     setState(() {
       _isLoading = true;
       _isAutoLogin = false;
@@ -391,350 +406,570 @@ class _AuthScreenState extends State<AuthScreen> {
   // ПОЛЕ ВВОДА
   // ========================================
 
-  InputDecoration _inputDecoration({
-    required String hint,
-    required IconData icon,
-  }) {
-    return InputDecoration(
-      hintText: hint,
-      hintStyle: const TextStyle(color: SpartanPalette.secondary),
-      prefixIcon: Icon(icon, color: SpartanPalette.ink),
-      filled: true,
-      fillColor: SpartanPalette.surface.withValues(alpha: 0.62),
-      enabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
-        borderSide: BorderSide(
-          color: SpartanPalette.ink.withValues(alpha: 0.35),
+  static const _navy = Color(0xFF091827);
+  static const _gold = Color(0xFFE6BE69);
+  static const _muted = Color(0xFFA6B6C8);
+  static const _field = Color(0xFF192C43);
+
+  void _goWelcome() => setState(() {
+    _showWelcome = true;
+    _isRegisterMode = false;
+    _error = '';
+    _passwordVisible = false;
+    _confirmPasswordVisible = false;
+  });
+
+  void _openMode(bool register) => setState(() {
+    _showWelcome = false;
+    _isRegisterMode = register;
+    _error = '';
+    _passwordVisible = false;
+    _confirmPasswordVisible = false;
+  });
+
+  Widget _panel({required Widget child, bool compact = false}) => Container(
+    padding: EdgeInsets.all(compact ? 18 : 22),
+    decoration: BoxDecoration(
+      color: const Color(0xFF14263A).withValues(alpha: .92),
+      borderRadius: BorderRadius.circular(28),
+      border: Border.all(color: _gold.withValues(alpha: .27)),
+      boxShadow: [
+        BoxShadow(
+          color: Colors.black.withValues(alpha: .26),
+          blurRadius: 34,
+          offset: const Offset(0, 16),
+        ),
+        BoxShadow(color: _gold.withValues(alpha: .035), blurRadius: 27),
+      ],
+    ),
+    child: child,
+  );
+
+  InputDecoration _premiumInput(String hint, IconData icon, {Widget? suffix}) =>
+      InputDecoration(
+        hintText: hint,
+        hintStyle: const TextStyle(color: _muted),
+        prefixIcon: Icon(icon, color: _gold, size: 21),
+        suffixIcon: suffix,
+        filled: true,
+        fillColor: _field,
+        contentPadding: const EdgeInsets.symmetric(
+          vertical: 18,
+          horizontal: 16,
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: BorderSide(
+            color: const Color(0xFF69809A).withValues(alpha: .36),
+          ),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: _gold, width: 1.6),
+        ),
+        disabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(16),
+          borderSide: const BorderSide(color: Color(0xFF3A4A5B)),
+        ),
+      );
+
+  Widget _primaryAction(
+    String label,
+    VoidCallback onTap, {
+    IconData icon = Icons.arrow_forward_rounded,
+  }) => SizedBox(
+    height: 56,
+    width: double.infinity,
+    child: ElevatedButton(
+      onPressed: _isLoading ? null : onTap,
+      style: ElevatedButton.styleFrom(
+        backgroundColor: _gold,
+        foregroundColor: _navy,
+        disabledBackgroundColor: _gold.withValues(alpha: .42),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(17)),
+        elevation: 4,
+        shadowColor: _gold.withValues(alpha: .36),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Flexible(
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Icon(icon, size: 21),
+        ],
+      ),
+    ),
+  );
+
+  Widget _welcomeBody() => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      const Text(
+        'ОБЩЕНИЕ БЕЗ ЛИШНЕГО ШУМА',
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          color: _gold,
+          fontSize: 11,
+          letterSpacing: 2.1,
+          fontWeight: FontWeight.w700,
         ),
       ),
-      focusedBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
-        borderSide: const BorderSide(color: SpartanPalette.ink, width: 1.5),
+      const SizedBox(height: 15),
+      const Text(
+        'Люди ближе.\nЛишнее — дальше.',
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          color: Colors.white,
+          fontSize: 27,
+          height: 1.22,
+          fontWeight: FontWeight.w800,
+        ),
       ),
-      disabledBorder: OutlineInputBorder(
-        borderRadius: BorderRadius.circular(14),
-        borderSide: const BorderSide(color: SpartanPalette.line),
+      const SizedBox(height: 14),
+      const Text(
+        'Чаты, звонки и файлы — в одном пространстве. Без обязательного номера телефона.',
+        textAlign: TextAlign.center,
+        style: TextStyle(color: _muted, fontSize: 13, height: 1.5),
       ),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-    );
-  }
+      const SizedBox(height: 32),
+      _primaryAction('СОЗДАТЬ АККАУНТ', () => _openMode(true)),
+      const SizedBox(height: 12),
+      SizedBox(
+        height: 54,
+        child: OutlinedButton.icon(
+          onPressed: () => _openMode(false),
+          icon: const Icon(Icons.login_rounded, size: 20),
+          label: const Text(
+            'У МЕНЯ ЕСТЬ АККАУНТ',
+            style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
+          ),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: Colors.white,
+            side: BorderSide(color: _gold.withValues(alpha: .5)),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+          ),
+        ),
+      ),
+    ],
+  );
 
-  // ========================================
-  // ЭКРАН
-  // ========================================
-
-  @override
-  Widget build(BuildContext context) {
+  Widget _formBody() {
     final language = AppLanguageService.instance;
-    return Scaffold(
-      backgroundColor: SpartanPalette.canvas,
-      resizeToAvoidBottomInset: true,
-
-      body: Stack(
-        fit: StackFit.expand,
-        children: [
-          // ==================================
-          // ФОН SPARTA / FENIX
-          // ==================================
-
-          const ColoredBox(color: SpartanPalette.canvas),
-
-          // ==================================
-          // ЗАТЕМНЕНИЕ ДЛЯ ЧИТАЕМОСТИ
-          // ==================================
-          Container(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [
-                  SpartanPalette.canvas.withValues(alpha: 0.20),
-                  SpartanPalette.canvas.withValues(alpha: 0.48),
-                  SpartanPalette.canvas.withValues(alpha: 0.76),
-                  SpartanPalette.canvas.withValues(alpha: 0.92),
-                ],
-                stops: const [0.0, 0.38, 0.72, 1.0],
+    final registration = _isRegisterMode;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            IconButton(
+              onPressed: _isLoading ? null : _goWelcome,
+              tooltip: 'Назад',
+              icon: const Icon(Icons.arrow_back_rounded, color: _gold),
+            ),
+            Expanded(
+              child: Text(
+                registration ? 'СОЗДАНИЕ АККАУНТА' : 'ВХОД В FENYVO',
+                textAlign: TextAlign.center,
+                style: const TextStyle(
+                  color: _gold,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 1.5,
+                ),
+              ),
+            ),
+            const SizedBox(width: 48),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Text(
+          registration ? 'Начните общение' : 'С возвращением!',
+          textAlign: TextAlign.center,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 25,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          registration
+              ? 'Выберите ник и надёжный пароль'
+              : 'Войдите под своим ником',
+          textAlign: TextAlign.center,
+          style: const TextStyle(color: _muted, fontSize: 13),
+        ),
+        const SizedBox(height: 19),
+        if (registration) ...[
+          DropdownButtonFormField<String>(
+            initialValue: language.code.value,
+            isExpanded: true,
+            decoration: _premiumInput(
+              'Язык приложения',
+              Icons.language_rounded,
+            ),
+            dropdownColor: const Color(0xFF14263A),
+            style: const TextStyle(color: Colors.white),
+            items: AppLanguageService.languages
+                .map(
+                  (item) => DropdownMenuItem<String>(
+                    value: item.code,
+                    child: Text(
+                      '${item.flag}  ${item.label}',
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                )
+                .toList(),
+            onChanged: _isLoading
+                ? null
+                : (value) {
+                    if (value != null) unawaited(language.select(value));
+                  },
+          ),
+          const SizedBox(height: 13),
+        ],
+        TextField(
+          controller: _usernameController,
+          enabled: !_isLoading,
+          autocorrect: false,
+          style: const TextStyle(color: Colors.white),
+          textInputAction: TextInputAction.next,
+          decoration: _premiumInput(
+            'Ник пользователя',
+            Icons.alternate_email_rounded,
+          ),
+        ),
+        const SizedBox(height: 13),
+        TextField(
+          controller: _passwordController,
+          enabled: !_isLoading,
+          obscureText: !_passwordVisible,
+          style: const TextStyle(color: Colors.white),
+          onChanged: registration ? (_) => setState(() {}) : null,
+          textInputAction: registration
+              ? TextInputAction.next
+              : TextInputAction.done,
+          onSubmitted: (_) {
+            if (!registration && !_isLoading) _login();
+          },
+          decoration: _premiumInput(
+            'Пароль',
+            Icons.lock_outline_rounded,
+            suffix: IconButton(
+              tooltip: _passwordVisible ? 'Скрыть пароль' : 'Показать пароль',
+              onPressed: () =>
+                  setState(() => _passwordVisible = !_passwordVisible),
+              icon: Icon(
+                _passwordVisible
+                    ? Icons.visibility_off_outlined
+                    : Icons.visibility_outlined,
+                color: _muted,
               ),
             ),
           ),
-
-          // ==================================
-          // СОДЕРЖИМОЕ
-          // ==================================
-          SafeArea(
-            child: SingleChildScrollView(
-              keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
-              padding: const EdgeInsets.fromLTRB(20, 24, 20, 30),
-              child: ConstrainedBox(
-                constraints: BoxConstraints(
-                  minHeight:
-                      MediaQuery.of(context).size.height -
-                      MediaQuery.of(context).padding.top -
-                      MediaQuery.of(context).padding.bottom -
-                      54,
-                ),
-                child: IntrinsicHeight(
-                  child: Column(
+        ),
+        if (registration) ...[
+          const SizedBox(height: 12),
+          const Text(
+            'Пароль: от 8 до 128 символов. Сохраните его в надёжном месте.',
+            style: TextStyle(color: _muted, fontSize: 12, height: 1.4),
+          ),
+          AnimatedSize(
+            duration: MediaQuery.of(context).disableAnimations
+                ? Duration.zero
+                : const Duration(milliseconds: 300),
+            curve: Curves.easeInOutCubic,
+            alignment: Alignment.topCenter,
+            child: _passwordController.text.length >= 8
+                ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      // ========================
-                      // ЛОГОТИП
-                      // ========================
-
-                      const SizedBox(height: 20),
-
-                      Image.asset(
-                        'assets/images/spartan_brand.png',
-                        width: 80,
-                        height: 80,
-                        semanticLabel: 'FENYVO',
-                      ),
-
                       const SizedBox(height: 14),
-
-                      const Text(
-                        'FENYVO',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: SpartanPalette.ink,
-                          fontSize: 28,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: 2.0,
-                        ),
-                      ),
-
-                      const SizedBox(height: 5),
-
-                      Text(
-                        _isRegisterMode
-                            ? language.text('create')
-                            : language.text('welcome'),
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          color: SpartanPalette.secondary,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: 1.4,
-                        ),
-                      ),
-
-                      const SizedBox(height: 28),
-
-                      // ========================
-                      // ПАНЕЛЬ ВХОДА
-                      // ========================
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(18),
-                        decoration: BoxDecoration(
-                          color: SpartanPalette.surface.withValues(alpha: 0.58),
-                          borderRadius: BorderRadius.circular(22),
-                          border: Border.all(
-                            color: SpartanPalette.ink.withValues(alpha: 0.30),
+                      TextField(
+                        controller: _confirmPasswordController,
+                        enabled: !_isLoading,
+                        obscureText: !_confirmPasswordVisible,
+                        style: const TextStyle(color: Colors.white),
+                        textInputAction: TextInputAction.done,
+                        onChanged: (_) => setState(() {}),
+                        onSubmitted: (_) {
+                          if (!_isLoading) _register();
+                        },
+                        decoration: _premiumInput(
+                          'Повторите пароль',
+                          Icons.verified_user_outlined,
+                          suffix: IconButton(
+                            tooltip: _confirmPasswordVisible
+                                ? 'Скрыть пароль'
+                                : 'Показать пароль',
+                            onPressed: () => setState(
+                              () => _confirmPasswordVisible =
+                                  !_confirmPasswordVisible,
+                            ),
+                            icon: Icon(
+                              _confirmPasswordVisible
+                                  ? Icons.visibility_off_outlined
+                                  : Icons.visibility_outlined,
+                              color: _muted,
+                            ),
                           ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.06),
-                              blurRadius: 24,
-                              offset: const Offset(0, 10),
-                            ),
-                          ],
                         ),
-                        child: Column(
+                      ),
+                      if (_confirmPasswordController.text.isNotEmpty) ...[
+                        const SizedBox(height: 9),
+                        Row(
                           children: [
-                            Text(
-                              _isRegisterMode
-                                  ? language.text('register')
-                                  : language.text('login'),
-                              style: const TextStyle(
-                                color: SpartanPalette.ink,
-                                fontSize: 22,
-                                fontWeight: FontWeight.bold,
+                            Icon(
+                              _confirmPasswordController.text ==
+                                      _passwordController.text
+                                  ? Icons.check_circle_outline_rounded
+                                  : Icons.info_outline_rounded,
+                              color:
+                                  _confirmPasswordController.text ==
+                                      _passwordController.text
+                                  ? const Color(0xFF8CDBAF)
+                                  : _gold,
+                              size: 17,
+                            ),
+                            const SizedBox(width: 7),
+                            Expanded(
+                              child: Text(
+                                _confirmPasswordController.text ==
+                                        _passwordController.text
+                                    ? 'Пароли совпадают'
+                                    : 'Пароли пока не совпадают',
+                                style: TextStyle(
+                                  color:
+                                      _confirmPasswordController.text ==
+                                          _passwordController.text
+                                      ? const Color(0xFF8CDBAF)
+                                      : _muted,
+                                  fontSize: 12,
+                                ),
                               ),
                             ),
-
-                            const SizedBox(height: 20),
-
-                            if (_isRegisterMode) ...[
-                              DropdownButtonFormField<String>(
-                                initialValue: language.code.value,
-                                decoration: _inputDecoration(
-                                  hint: language.text('language'),
-                                  icon: Icons.language_rounded,
-                                ),
-                                dropdownColor: SpartanPalette.surface,
-                                style: const TextStyle(
-                                  color: SpartanPalette.ink,
-                                ),
-                                items: AppLanguageService.languages
-                                    .map(
-                                      (item) => DropdownMenuItem<String>(
-                                        value: item.code,
-                                        child: Text(
-                                          '${item.flag}  ${item.label}',
-                                        ),
-                                      ),
-                                    )
-                                    .toList(),
-                                onChanged: _isLoading
-                                    ? null
-                                    : (value) {
-                                        if (value != null) {
-                                          unawaited(language.select(value));
-                                        }
-                                      },
-                              ),
-                              const SizedBox(height: 13),
-                            ],
-
-                            TextField(
-                              controller: _usernameController,
-                              enabled: !_isLoading,
-                              style: const TextStyle(color: SpartanPalette.ink),
-                              textInputAction: TextInputAction.next,
-                              decoration: _inputDecoration(
-                                hint: 'Username',
-                                icon: Icons.person_outline,
-                              ),
-                            ),
-
-                            const SizedBox(height: 13),
-
-                            TextField(
-                              controller: _passwordController,
-                              enabled: !_isLoading,
-                              style: const TextStyle(color: SpartanPalette.ink),
-                              obscureText: true,
-                              textInputAction: TextInputAction.next,
-                              decoration: _inputDecoration(
-                                hint: 'Password',
-                                icon: Icons.lock_outline,
-                              ),
-                            ),
-
-                            const SizedBox(height: 18),
-
-                            if (_error.isNotEmpty)
-                              Container(
-                                width: double.infinity,
-                                margin: const EdgeInsets.only(bottom: 14),
-                                padding: const EdgeInsets.all(10),
-                                decoration: BoxDecoration(
-                                  color: Colors.red.withValues(alpha: 0.14),
-                                  borderRadius: BorderRadius.circular(10),
-                                  border: Border.all(
-                                    color: Colors.red.withValues(alpha: 0.45),
-                                  ),
-                                ),
-                                child: Text(
-                                  _error,
-                                  textAlign: TextAlign.center,
-                                  style: const TextStyle(
-                                    color: Colors.redAccent,
-                                    fontSize: 13,
-                                  ),
-                                ),
-                              ),
-
-                            if (_isLoading)
-                              Column(
-                                children: [
-                                  const CircularProgressIndicator(
-                                    color: SpartanPalette.ink,
-                                  ),
-
-                                  const SizedBox(height: 15),
-
-                                  Text(
-                                    _isAutoLogin
-                                        ? 'Автоматический вход...'
-                                        : _isRegisterMode
-                                        ? 'Регистрация...'
-                                        : 'Подключение...',
-                                    style: const TextStyle(
-                                      color: SpartanPalette.secondary,
-                                    ),
-                                  ),
-                                ],
-                              )
-                            else
-                              Column(
-                                children: [
-                                  SizedBox(
-                                    width: double.infinity,
-                                    height: 54,
-                                    child: ElevatedButton(
-                                      onPressed: _isRegisterMode
-                                          ? _register
-                                          : _login,
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: SpartanPalette.blue,
-                                        foregroundColor: SpartanPalette.ink,
-                                        elevation: 0,
-                                        shadowColor: Colors.transparent,
-                                        shape: RoundedRectangleBorder(
-                                          borderRadius: BorderRadius.circular(
-                                            14,
-                                          ),
-                                        ),
-                                      ),
-                                      child: Text(
-                                        _isRegisterMode
-                                            ? language.text('registerButton')
-                                            : language.text('loginButton'),
-                                        style: const TextStyle(
-                                          fontWeight: FontWeight.w900,
-                                          letterSpacing: 0.8,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-
-                                  const SizedBox(height: 8),
-
-                                  TextButton(
-                                    onPressed: () {
-                                      setState(() {
-                                        _isRegisterMode = !_isRegisterMode;
-
-                                        _error = '';
-                                      });
-                                    },
-                                    child: Text(
-                                      _isRegisterMode
-                                          ? 'Уже есть аккаунт? Войти'
-                                          : 'Нет аккаунта? Регистрация',
-                                      textAlign: TextAlign.center,
-                                      style: const TextStyle(
-                                        color: SpartanPalette.ink,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
                           ],
                         ),
-                      ),
-
-                      const Spacer(),
-
-                      const SizedBox(height: 20),
-
-                      Text(
-                        _isRegisterMode
-                            ? 'SPARTA • FENIX • REGISTRATION'
-                            : 'SPARTA • FENIX • SECURE CHAT',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          color: SpartanPalette.ink.withValues(alpha: 0.40),
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                          letterSpacing: 1.2,
-                        ),
-                      ),
-
-                      const SizedBox(height: 6),
+                      ],
                     ],
+                  )
+                : const SizedBox(width: double.infinity),
+          ),
+        ],
+        if (_error.isNotEmpty) ...[
+          const SizedBox(height: 15),
+          Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: const Color(0xFF682B36).withValues(alpha: .55),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Text(
+              _error,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Color(0xFFFFB7BF), fontSize: 12),
+            ),
+          ),
+        ],
+        const SizedBox(height: 18),
+        if (_isLoading)
+          Column(
+            children: [
+              const CircularProgressIndicator(color: _gold),
+              const SizedBox(height: 12),
+              Text(
+                _isAutoLogin
+                    ? 'Автоматический вход...'
+                    : registration
+                    ? 'Регистрация...'
+                    : 'Подключение...',
+                style: const TextStyle(color: _muted),
+              ),
+            ],
+          )
+        else
+          _primaryAction(
+            registration ? 'ЗАРЕГИСТРИРОВАТЬСЯ' : 'ВОЙТИ',
+            registration ? _register : _login,
+            icon: registration
+                ? Icons.person_add_alt_1_rounded
+                : Icons.login_rounded,
+          ),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final view = MediaQuery.of(context);
+    final reducedMotion = view.disableAnimations || view.accessibleNavigation;
+    final welcome = _showWelcome && !_isLoading;
+    final usableHeight =
+        view.size.height -
+        view.padding.top -
+        view.padding.bottom -
+        view.viewInsets.bottom;
+    final compact = usableHeight < 770;
+    final veryCompact = usableHeight < 635;
+    final logoSize = welcome
+        ? (veryCompact
+              ? 116.0
+              : compact
+              ? 140.0
+              : 164.0)
+        : (veryCompact
+              ? 64.0
+              : compact
+              ? 82.0
+              : 104.0);
+    return Scaffold(
+      backgroundColor: _navy,
+      resizeToAvoidBottomInset: true,
+      body: Stack(
+        children: [
+          const Positioned.fill(
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: RadialGradient(
+                  center: Alignment(0, -.68),
+                  radius: 1.26,
+                  colors: [Color(0xFF1F3953), Color(0xFF0C1E30), _navy],
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            top: -135,
+            right: -125,
+            child: IgnorePointer(
+              child: Container(
+                width: 320,
+                height: 320,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: RadialGradient(
+                    colors: [_gold.withValues(alpha: .085), Colors.transparent],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          SafeArea(
+            child: LayoutBuilder(
+              builder: (context, constraints) => SingleChildScrollView(
+                keyboardDismissBehavior:
+                    ScrollViewKeyboardDismissBehavior.onDrag,
+                padding: EdgeInsets.fromLTRB(20, veryCompact ? 8 : 16, 20, 20),
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxWidth: 460,
+                      minHeight:
+                          (constraints.maxHeight - (veryCompact ? 28 : 36))
+                              .clamp(0.0, double.infinity),
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        AnimatedSize(
+                          duration: reducedMotion
+                              ? Duration.zero
+                              : const Duration(milliseconds: 250),
+                          curve: Curves.easeOutCubic,
+                          child: _PremiumOrbitMark(size: logoSize),
+                        ),
+                        SizedBox(height: veryCompact ? 5 : 9),
+                        Text(
+                          'FENYVO',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: welcome ? 30 : (veryCompact ? 22 : 26),
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 3,
+                          ),
+                        ),
+                        SizedBox(height: veryCompact ? 3 : 5),
+                        Text(
+                          'SPARTA • FENIX',
+                          style: TextStyle(
+                            color: _gold,
+                            fontSize: veryCompact ? 9 : 10,
+                            letterSpacing: 2.7,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        SizedBox(
+                          height: welcome
+                              ? (compact ? 16 : 26)
+                              : (veryCompact
+                                    ? 10
+                                    : compact
+                                    ? 14
+                                    : 20),
+                        ),
+                        AnimatedSwitcher(
+                          duration: reducedMotion
+                              ? Duration.zero
+                              : const Duration(milliseconds: 330),
+                          switchInCurve: Curves.easeOutCubic,
+                          switchOutCurve: Curves.easeInCubic,
+                          transitionBuilder: (child, animation) =>
+                              FadeTransition(
+                                opacity: animation,
+                                child: SlideTransition(
+                                  position: Tween<Offset>(
+                                    begin: const Offset(0, .035),
+                                    end: Offset.zero,
+                                  ).animate(animation),
+                                  child: child,
+                                ),
+                              ),
+                          child: KeyedSubtree(
+                            key: ValueKey<String>(
+                              welcome
+                                  ? 'welcome'
+                                  : _isRegisterMode
+                                  ? 'register'
+                                  : 'login',
+                            ),
+                            child: _panel(
+                              compact: !welcome && compact,
+                              child: welcome ? _welcomeBody() : _formBody(),
+                            ),
+                          ),
+                        ),
+                        SizedBox(height: veryCompact ? 12 : 19),
+                        const Text(
+                          'Без обязательного телефона и почты. Восстановление доступа по секретным словам пока не подключено.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: _muted,
+                            fontSize: 11,
+                            height: 1.5,
+                          ),
+                        ),
+                        const SizedBox(height: 14),
+                        Text(
+                          'SPARTA • FENIX • SECURE CHAT',
+                          style: TextStyle(
+                            color: _gold.withValues(alpha: .62),
+                            fontSize: 10,
+                            letterSpacing: 1.6,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -744,4 +979,112 @@ class _AuthScreenState extends State<AuthScreen> {
       ),
     );
   }
+}
+
+class _PremiumOrbitMark extends StatefulWidget {
+  const _PremiumOrbitMark({required this.size});
+  final double size;
+
+  @override
+  State<_PremiumOrbitMark> createState() => _PremiumOrbitMarkState();
+}
+
+class _PremiumOrbitMarkState extends State<_PremiumOrbitMark>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _rotation;
+  @override
+  void initState() {
+    super.initState();
+    _rotation = AnimationController(
+      vsync: this,
+      duration: const Duration(seconds: 10),
+    )..repeat();
+  }
+
+  @override
+  void dispose() {
+    _rotation.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final media = MediaQuery.of(context);
+    final reducedMotion = media.disableAnimations || media.accessibleNavigation;
+    if (reducedMotion) {
+      _rotation.stop();
+    } else if (!_rotation.isAnimating) {
+      _rotation.repeat();
+    }
+    return SizedBox(
+      width: widget.size,
+      height: widget.size,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Positioned.fill(
+            child: AnimatedBuilder(
+              animation: _rotation,
+              builder: (context, child) => CustomPaint(
+                painter: _PremiumOrbitPainter(
+                  reducedMotion ? 0 : _rotation.value,
+                ),
+              ),
+            ),
+          ),
+          Container(
+            width: widget.size * .70,
+            height: widget.size * .70,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              boxShadow: [
+                BoxShadow(
+                  color: const Color(0xFFE6BE69).withValues(alpha: .13),
+                  blurRadius: 32,
+                  spreadRadius: 2,
+                ),
+              ],
+            ),
+            child: Image.asset(
+              'assets/images/spartan_brand.png',
+              fit: BoxFit.contain,
+              semanticLabel: 'FENYVO',
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PremiumOrbitPainter extends CustomPainter {
+  const _PremiumOrbitPainter(this.phase);
+  final double phase;
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = size.shortestSide * .455;
+    final rect = Rect.fromCircle(center: center, radius: radius);
+    final track = Paint()
+      ..color = const Color(0xFF7194B5).withValues(alpha: .28)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2;
+    canvas.drawCircle(center, radius, track);
+    final arcPaint = Paint()
+      ..color = const Color(0xFFE6BE69)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.3
+      ..strokeCap = StrokeCap.round;
+    final a = phase * 2 * math.pi;
+    canvas.drawArc(rect, a, math.pi * .55, false, arcPaint);
+    final dot = Offset(
+      center.dx + radius * math.cos(a),
+      center.dy + radius * math.sin(a),
+    );
+    canvas.drawCircle(dot, 4, Paint()..color = const Color(0xFFF4DA9E));
+  }
+
+  @override
+  bool shouldRepaint(covariant _PremiumOrbitPainter oldDelegate) =>
+      oldDelegate.phase != phase;
 }

@@ -39,6 +39,9 @@ class Win32Window {
   // Show the current window. Returns true if the window was successfully shown.
   bool Show();
 
+  // Persist the restored bounds and maximize state for next launch.
+  void SavePlacement();
+
   // Release OS resources associated with window.
   void Destroy();
 
@@ -91,6 +94,8 @@ class Win32Window {
   static void UpdateTheme(HWND const window);
 
   bool quit_on_close_ = false;
+  bool restored_maximized_ = false;
+  bool shown_ = false;
 
   // window handle for top level window.
   HWND window_handle_ = nullptr;

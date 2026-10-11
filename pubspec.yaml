@@ -2,7 +2,7 @@ name: spartan_chat_final
 description: Spartan Chat messenger
 publish_to: "none"
 
-version: 1.8.0+4231
+version: 1.8.0+4234
 
 environment:
   sdk: ">=3.13.0 <4.0.0"
@@ -21,6 +21,8 @@ dependencies:
   public_file_saver: ^1.1.0
   web_socket_channel: ^3.0.3
   url_launcher: ^6.3.2
+  share_plus: ^12.0.2
+  app_links: ^7.2.1
 
   hive: ^2.2.3
   hive_flutter: ^1.1.0

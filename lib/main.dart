@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'services/storage_service.dart';
+import 'services/contact_link_service.dart';
 import 'services/app_language_service.dart';
 import 'services/notification_service.dart';
 import 'services/firebase_messaging_service.dart';
@@ -32,6 +33,10 @@ Future<void> main() async {
 
   await StorageService.init();
   await AppLanguageService.instance.initialize();
+
+  if (!Platform.isWindows) {
+    await ContactLinkService.instance.initialize();
+  }
 
   AppVisibility.instance.initialize();
   await NotificationService.instance.initialize();

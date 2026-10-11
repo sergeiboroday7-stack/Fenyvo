@@ -16,6 +16,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/socket_service.dart';
+import '../services/contact_link_service.dart';
 import '../services/notification_service.dart';
 import '../services/firebase_messaging_service.dart';
 import '../services/storage_service.dart';
@@ -25,6 +26,8 @@ import 'auth_screen.dart';
 import 'chat_screen.dart';
 import 'group_chat_screen.dart';
 import 'group_create_screen.dart';
+import 'contact_link_screen.dart';
+import 'contacts_screen.dart';
 
 class ChatListScreen extends StatefulWidget {
   const ChatListScreen({super.key});
@@ -47,6 +50,22 @@ class _ChatListScreenState extends State<ChatListScreen> {
   Map<String, dynamic>? _selectedDesktopGroup;
 
   String? _selectedDesktopUser;
+  bool _desktopProfileVisible = true;
+  static const _contactsWidthKey = 'fenyvo_desktop_contacts_width';
+  double _contactsWidth = 370;
+
+  Future<void> _restoreContactsWidth() async {
+    final preferences = await SharedPreferences.getInstance();
+    final saved = preferences.getDouble(_contactsWidthKey);
+    if (mounted && saved != null && saved.isFinite) {
+      setState(() => _contactsWidth = saved.clamp(260.0, 550.0));
+    }
+  }
+
+  Future<void> _saveContactsWidth() async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setDouble(_contactsWidthKey, _contactsWidth);
+  }
 
   String _tr(String key, [Map<String, Object> values = const {}]) {
     var result = AppLanguageService.instance.text(key);
@@ -78,9 +97,29 @@ class _ChatListScreenState extends State<ChatListScreen> {
 
   StreamSubscription<String>? _firebaseNotificationTapSubscription;
 
+  void _handlePendingContactLink() {
+    final username = ContactLinkService.instance.takePendingUsername()?.trim();
+    if (!mounted || username == null || username.isEmpty) return;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => ContactLinkScreen(username: username),
+        ),
+      );
+    });
+  }
+
   @override
   void initState() {
     super.initState();
+    unawaited(_restoreContactsWidth());
+
+    ContactLinkService.instance.addListener(_handlePendingContactLink);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _handlePendingContactLink();
+    });
 
     SocketService.instance.addMessageHandler(_handleMessage);
 
@@ -121,6 +160,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
 
   @override
   void dispose() {
+    ContactLinkService.instance.removeListener(_handlePendingContactLink);
     SocketService.instance.removeMessageHandler(_handleMessage);
 
     _notificationTapSubscription?.cancel();
@@ -1278,15 +1318,9 @@ class _ChatListScreenState extends State<ChatListScreen> {
     bool pinned = false,
     VoidCallback? onLongPress,
   }) {
-    final highlighted = selected || unread > 0;
-    const cardRadius = BorderRadius.only(
-      topLeft: Radius.circular(22),
-      topRight: Radius.circular(9),
-      bottomRight: Radius.circular(22),
-      bottomLeft: Radius.circular(9),
-    );
+    const cardRadius = BorderRadius.all(Radius.circular(17));
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
       child: Material(
         color: Colors.transparent,
         borderRadius: cardRadius,
@@ -1296,22 +1330,24 @@ class _ChatListScreenState extends State<ChatListScreen> {
           borderRadius: cardRadius,
           child: AnimatedContainer(
             duration: const Duration(milliseconds: 220),
-            padding: const EdgeInsets.fromLTRB(13, 13, 10, 13),
+            padding: const EdgeInsets.fromLTRB(12, 11, 11, 11),
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 colors: selected
                     ? const [SpartanPalette.surfaceRaised, SpartanPalette.blue]
                     : const [
                         SpartanPalette.surfaceSoft,
-                        SpartanPalette.surface,
+                        SpartanPalette.canvasDeep,
                       ],
               ),
               borderRadius: cardRadius,
               border: Border.all(
-                color: highlighted
-                    ? SpartanPalette.gold.withValues(alpha: .62)
+                color: selected
+                    ? SpartanPalette.gold.withValues(alpha: .90)
+                    : unread > 0
+                    ? SpartanPalette.gold.withValues(alpha: .45)
                     : SpartanPalette.line,
-                width: highlighted ? 1.1 : .7,
+                width: selected ? 1.35 : .8,
               ),
               boxShadow: const [
                 BoxShadow(
@@ -1368,17 +1404,21 @@ class _ChatListScreenState extends State<ChatListScreen> {
                     const SizedBox(height: 7),
                     if (unread > 0)
                       Container(
-                        width: 8,
-                        height: 25,
+                        constraints: const BoxConstraints(minWidth: 23),
+                        height: 23,
+                        padding: const EdgeInsets.symmetric(horizontal: 6),
+                        alignment: Alignment.center,
                         decoration: BoxDecoration(
                           color: SpartanPalette.gold,
-                          borderRadius: BorderRadius.circular(6),
-                          boxShadow: [
-                            BoxShadow(
-                              color: SpartanPalette.gold.withValues(alpha: .35),
-                              blurRadius: 8,
-                            ),
-                          ],
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        child: Text(
+                          unread > 99 ? '99+' : '$unread',
+                          style: const TextStyle(
+                            color: SpartanPalette.onGold,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w900,
+                          ),
                         ),
                       )
                     else if (pinned)
@@ -1974,17 +2014,22 @@ class _ChatListScreenState extends State<ChatListScreen> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
-                          'COMMAND DECK',
-                          style: TextStyle(
+                        Text(
+                          MediaQuery.sizeOf(context).width >= 900
+                              ? 'FENYVO'
+                              : 'COMMAND DECK',
+                          style: const TextStyle(
+                            color: SpartanPalette.gold,
                             fontSize: 25,
                             fontWeight: FontWeight.w900,
-                            letterSpacing: .8,
+                            letterSpacing: 2.2,
                           ),
                         ),
                         const SizedBox(height: 3),
                         Text(
-                          _tr('commandCenter'),
+                          MediaQuery.sizeOf(context).width >= 900
+                              ? 'БОЛЬШЕ ЧЕМ ОБЩЕНИЕ'
+                              : _tr('commandCenter'),
                           style: const TextStyle(
                             color: SpartanPalette.gold,
                             fontSize: 10,
@@ -2400,22 +2445,27 @@ class _ChatListScreenState extends State<ChatListScreen> {
           width: 48,
           height: 48,
           decoration: BoxDecoration(
-            color: _section == index ? SpartanPalette.gold : Colors.transparent,
+            color: _section == index
+                ? SpartanPalette.gold.withValues(alpha: .18)
+                : Colors.transparent,
             borderRadius: BorderRadius.circular(13),
+            border: _section == index
+                ? Border.all(color: SpartanPalette.gold.withValues(alpha: .65))
+                : null,
           ),
           child: pulseBadge
               ? Center(
                   child: _pulseBadgeIcon(
                     icon,
                     color: _section == index
-                        ? SpartanPalette.onGold
+                        ? SpartanPalette.gold
                         : SpartanPalette.ink,
                   ),
                 )
               : Icon(
                   icon,
                   color: _section == index
-                      ? SpartanPalette.onGold
+                      ? SpartanPalette.gold
                       : SpartanPalette.ink,
                 ),
         ),
@@ -2568,7 +2618,13 @@ class _ChatListScreenState extends State<ChatListScreen> {
                   icon: const Icon(Icons.bolt_rounded, size: 30),
                 ),
               ),
+              _mobileDeckButton(3, Icons.people_outline_rounded, 'Контакты'),
               _mobileDeckButton(1, Icons.call_outlined, language.text('calls')),
+              _mobileDeckButton(
+                2,
+                Icons.settings_outlined,
+                language.text('settingsNav'),
+              ),
             ],
           ),
         ),
@@ -2576,23 +2632,314 @@ class _ChatListScreenState extends State<ChatListScreen> {
     );
   }
 
+  // Desktop-only companion profile. Kept outside ChatScreen so message,
+  // encryption and media flows remain untouched.
+  Widget _desktopContactPanel(String user) {
+    final online = _isUserOnline(user);
+    final trusted = _trustedUsers.contains(user);
+    final owner = SocketService.instance.currentUser ?? '';
+    final totalMessages = owner.isEmpty
+        ? 0
+        : StorageService.getMessages(owner, user).length;
+    return Container(
+      width: 280,
+      decoration: const BoxDecoration(
+        color: SpartanPalette.canvasDeep,
+        border: Border(left: BorderSide(color: SpartanPalette.line)),
+      ),
+      child: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 17, 12, 12),
+              child: Row(
+                children: [
+                  const Expanded(
+                    child: Text(
+                      'ПРОФИЛЬ',
+                      style: TextStyle(
+                        color: SpartanPalette.gold,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 2,
+                      ),
+                    ),
+                  ),
+                  IconButton(
+                    tooltip: 'Скрыть профиль',
+                    onPressed: () =>
+                        setState(() => _desktopProfileVisible = false),
+                    icon: const Icon(Icons.close_rounded, size: 20),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 26),
+            Container(
+              padding: const EdgeInsets.all(5),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(color: SpartanPalette.gold, width: 1.5),
+              ),
+              child: _buildAvatar(user, radius: 49),
+            ),
+            const SizedBox(height: 18),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 15),
+              child: Text(
+                user,
+                textAlign: TextAlign.center,
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w800,
+                  color: SpartanPalette.ink,
+                ),
+              ),
+            ),
+            const SizedBox(height: 7),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.circle,
+                  size: 8,
+                  color: online ? SpartanPalette.online : SpartanPalette.muted,
+                ),
+                const SizedBox(width: 7),
+                Text(
+                  online ? 'В сети' : 'Не в сети',
+                  style: const TextStyle(color: SpartanPalette.secondary),
+                ),
+              ],
+            ),
+            if (trusted) ...[
+              const SizedBox(height: 9),
+              const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.verified_rounded,
+                    size: 16,
+                    color: SpartanPalette.gold,
+                  ),
+                  SizedBox(width: 5),
+                  Text(
+                    'Доверенный контакт',
+                    style: TextStyle(color: SpartanPalette.gold, fontSize: 12),
+                  ),
+                ],
+              ),
+            ],
+            const SizedBox(height: 27),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: _desktopProfileAction(
+                      Icons.call_rounded,
+                      'Аудио',
+                      () => _dial(user, false),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: _desktopProfileAction(
+                      Icons.videocam_rounded,
+                      'Видео',
+                      () => _dial(user, true),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 29),
+            const Divider(height: 1, color: SpartanPalette.line),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(22, 24, 22, 0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'ПЕРЕПИСКА',
+                    style: TextStyle(
+                      color: SpartanPalette.gold,
+                      fontWeight: FontWeight.w800,
+                      fontSize: 11,
+                      letterSpacing: 1.8,
+                    ),
+                  ),
+                  const SizedBox(height: 17),
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.chat_bubble_outline_rounded,
+                        color: SpartanPalette.secondary,
+                        size: 19,
+                      ),
+                      const SizedBox(width: 11),
+                      Expanded(
+                        child: Text(
+                          'Сообщений на устройстве',
+                          style: const TextStyle(
+                            color: SpartanPalette.secondary,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                      Text(
+                        '$totalMessages',
+                        style: const TextStyle(
+                          color: SpartanPalette.ink,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 15),
+                  const Row(
+                    children: [
+                      Icon(
+                        Icons.lock_outline_rounded,
+                        color: SpartanPalette.gold,
+                        size: 19,
+                      ),
+                      SizedBox(width: 11),
+                      Expanded(
+                        child: Text(
+                          'Настройки защиты — в чате',
+                          style: TextStyle(
+                            color: SpartanPalette.secondary,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const Spacer(),
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 10, 20, 23),
+              child: Text(
+                'FENYVO · БОЛЬШЕ ЧЕМ ОБЩЕНИЕ',
+                style: TextStyle(
+                  color: SpartanPalette.muted,
+                  fontSize: 9,
+                  letterSpacing: 1.2,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _desktopProfileAction(
+    IconData icon,
+    String title,
+    VoidCallback action,
+  ) => Material(
+    color: SpartanPalette.surfaceSoft,
+    borderRadius: BorderRadius.circular(15),
+    child: InkWell(
+      onTap: action,
+      borderRadius: BorderRadius.circular(15),
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        decoration: BoxDecoration(
+          border: Border.all(color: SpartanPalette.line),
+          borderRadius: BorderRadius.circular(15),
+        ),
+        child: Column(
+          children: [
+            Icon(icon, color: SpartanPalette.gold, size: 23),
+            const SizedBox(height: 7),
+            Text(
+              title,
+              style: const TextStyle(color: SpartanPalette.ink, fontSize: 12),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+
   @override
   Widget build(BuildContext context) {
     final desktop = MediaQuery.sizeOf(context).width >= 900;
-    final body = _section == 1
+    final body = _section == 3
+        ? ContactsScreen(
+            key: const ValueKey('fenyvo-contacts-screen'),
+            contacts: const <String>[],
+            onlineUsers: _onlineUsers.toSet(),
+            onOpenChat: _openChat,
+          )
+        : _section == 1
         ? _callsPane()
         : _section == 2
         ? _settings()
         : desktop
-        ? Row(
-            children: [
-              SizedBox(
-                width: MediaQuery.sizeOf(context).width >= 1300 ? 340 : 310,
-                child: _buildChatListPane(),
-              ),
-              const VerticalDivider(width: 1, thickness: 1),
-              Expanded(child: _desktopConversation()),
-            ],
+        ? LayoutBuilder(
+            builder: (context, constraints) {
+              // The rail is outside this body. Always leave a readable chat.
+              final usable = constraints.maxWidth;
+              final maxContacts = (usable - 360.0).clamp(260.0, 550.0);
+              final contactsWidth = _contactsWidth.clamp(260.0, maxContacts);
+              final hasProfileSpace =
+                  _selectedDesktopUser != null &&
+                  MediaQuery.sizeOf(context).width >= 1360 &&
+                  usable - contactsWidth - 7 - 280 >= 390;
+              return Row(
+                children: [
+                  SizedBox(width: contactsWidth, child: _buildChatListPane()),
+                  MouseRegion(
+                    cursor: SystemMouseCursors.resizeColumn,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onHorizontalDragUpdate: (details) {
+                        setState(() {
+                          _contactsWidth = (_contactsWidth + details.delta.dx)
+                              .clamp(260.0, maxContacts);
+                        });
+                      },
+                      onHorizontalDragEnd: (_) =>
+                          unawaited(_saveContactsWidth()),
+                      child: SizedBox(
+                        width: 7,
+                        height: double.infinity,
+                        child: Center(
+                          child: Container(
+                            width: 1,
+                            color: SpartanPalette.line,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                  Expanded(child: _desktopConversation()),
+                  if (hasProfileSpace) ...[
+                    if (_desktopProfileVisible)
+                      _desktopContactPanel(_selectedDesktopUser!)
+                    else
+                      IconButton(
+                        tooltip: 'Показать профиль',
+                        onPressed: () =>
+                            setState(() => _desktopProfileVisible = true),
+                        icon: const Icon(
+                          Icons.person_outline_rounded,
+                          color: SpartanPalette.gold,
+                        ),
+                      ),
+                  ],
+                ],
+              );
+            },
           )
         : _buildChatListPane();
     if (desktop)
@@ -2614,6 +2961,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                         Icons.chat_bubble_outline_rounded,
                         AppLanguageService.instance.text('chats'),
                       ),
+                      _railButton(3, Icons.people_outline_rounded, 'Контакты'),
                       _railButton(
                         1,
                         Icons.call_outlined,

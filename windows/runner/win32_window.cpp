@@ -3,6 +3,8 @@
 #include <dwmapi.h>
 #include <flutter_windows.h>
 
+#pragma comment(lib, "Advapi32.lib")
+
 #include "resource.h"
 
 namespace {
@@ -51,6 +53,36 @@ void EnableFullDpiSupportIfAvailable(HWND hwnd) {
     enable_non_client_dpi_scaling(hwnd);
   }
   FreeLibrary(user32_module);
+}
+
+
+// Stored per Windows user, independent from chat history and account data.
+constexpr const wchar_t kWindowStateKey[] = L"Software\\FENYVO\\DesktopWindow";
+constexpr const wchar_t kPlacementName[] = L"Placement";
+
+bool ReadSavedPlacement(WINDOWPLACEMENT* placement) {
+  DWORD size = sizeof(WINDOWPLACEMENT);
+  DWORD type = 0;
+  WINDOWPLACEMENT stored{};
+  stored.length = sizeof(WINDOWPLACEMENT);
+  if (RegGetValueW(HKEY_CURRENT_USER, kWindowStateKey, kPlacementName,
+                   RRF_RT_REG_BINARY, &type, &stored, &size) != ERROR_SUCCESS ||
+      size != sizeof(WINDOWPLACEMENT) ||
+      stored.length != sizeof(WINDOWPLACEMENT)) return false;
+  const RECT r = stored.rcNormalPosition;
+  if (r.right - r.left < 500 || r.bottom - r.top < 400 ||
+      r.right - r.left > 10000 || r.bottom - r.top > 10000) return false;
+  // Do not resurrect windows that are completely off all connected monitors.
+  HMONITOR monitor = MonitorFromRect(&r, MONITOR_DEFAULTTONULL);
+  if (!monitor) return false;
+  MONITORINFO info{sizeof(MONITORINFO)};
+  if (!GetMonitorInfoW(monitor, &info)) return false;
+  RECT visible{};
+  if (!IntersectRect(&visible, &r, &info.rcWork) ||
+      visible.right - visible.left < 80 ||
+      visible.bottom - visible.top < 80) return false;
+  *placement = stored;
+  return true;
 }
 
 }  // namespace
@@ -146,11 +178,21 @@ bool Win32Window::Create(const std::wstring& title,
 
   UpdateTheme(window);
 
+  WINDOWPLACEMENT saved{};
+  if (ReadSavedPlacement(&saved)) {
+    // Restore location without activating or displaying the window prematurely.
+    const RECT& r = saved.rcNormalPosition;
+    SetWindowPos(window, nullptr, r.left, r.top, r.right - r.left,
+                 r.bottom - r.top,
+                 SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+    restored_maximized_ = saved.showCmd == SW_SHOWMAXIMIZED;
+  }
   return OnCreate();
 }
 
 bool Win32Window::Show() {
-  return ShowWindow(window_handle_, SW_SHOWNORMAL);
+  shown_ = true;
+  return ShowWindow(window_handle_, restored_maximized_ ? SW_SHOWMAXIMIZED : SW_SHOWNORMAL);
 }
 
 // static
@@ -179,6 +221,17 @@ Win32Window::MessageHandler(HWND hwnd,
                             WPARAM const wparam,
                             LPARAM const lparam) noexcept {
   switch (message) {
+    case WM_GETMINMAXINFO: {
+      // Limit the shell window size, but leave room for responsive chat layout.
+      const UINT dpi = GetDpiForWindow(hwnd);
+      auto* info = reinterpret_cast<MINMAXINFO*>(lparam);
+      info->ptMinTrackSize.x = MulDiv(720, dpi, 96);
+      info->ptMinTrackSize.y = MulDiv(520, dpi, 96);
+      return 0;
+    }
+    case WM_EXITSIZEMOVE:
+      SavePlacement();
+      return 0;
     case WM_DESTROY:
       window_handle_ = nullptr;
       Destroy();
@@ -198,6 +251,9 @@ Win32Window::MessageHandler(HWND hwnd,
       return 0;
     }
     case WM_SIZE: {
+      if (shown_ && (wparam == SIZE_MAXIMIZED || wparam == SIZE_RESTORED)) {
+        SavePlacement();
+      }
       RECT rect = GetClientArea();
       if (child_content_ != nullptr) {
         // Size and position the child window.
@@ -219,6 +275,23 @@ Win32Window::MessageHandler(HWND hwnd,
   }
 
   return DefWindowProc(window_handle_, message, wparam, lparam);
+}
+
+
+void Win32Window::SavePlacement() {
+  if (!window_handle_ || IsIconic(window_handle_)) return;
+  WINDOWPLACEMENT placement{};
+  placement.length = sizeof(placement);
+  if (!GetWindowPlacement(window_handle_, &placement)) return;
+  // SW_SHOWMINIMIZED is not a useful state to restore on next launch.
+  placement.showCmd = IsZoomed(window_handle_) ? SW_SHOWMAXIMIZED : SW_SHOWNORMAL;
+  HKEY key = nullptr;
+  if (RegCreateKeyExW(HKEY_CURRENT_USER, kWindowStateKey, 0, nullptr, 0,
+                      KEY_SET_VALUE, nullptr, &key, nullptr) != ERROR_SUCCESS)
+    return;
+  RegSetValueExW(key, kPlacementName, 0, REG_BINARY,
+                 reinterpret_cast<const BYTE*>(&placement), sizeof(placement));
+  RegCloseKey(key);
 }
 
 void Win32Window::Destroy() {

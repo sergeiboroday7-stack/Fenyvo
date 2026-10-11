@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.fenyvo.app",
+      "sha256_cert_fingerprints": [
+        "C6:0E:86:91:BC:A7:9C:E7:7E:FE:D5:2C:B0:D4:BD:7A:CE:D0:25:58:90:BD:A2:6C:53:F0:F2:CC:1D:36:CF:BC"
+      ]
+    }
+  }
+]
