@@ -43,7 +43,14 @@ function loadServerConfig(projectDirectory = __dirname) {
     wsPort: readInteger('SPARTAN_WS_PORT', 8080, { max: 65535 }),
     mediaHost: process.env.SPARTAN_MEDIA_HOST?.trim() || '0.0.0.0',
     mediaPort: readInteger('SPARTAN_MEDIA_PORT', 8081, { max: 65535 }),
-    maxMediaBytes: readInteger('SPARTAN_MAX_MEDIA_BYTES', 1024 * 1024 * 1024, {
+    turnHost: process.env.SPARTAN_TURN_HOST?.trim() || '',
+    turnPort: readInteger('SPARTAN_TURN_PORT', 3478, { max: 65535 }),
+    turnSecret: process.env.SPARTAN_TURN_SECRET?.trim() || '',
+    turnCredentialTtlSeconds: readInteger(
+      'SPARTAN_TURN_TTL_SECONDS',
+      3600,
+      { min: 300, max: 86400 },
+    ),    maxMediaBytes: readInteger('SPARTAN_MAX_MEDIA_BYTES', 1024 * 1024 * 1024, {
       min: 1024,
       max: 2 * 1024 * 1024 * 1024,
     }),

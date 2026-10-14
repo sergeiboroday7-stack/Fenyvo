@@ -27,6 +27,26 @@ test('integer settings use defaults and reject unsafe ports', () => {
   });
 });
 
+test('WebSocket payload limits stay inside the configured safety range', () => {
+  withEnvironment('TEST_PAYLOAD', '16777216', () => {
+    assert.equal(
+      readInteger('TEST_PAYLOAD', 1024, {
+        min: 64 * 1024,
+        max: 64 * 1024 * 1024,
+      }),
+      16777216,
+    );
+  });
+  withEnvironment('TEST_PAYLOAD', '1073741824', () => {
+    assert.throws(() =>
+      readInteger('TEST_PAYLOAD', 1024, {
+        min: 64 * 1024,
+        max: 64 * 1024 * 1024,
+      }),
+    );
+  });
+});
+
 test('boolean settings accept explicit safe values', () => {
   withEnvironment('TEST_BOOLEAN', 'true', () => {
     assert.equal(readBoolean('TEST_BOOLEAN'), true);

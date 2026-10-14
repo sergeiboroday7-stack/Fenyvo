@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:firebase_messaging/firebase_messaging.dart';
 
 import 'notification_service.dart';
+import 'app_update_service.dart';
 import 'system_call_service.dart';
 import 'socket_service.dart';
 
@@ -144,6 +145,11 @@ class FirebaseMessagingService {
 
     final type = data['type']?.toString().trim() ?? '';
 
+    if (type == 'app_update') {
+      AppUpdateService.instance.signalReleaseAvailable();
+      return 'app_update';
+    }
+
     if (type == 'group_call_started') {
       final groupId = data['groupId']?.toString().trim() ?? '';
       return groupId.isEmpty ? null : 'group:$groupId';
@@ -196,6 +202,10 @@ class FirebaseMessagingService {
       if (message.data['type'] == 'call_invite' ||
           message.data['type'] == 'call_cancel') {
         unawaited(SystemCallService.instance.foregroundPush(message.data));
+        return;
+      }
+      if (message.data['type'] == 'app_update') {
+        AppUpdateService.instance.signalReleaseAvailable();
         return;
       }
       print(

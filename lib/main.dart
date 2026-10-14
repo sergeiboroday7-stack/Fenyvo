@@ -22,6 +22,7 @@ import 'services/group_call_service.dart';
 import 'services/pulse_service.dart';
 import 'screens/splash_screen.dart';
 import 'theme/spartan_theme.dart';
+import 'widgets/app_update_host.dart';
 
 final GlobalKey<NavigatorState> spartanNavigatorKey =
     GlobalKey<NavigatorState>();
@@ -83,7 +84,12 @@ class SpartanChatApp extends StatelessWidget {
           GlobalCupertinoLocalizations.delegate,
         ],
         builder: (context, child) {
-          return CallNavigationHost(child: child ?? const SizedBox.shrink());
+          return AppUpdateHost(
+            navigatorKey: spartanNavigatorKey,
+            child: CallNavigationHost(
+              child: child ?? const SizedBox.shrink(),
+            ),
+          );
         },
         home: const SplashScreen(),
       ),

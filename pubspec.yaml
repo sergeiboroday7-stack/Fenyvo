@@ -2,7 +2,7 @@ name: spartan_chat_final
 description: Spartan Chat messenger
 publish_to: "none"
 
-version: 1.8.0+4234
+version: 1.8.1+4236
 
 environment:
   sdk: ">=3.13.0 <4.0.0"
@@ -16,6 +16,7 @@ dependencies:
   cupertino_icons: ^1.0.9
 
   shared_preferences: ^2.5.5
+  package_info_plus: ^9.0.1
   image_picker: 1.1.2
   file_picker: ^10.3.3
   public_file_saver: ^1.1.0

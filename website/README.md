@@ -9,10 +9,11 @@ Deployment layout:
   index.html
   .well-known/assetlinks.json
   assets/fenyvo-logo.png
-  download/Fenyvo-1.8.0-arm64.apk
-  download/Fenyvo-1.8.0-arm64.sha256.txt
-  download/Fenyvo-1.8.0-windows-x64.zip
-  download/Fenyvo-1.8.0-windows-x64.sha256.txt
+  download/Fenyvo-1.8.1-arm64.apk
+  download/Fenyvo-1.8.1-arm64.sha256.txt
+  download/Fenyvo-1.8.1-windows-x64.zip
+  download/Fenyvo-1.8.1-windows-x64.sha256.txt
+  releases/appcast.json
 ```
 
 The APK binary is deployed separately and must not be committed to Git. Update
