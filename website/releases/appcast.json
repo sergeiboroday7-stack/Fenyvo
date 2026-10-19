@@ -1,62 +1,62 @@
 {
   "schemaVersion": 1,
-  "publishedAt": "2026-10-13T08:38:40Z",
+  "publishedAt": "2026-10-19T08:23:37Z",
   "platforms": {
     "android": {
-      "version": "1.8.1",
-      "build": 4236,
+      "version": "1.8.2",
+      "build": 4242,
       "minimumSupportedBuild": 0,
-      "downloadUrl": "https://fenyvo.com/download/Fenyvo-1.8.1-arm64.apk",
-      "sha256": "4a26403972c9d5f400645de5dddba5c7e095d1dc6904d553e7ccba0847ff3cfa",
+      "downloadUrl": "https://fenyvo.com/download/Fenyvo-1.8.2-arm64.apk",
+      "sha256": "c051081ba799f9d2447a653ce6a71e5b3a1171d1963e997b6b3e41df387dc734",
       "sizeBytes": 77226801,
-      "publishedAt": "2026-10-13T08:38:40Z",
+      "publishedAt": "2026-10-19T08:23:37Z",
       "notes": {
         "ru": [
-          "Fenyvo автоматически проверяет наличие новых версий.",
-          "Обновление можно открыть прямо с экрана уведомления.",
-          "После установки один раз показывается понятный список изменений.",
-          "Проверка работает в фоне и не мешает входу, сообщениям и звонкам."
+          "Улучшена стабильность подключения участников группового видеозвонка.",
+          "Добавлено восстановление удалённого видео после краткого обрыва связи.",
+          "Исправлены регистрация, порядок сообщений и повторное подключение к звонку.",
+          "Это тестовый релиз: о проблемах можно сообщить через поддержку Fenyvo."
         ],
         "uk": [
-          "Fenyvo автоматично перевіряє наявність нових версій.",
-          "Оновлення можна відкрити прямо з екрана сповіщення.",
-          "Після встановлення один раз показується зрозумілий список змін.",
-          "Перевірка працює у фоні й не заважає входу, повідомленням та дзвінкам."
+          "Покращено стабільність підключення учасників групового відеодзвінка.",
+          "Додано відновлення віддаленого відео після короткого розриву зв’язку.",
+          "Виправлено реєстрацію, порядок повідомлень і повторне підключення до дзвінка.",
+          "Це тестовий реліз: про проблеми можна повідомити через підтримку Fenyvo."
         ],
         "en": [
-          "Fenyvo now checks for new versions automatically.",
-          "Open the update directly from the release notification.",
-          "A clear change summary appears once after installation.",
-          "Background checks do not interrupt sign-in, messages, or calls."
+          "Improved participant connection stability in group video calls.",
+          "Added remote video recovery after a brief network interruption.",
+          "Fixed registration, message ordering, and call reconnection.",
+          "This is a test release; report issues through Fenyvo Support."
         ]
       }
     },
     "windows": {
-      "version": "1.8.1",
-      "build": 4236,
+      "version": "1.8.2",
+      "build": 4242,
       "minimumSupportedBuild": 0,
-      "downloadUrl": "https://fenyvo.com/download/Fenyvo-1.8.1-windows-x64.zip",
-      "sha256": "9eceb2d4612083bb3d4d18f55d0615d16dcb658e38d2ba07d8cc854b3c14f35b",
-      "sizeBytes": 31847394,
-      "publishedAt": "2026-10-13T08:38:40Z",
+      "downloadUrl": "https://fenyvo.com/download/Fenyvo-1.8.2-windows-x64.zip",
+      "sha256": "388458875c21864ca1a44aafb187b2dbba25e7a75af1a555aaeda6287007b467",
+      "sizeBytes": 30657714,
+      "publishedAt": "2026-10-19T08:23:37Z",
       "notes": {
         "ru": [
-          "Fenyvo автоматически проверяет наличие новых версий.",
-          "После установки один раз показывается понятный список изменений.",
-          "Установщик обновляет ярлыки рабочего стола и меню Пуск.",
-          "Проверка работает в фоне и не мешает сообщениям и звонкам."
+          "Улучшена стабильность групповых видеозвонков между Windows и Android.",
+          "Добавлено восстановление удалённого видео после краткого обрыва связи.",
+          "Установщик обновляет приложение и ярлыки рабочего стола и меню Пуск.",
+          "Это тестовый релиз: о проблемах можно сообщить через поддержку Fenyvo."
         ],
         "uk": [
-          "Fenyvo автоматично перевіряє наявність нових версій.",
-          "Після встановлення один раз показується зрозумілий список змін.",
-          "Інсталятор оновлює ярлики робочого столу та меню Пуск.",
-          "Перевірка працює у фоні й не заважає повідомленням та дзвінкам."
+          "Покращено стабільність групових відеодзвінків між Windows та Android.",
+          "Додано відновлення віддаленого відео після короткого розриву зв’язку.",
+          "Інсталятор оновлює застосунок і ярлики робочого столу та меню Пуск.",
+          "Це тестовий реліз: про проблеми можна повідомити через підтримку Fenyvo."
         ],
         "en": [
-          "Fenyvo now checks for new versions automatically.",
-          "A clear change summary appears once after installation.",
-          "The installer refreshes the Desktop and Start Menu shortcuts.",
-          "Background checks do not interrupt messages or calls."
+          "Improved group video call stability between Windows and Android.",
+          "Added remote video recovery after a brief network interruption.",
+          "The installer refreshes the app, Desktop, and Start Menu shortcuts.",
+          "This is a test release; report issues through Fenyvo Support."
         ]
       }
     }

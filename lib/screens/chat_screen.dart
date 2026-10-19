@@ -1,3 +1,4 @@
+import '../services/message_chronology.dart';
 import '../theme/spartan_theme.dart';
 import '../widgets/emoji_picker.dart';
 import '../services/saved_messages_service.dart';
@@ -1295,21 +1296,7 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   void _sortMessagesChronologically() {
-    int compare(Map<String, dynamic> a, Map<String, dynamic> b) {
-      final aTime = DateTime.tryParse(a['time']?.toString() ?? '');
-      final bTime = DateTime.tryParse(b['time']?.toString() ?? '');
-      if (aTime != null && bTime != null) {
-        final byTime = aTime.compareTo(bTime);
-        if (byTime != 0) return byTime;
-      } else if (aTime != null) {
-        return -1;
-      } else if (bTime != null) {
-        return 1;
-      }
-      return (a['id']?.toString() ?? '').compareTo(b['id']?.toString() ?? '');
-    }
-
-    _messages.sort(compare);
+    MessageChronology.sort(_messages);
   }
 
   List<Map<String, dynamic>> _callHistoryMessages(String owner) {
@@ -1390,6 +1377,23 @@ class _ChatScreenState extends State<ChatScreen>
       default:
         return 0;
     }
+  }
+
+  void _syncConfirmedMessageTime(String messageId, String serverTime) {
+    final id = messageId.trim();
+    final parsedTime = DateTime.tryParse(serverTime);
+    if (id.isEmpty || parsedTime == null || !mounted) return;
+
+    final index = _messages.indexWhere(
+      (message) => message['id']?.toString().trim() == id,
+    );
+    if (index < 0 || _messages[index]['isMe'] != true) return;
+
+    setState(() {
+      _messages[index]['time'] = parsedTime.toUtc().toIso8601String();
+      _sortMessagesChronologically();
+    });
+    _saveMessages();
   }
 
   void _updateMessageStatus(String messageId, String newStatus) {
@@ -2522,6 +2526,7 @@ class _ChatScreenState extends State<ChatScreen>
 
       // Подтверждение сервера переводит локально queued/sending в sent.
       _updateMessageStatus(id, 'sent');
+      _syncConfirmedMessageTime(id, time);
 
       _addMessageIfNotExists({
         'id': id,

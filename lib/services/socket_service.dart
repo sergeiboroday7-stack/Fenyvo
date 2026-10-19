@@ -11,6 +11,7 @@ import 'notification_service.dart';
 import 'storage_service.dart';
 import 'app_visibility.dart';
 import 'system_call_service.dart';
+import 'turn_credential_service.dart';
 import 'e2ee_settings_service.dart';
 import 'crypto/signal_e2ee_service.dart';
 
@@ -286,6 +287,10 @@ class SocketService {
           final mediaPort =
               int.tryParse(data['mediaPort']?.toString() ?? '') ?? 8081;
           final serverUrl = _serverUrl?.trim() ?? '';
+          final turnData = data['turn'];
+          TurnCredentialService.configure(
+            turnData is Map ? Map<String, dynamic>.from(turnData) : null,
+          );
           if (mediaToken.isNotEmpty && serverUrl.isNotEmpty) {
             MediaTransferService.configure(
               webSocketUrl: serverUrl,
@@ -733,7 +738,9 @@ class SocketService {
                 .cast<Map<String, dynamic>?>()
                 .firstWhere((item) => item != null, orElse: () => null);
             if (local != null) {
+              final confirmedTime = data['time'];
               data.addAll(Map<String, dynamic>.from(local));
+              if (confirmedTime != null) data['time'] = confirmedTime;
               data
                 ..remove('requiresE2ee')
                 ..remove('status');
@@ -1019,8 +1026,20 @@ class SocketService {
   // РЕГИСТРАЦИЯ
   // ========================================
 
-  void register(String username, String password) {
-    _send('register', {'username': username.trim(), 'password': password});
+  void register(
+    String username,
+    String password, {
+    required bool termsAccepted,
+    required bool ageConfirmed,
+  }) {
+    _send('register', {
+      'username': username.trim(),
+      'password': password,
+      'termsAccepted': termsAccepted,
+      'ageConfirmed': ageConfirmed,
+      'termsVersion': '2026-10-01',
+      'privacyVersion': '2026-10-01',
+    });
   }
 
   // ========================================

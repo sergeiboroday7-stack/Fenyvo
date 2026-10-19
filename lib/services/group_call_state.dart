@@ -5,6 +5,7 @@ class GroupCallMember {
     this.muted = false,
     this.videoEnabled = true,
     this.away = false,
+    this.disconnected = false,
     this.moderator = false,
     this.role = 'guest',
   });
@@ -13,6 +14,7 @@ class GroupCallMember {
   final bool muted;
   final bool videoEnabled;
   final bool away;
+  final bool disconnected;
   final bool moderator;
   final String role;
   bool get isHost => role == 'host';
@@ -74,6 +76,7 @@ class GroupCallState {
           muted: item['muted'] == true,
           videoEnabled: item['videoEnabled'] != false,
           away: item['away'] == true,
+          disconnected: item['disconnected'] == true,
           moderator: item['moderator'] == true,
           role: item['role']?.toString() ?? 'guest',
         ),

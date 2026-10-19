@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/socket_service.dart';
@@ -28,6 +29,8 @@ class _AuthScreenState extends State<AuthScreen> {
 
   bool _isLoading = false;
   bool _isRegisterMode = false;
+  bool _termsAccepted = false;
+  bool _ageConfirmed = false;
   bool _isAutoLogin = false;
   bool _showWelcome = false;
 
@@ -367,6 +370,18 @@ class _AuthScreenState extends State<AuthScreen> {
       return;
     }
 
+    if (!_termsAccepted) {
+      setState(
+        () => _error = 'Примите Условия использования и подтвердите ознакомление с Политикой конфиденциальности',
+      );
+      return;
+    }
+
+    if (!_ageConfirmed) {
+      setState(() => _error = 'Подтвердите, что вам исполнилось 16 лет');
+      return;
+    }
+
     setState(() {
       _isLoading = true;
       _isAutoLogin = false;
@@ -392,7 +407,12 @@ class _AuthScreenState extends State<AuthScreen> {
 
       _startLoginTimeout();
 
-      SocketService.instance.register(username, password);
+      SocketService.instance.register(
+        username,
+        password,
+        termsAccepted: _termsAccepted,
+        ageConfirmed: _ageConfirmed,
+      );
     } catch (e) {
       print('❌ Ошибка регистрации: $e');
 
@@ -417,6 +437,8 @@ class _AuthScreenState extends State<AuthScreen> {
     _error = '';
     _passwordVisible = false;
     _confirmPasswordVisible = false;
+    _termsAccepted = false;
+    _ageConfirmed = false;
   });
 
   void _openMode(bool register) => setState(() {
@@ -425,6 +447,8 @@ class _AuthScreenState extends State<AuthScreen> {
     _error = '';
     _passwordVisible = false;
     _confirmPasswordVisible = false;
+    _termsAccepted = false;
+    _ageConfirmed = false;
   });
 
   Widget _panel({required Widget child, bool compact = false}) => Container(
@@ -766,6 +790,65 @@ class _AuthScreenState extends State<AuthScreen> {
                 : const SizedBox(width: double.infinity),
           ),
         ],
+        if (registration) ...[
+          const SizedBox(height: 12),
+          CheckboxListTile(
+            value: _termsAccepted,
+            onChanged: _isLoading
+                ? null
+                : (v) => setState(() => _termsAccepted = v ?? false),
+            title: const Text(
+              'Я принимаю Условия использования и подтверждаю ознакомление с Политикой конфиденциальности.',
+              style: TextStyle(color: Colors.white, fontSize: 12),
+            ),
+            controlAffinity: ListTileControlAffinity.leading,
+            contentPadding: EdgeInsets.zero,
+            dense: true,
+            activeColor: _gold,
+          ),
+          CheckboxListTile(
+            value: _ageConfirmed,
+            onChanged: _isLoading
+                ? null
+                : (v) => setState(() => _ageConfirmed = v ?? false),
+            title: const Text(
+              'Я подтверждаю, что мне исполнилось 16 лет.',
+              style: TextStyle(color: Colors.white, fontSize: 12),
+            ),
+            controlAffinity: ListTileControlAffinity.leading,
+            contentPadding: EdgeInsets.zero,
+            dense: true,
+            activeColor: _gold,
+          ),
+        ],
+        if (registration)
+          Wrap(
+            spacing: 8,
+            children: [
+              TextButton(
+                onPressed: _isLoading
+                    ? null
+                    : () async {
+                        await launchUrl(
+                          Uri.parse('https://fenyvo.com/terms.html'),
+                          mode: LaunchMode.externalApplication,
+                        );
+                      },
+                child: const Text('Условия использования'),
+              ),
+              TextButton(
+                onPressed: _isLoading
+                    ? null
+                    : () async {
+                        await launchUrl(
+                          Uri.parse('https://fenyvo.com/privacy.html'),
+                          mode: LaunchMode.externalApplication,
+                        );
+                      },
+                child: const Text('Политика конфиденциальности'),
+              ),
+            ],
+          ),
         if (_error.isNotEmpty) ...[
           const SizedBox(height: 15),
           Container(

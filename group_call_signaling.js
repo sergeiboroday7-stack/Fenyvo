@@ -24,7 +24,7 @@ function createGroupCallSignaling({ send, onlineUsers, getGroup, getMembers,
     hostGraceUntil: room.hostGraceUntil, limit: maxParticipants,
     participants: [...room.people].map(([user, p]) => ({ user,
       sessionId: p.sessionId, muted: p.muted,
-      videoEnabled: p.videoEnabled, away: p.away === true,
+      videoEnabled: p.videoEnabled, away: p.away === true, disconnected: p.disconnected === true,
       moderator: room.moderators.has(user),
       role: p.viewer ? 'viewer' : user === room.startedBy ? 'host' : room.moderators.has(user) ? 'moderator' : 'guest' })) });
   function broadcast(room) {
@@ -43,7 +43,8 @@ function createGroupCallSignaling({ send, onlineUsers, getGroup, getMembers,
   function reconcileHost(room) {
     const onStage = candidate =>
       room.people.get(candidate)?.viewer === false &&
-      room.people.get(candidate)?.away !== true;
+      room.people.get(candidate)?.away !== true &&
+      room.people.get(candidate)?.disconnected !== true;
 
     // The call creator always reclaims the host role after returning.
     if (onStage(room.owner)) {
@@ -109,11 +110,18 @@ function createGroupCallSignaling({ send, onlineUsers, getGroup, getMembers,
     for (const [user, person] of [...room.people]) {
       if (!allowed.includes(user)) {
         remove(room, user, 'Участник удалён из группы');
-      } else if (
-        onlineUsers.get(user) !== person.socket ||
-        now() - person.seen > 45000
+      } else {
+        if (person.disconnected !== true && (onlineUsers.get(user) !== person.socket || now() - person.seen > 45000)) {
+          person.disconnected = true;
+          person.disconnectedAt = now();
+          reconcileHost(room);
+          broadcast(room);
+        }
+        if ((person.disconnected === true && now() - person.disconnectedAt >= 300000) ||
+         (person.disconnected !== true && now() - person.seen > 300000)
       ) {
         remove(room, user, 'Соединение потеряно');
+      }
       }
     }
 
@@ -290,6 +298,22 @@ function createGroupCallSignaling({ send, onlineUsers, getGroup, getMembers,
         error('Этот звонок уже завершён'); return true;
       }
       const existing = room?.people.get(user);
+      if (existing && byUser.get(user) === room && existing.viewer === false &&
+          (existing.disconnected === true || existing.socket !== ws)) {
+        if (isPrivateBusy(user)) { error('Сначала завершите текущий звонок'); return true; }
+        existing.socket = ws;
+        existing.sessionId = crypto.randomUUID();
+        existing.requestId = requestId;
+        existing.disconnected = false;
+        existing.disconnectedAt = null;
+        existing.seen = now();
+        existing.window = now();
+        existing.signals = 0;
+        reconcileHost(room);
+        send(ws, 'group_call_joined', { requestId, sessionId: existing.sessionId, call: snapshot(room) });
+        broadcast(room);
+        return true;
+      }
       if (existing?.requestId === requestId) {
         send(ws, 'group_call_joined', { requestId, sessionId: existing.sessionId, call: snapshot(room) });
         return true;
@@ -297,10 +321,17 @@ function createGroupCallSignaling({ send, onlineUsers, getGroup, getMembers,
       const returningAuthority = room && !existing &&
         (user === room.owner ||
          (room.awaitingHost === true && room.moderators.has(user)));
-      if (room && !existing && !room.approvedJoins.has(user) && !returningAuthority) {
+      const viewerInThisRoom =
+        existing?.viewer === true && byUser.get(user) === room;
+      if (
+        room &&
+        (!existing || existing.viewer === true) &&
+        !room.approvedJoins.has(user) &&
+        !returningAuthority
+      ) {
         error('Сначала запросите разрешение ведущего'); return true;
       }
-      if (byUser.has(user) || isPrivateBusy(user)) { error('Сначала завершите текущий звонок'); return true; }
+      if ((byUser.has(user) && !viewerInThisRoom) || isPrivateBusy(user)) { error('Сначала завершите текущий звонок'); return true; }
       const stageCount = room ? [...room.people.values()].filter(p => !p.viewer).length : 0;
       if (room && stageCount >= maxParticipants) { error(`В звонке уже ${maxParticipants} участника`); return true; }
       const created = !room;
@@ -329,7 +360,7 @@ function createGroupCallSignaling({ send, onlineUsers, getGroup, getMembers,
       return true;
     }
     const person = room?.people.get(user);
-    if (!room || room.id !== data.callId || !person || person.sessionId !== data.sessionId) {
+    if (!room || room.id !== data.callId || !person || person.socket !== ws || person.disconnected === true || person.sessionId !== data.sessionId) {
       if (type !== 'group_call_leave') error('Вы больше не участвуете в этом звонке');
       return true;
     }
@@ -468,7 +499,7 @@ function createGroupCallSignaling({ send, onlineUsers, getGroup, getMembers,
       if (!room || (callId && room.id !== callId)) return [];
       return [...room.people.keys()];
     },
-    disconnected(user) { const room = byUser.get(user); if (room) remove(room, user, 'Соединение потеряно'); },
+    disconnected(user) { const room = byUser.get(user); if (!room) return; const person = room.people.get(user); if (!person || onlineUsers.get(user) === person.socket) return; person.disconnected = true; person.disconnectedAt = now(); reconcileHost(room); broadcast(room); },
     dispose() { for (const room of rooms.values()) { cancel(room.timer); clearHostGrace(room); } rooms.clear(); byUser.clear(); } };
 }
 module.exports = { createGroupCallSignaling };

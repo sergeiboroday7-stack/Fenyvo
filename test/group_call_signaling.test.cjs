@@ -161,6 +161,7 @@ test('moderator can reconnect during owner grace and take host role', () => {
     action: 'promote',
   });
 
+  f.onlineUsers.delete('A');
   f.api.disconnected('A');
 
   let state = f.sent.findLast(
@@ -180,9 +181,11 @@ test('moderator can reconnect during owner grace and take host role', () => {
   );
   assert.ok(shutdown);
 
+  f.onlineUsers.delete('B');
   f.api.disconnected('B');
 
-  assert.equal(f.api.isBusy('B'), false);
+  assert.equal(f.api.isBusy('B'), true);
+  assert.equal(f.api.isBusy('B'), true);
 
   f.onlineUsers.set('B', { u: 'B' });
 
@@ -328,6 +331,26 @@ test('host can invite a viewer to stage but an ordinary guest cannot', () => {
   assert.equal(f.joined('C').call.participants.find(p => p.user === 'C').role, 'guest');
   f.api.dispose();
 });
+test('approved viewer can join stage before delayed unwatch is processed', () => {
+  const f = fixture(); f.start(); const viewer = f.watch('C');
+  f.send('C', 'group_call_join_request', {
+    groupId: 'g', callId: viewer.call.id,
+  });
+  f.send('A', 'group_call_join_response', {
+    groupId: 'g', callId: viewer.call.id, target: 'C', accepted: true,
+  });
+  f.send('C', 'group_call_join', {
+    groupId: 'g', callId: viewer.call.id, requestId: 'stage-C-race',
+  });
+  const joined = f.joined('C');
+  assert.equal(joined.call.participants.find(p => p.user === 'C').role, 'guest');
+  f.send('C', 'group_call_unwatch', {
+    groupId: 'g', callId: viewer.call.id, sessionId: viewer.sessionId,
+    forStage: true,
+  });
+  assert.equal(f.api.isBusy('C'), true);
+  f.api.dispose();
+});
 test('room is visible to group but does not ring or auto-join everyone', () => {
   const f = fixture(); const a = f.start();
   assert.equal(a.call.participants.length, 1);
@@ -353,6 +376,7 @@ test('owner network disconnect starts grace and owner can return directly', () =
   const started = f.start();
   f.join('B');
 
+  f.onlineUsers.delete('A');
   f.api.disconnected('A');
 
   let state = f.sent.findLast(
@@ -363,8 +387,9 @@ test('owner network disconnect starts grace and owner can return directly', () =
   assert.equal(state.owner, 'A');
   assert.equal(state.startedBy, '');
   assert.equal(state.awaitingHost, true);
-  assert.deepEqual(state.participants.map(p => p.user), ['B']);
-  assert.equal(f.api.isBusy('A'), false);
+  assert.deepEqual(state.participants.map(p => p.user), ['A', 'B']);
+  assert.equal(state.participants.find(p => p.user === 'A').disconnected, true);
+  assert.equal(f.api.isBusy('A'), true);
   assert.equal(f.api.isBusy('B'), true);
 
   const shutdown = f.timers.findLast(
@@ -496,10 +521,22 @@ test('private caller must leave its group before inviting a group participant', 
   assert.equal(sent[0].type, 'call_offer'); api.dispose();
 });
 test('missing heartbeat removes stale people and expired room', () => {
-  const f = fixture(); f.start(); f.join('B'); f.advance(30000);
-  f.send('B', 'group_call_heartbeat', f.packet('B')); f.advance(16000); f.timers[0].fn();
-  assert.equal(f.api.isBusy('A'), false); assert.equal(f.api.isBusy('B'), true);
-  f.api.disconnected('B'); assert.equal(f.api.isBusy('B'), false); f.api.dispose();
+  const f = fixture();
+  f.start();
+  f.join('B');
+  f.advance(30000);
+  f.send('B', 'group_call_heartbeat', f.packet('B'));
+  f.advance(16000);
+  f.timers[0].fn();
+  assert.equal(f.api.isBusy('A'), true);
+  assert.equal(f.api.isBusy('B'), true);
+  const state = f.sent.findLast(x => x.to === 'B' && x.type === 'group_call_state').data.call;
+  assert.equal(state.participants.find(p => p.user === 'A').disconnected, true);
+  f.advance(300000);
+  f.send('B', 'group_call_heartbeat', f.packet('B'));
+  assert.equal(f.api.isBusy('A'), false);
+  assert.equal(f.api.isBusy('B'), true);
+  f.api.dispose();
 });
 test('stage join request expires after 45 seconds and may be requested again', () => {
   const f = fixture();
@@ -582,4 +619,58 @@ test('malformed packets rejected; chat unaffected', () => {
   for (const data of [null, [], { groupId: 'x'.repeat(200001) }]) {
     assert.equal(f.send('A', 'group_call_start', data), true); assert.equal(f.sent.at(-1).type, 'group_call_error');
   }
+});
+
+test('participant network disconnect keeps their place for reconnect', () => {
+  const f = fixture();
+  const started = f.start();
+  f.join('B');
+  f.onlineUsers.delete('B');
+  f.api.disconnected('B');
+  const participants = f.sent.findLast(x => x.to === 'A' && x.type === 'group_call_state').data.call.participants;
+  const guest = participants.find(p => p.user === 'B');
+  assert.ok(guest, 'Disconnected participant should remain in room');
+  assert.equal(guest.disconnected, true);
+  assert.equal(f.api.isBusy('B'), true);
+  f.api.dispose();
+});
+
+
+test('disconnected guest reconnects without host approval', () => {
+  const f = fixture();
+  const started = f.start();
+  f.join('B');
+  const old = f.packet('B');
+  const oldSocket = f.onlineUsers.get('B');
+  f.onlineUsers.delete('B');
+  f.api.disconnected('B');
+  f.onlineUsers.set('B', { u: 'B' });
+  f.send('B', 'group_call_join', { groupId: 'g', callId: started.call.id, requestId: 'reconnect-B' });
+  const returned = f.joined('B');
+  assert.equal(returned.requestId, 'reconnect-B');
+  assert.notEqual(returned.sessionId, old.sessionId);
+  assert.equal(returned.call.participants.find(p => p.user === 'B').disconnected, false);
+  assert.equal(f.api.isBusy('B'), true);
+  const oldResult = f.api.handle(oldSocket, 'B', 'group_call_leave', old);
+  assert.equal(oldResult, true);
+  assert.equal(f.api.isBusy('B'), true);
+  f.api.dispose();
+});
+
+
+test('disconnected guest expires after five minutes', () => {
+  const f = fixture();
+  f.start();
+  f.join('B');
+  f.onlineUsers.delete('B');
+  f.api.disconnected('B');
+  f.advance(299000);
+  f.send('A', 'group_call_heartbeat', f.packet('A'));
+  assert.equal(f.api.isBusy('B'), true);
+  const state = f.sent.findLast(x => x.to === 'A' && x.type === 'group_call_state').data.call;
+  assert.equal(state.participants.find(p => p.user === 'B').disconnected, true);
+  f.advance(1000);
+  f.send('A', 'group_call_get', { groupId: 'g' });
+  assert.equal(f.api.isBusy('B'), false);
+  f.api.dispose();
 });

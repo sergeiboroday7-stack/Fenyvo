@@ -9,10 +9,10 @@ Deployment layout:
   index.html
   .well-known/assetlinks.json
   assets/fenyvo-logo.png
-  download/Fenyvo-1.8.1-arm64.apk
-  download/Fenyvo-1.8.1-arm64.sha256.txt
-  download/Fenyvo-1.8.1-windows-x64.zip
-  download/Fenyvo-1.8.1-windows-x64.sha256.txt
+  download/Fenyvo-1.8.2-arm64.apk
+  download/Fenyvo-1.8.2-arm64.sha256.txt
+  download/Fenyvo-1.8.2-windows-x64.zip
+  download/Fenyvo-1.8.2-windows-x64.sha256.txt
   releases/appcast.json
 ```
 

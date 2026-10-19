@@ -8944,7 +8944,7 @@ wss.on(
               id: requestedId,
               from: currentUser,
               to,
-              time: data.time || serverSentAt,
+              time: serverSentAt,
               messageType: 'text',
               e2ee: true,
               e2eeVersion: 2,
@@ -9080,7 +9080,7 @@ wss.on(
               fileName: acceptedMedia.record.fileName,
               fileSize: acceptedMedia.record.fileSize,
               mimeType: acceptedMedia.record.mimeType,
-              time: data.time || new Date().toISOString(),
+              time: new Date().toISOString(),
               replyTo:
                 data.replyTo && typeof data.replyTo === 'object' && !Array.isArray(data.replyTo)
                   ? {
@@ -9313,10 +9313,10 @@ wss.on(
                     voiceMimeType: null,
                   }),
 
-              time:
-                data.time ||
-                new Date()
-                  .toISOString(),
+              time: serverSentAt,
+
+
+
 
               replyTo:
                 data.replyTo &&

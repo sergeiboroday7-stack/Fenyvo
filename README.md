@@ -4,22 +4,22 @@ Fenyvo — кроссплатформенный мессенджер для Andr
 
 ## Текущая версия
 
-- Android и Windows: **1.8.1 / build 4236**.
+- Android и Windows: **1.8.2 / build 4242** (тестовый публичный релиз).
 - Android package: `com.fenyvo.app`.
 - Windows binary: `fenyvo.exe`.
 - Публичный сайт: `https://fenyvo.com`.
 - Манифест обновлений: `https://fenyvo.com/releases/appcast.json`.
-- Android APK: `https://fenyvo.com/download/Fenyvo-1.8.1-arm64.apk`.
-- Windows ZIP: `https://fenyvo.com/download/Fenyvo-1.8.1-windows-x64.zip`.
+- Android APK: `https://fenyvo.com/download/Fenyvo-1.8.2-arm64.apk`.
+- Windows ZIP: `https://fenyvo.com/download/Fenyvo-1.8.2-windows-x64.zip`.
 - Android APK: **77 226 801 байт**, SHA-256
-  `4a26403972c9d5f400645de5dddba5c7e095d1dc6904d553e7ccba0847ff3cfa`.
-- Windows ZIP: **31 847 394 байта**, SHA-256
-  `9eceb2d4612083bb3d4d18f55d0615d16dcb658e38d2ba07d8cc854b3c14f35b`.
+  `c051081ba799f9d2447a653ce6a71e5b3a1171d1963e997b6b3e41df387dc734`.
+- Windows ZIP: **30 657 714 байт**, SHA-256
+  `388458875c21864ca1a44aafb187b2dbba25e7a75af1a555aaeda6287007b467`.
 
-Сборка 4236 проверяет обновления при запуске и возвращении в приложение, но не
+Сборка 4242 проверяет обновления при запуске и возвращении в приложение, но не
 показывает окно поверх активного звонка. После установки описание изменений
 показывается один раз. Манифест содержит отдельные ссылки и суммы для Android и
-Windows; обновление 4236 опубликовано как необязательное.
+Windows; обновление 4242 публикуется как необязательное тестовое обновление.
 
 ## Мой Fenyvo
 
@@ -157,18 +157,18 @@ flutter build apk --release --target-platform android-arm64 --dart-define=SPARTA
 
 `SPARTAN_SERVER_URL` пока остаётся внутренним техническим именем параметра сборки.
 
-Релизный файл 4236:
+Релизный файл 4242:
 
 ```text
-Fenyvo-1.8.1-arm64.apk
+Fenyvo-1.8.2-arm64.apk
 ```
 
 ## SHA-256 APK
 
-Контрольная сумма опубликованного ARM64 APK версии 1.8.1+4236:
+Контрольная сумма ARM64 APK версии 1.8.2+4242:
 
 ```text
-4a26403972c9d5f400645de5dddba5c7e095d1dc6904d553e7ccba0847ff3cfa
+c051081ba799f9d2447a653ce6a71e5b3a1171d1963e997b6b3e41df387dc734
 ```
 
 ## Сборка Windows
@@ -229,11 +229,11 @@ Fenyvo находится в активной разработке.
 
 На текущем этапе подтверждены:
 
-- Android release 1.8.1 / 4236;
+- Android release 1.8.2 / 4242;
 - package `com.fenyvo.app`;
 - постоянная Android release-подпись;
 - Firebase client для `com.fenyvo.app`;
-- Windows release 1.8.1 / 4236 и постоянная установка с актуальными ярлыками;
+- Windows release 1.8.2 / 4242 и постоянная установка с актуальными ярлыками;
 - личные аудио- и видеозвонки;
 - групповые видеозвонки;
 - Android speakerphone;

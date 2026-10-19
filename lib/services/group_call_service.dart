@@ -10,6 +10,7 @@ import 'call_service.dart';
 import 'group_call_state.dart';
 import 'incoming_call_alert_service.dart';
 import 'socket_service.dart';
+import 'turn_credential_service.dart';
 
 enum GroupCallPhase { idle, invited, joining, active, leaving }
 
@@ -21,44 +22,39 @@ class _GroupPeer {
   final RTCPeerConnection connection;
   final List<Map<String, dynamic>> localIce = [], remoteIce = [];
   bool localSet = false, remoteSet = false;
+  bool ready = false;
   String status = 'Подключение…';
   Timer? timeout;
+  Future<void>? releaseFuture;
 }
 
 class GroupCallService extends ChangeNotifier {
   GroupCallService._()
-      : _send = SocketService.instance.sendGroupCall,
-        _user = (() => SocketService.instance.currentUser ?? ''),
-        _authenticated = (() => SocketService.instance.isAuthenticated),
-        _privateBusy = (() => CallService.instance.hasCall),
-        _foreground = (() => AppVisibility.instance.foreground),
-        _renderLocalVideo = true,
-        _media = ((withVideo) => navigator.mediaDevices.getUserMedia({
-              'audio': {
-                'echoCancellation': true,
-                'noiseSuppression': true,
-                'autoGainControl': true,
-              },
-              'video': withVideo
-                  ? {
-                      'facingMode': 'user',
-                      'width': {'ideal': 640},
-                      'height': {'ideal': 480},
-                      'frameRate': {'ideal': 20, 'max': 24},
-                    }
-                  : false,
-            })),
-        _connection = (() => createPeerConnection({
-              'sdpSemantics': 'unified-plan',
-              'iceServers': [
-                {
-                  'urls': [
-                    'stun:stun.l.google.com:19302',
-                    'stun:stun1.l.google.com:19302',
-                  ],
-                },
-              ],
-            }));
+    : _send = SocketService.instance.sendGroupCall,
+      _user = (() => SocketService.instance.currentUser ?? ''),
+      _authenticated = (() => SocketService.instance.isAuthenticated),
+      _privateBusy = (() => CallService.instance.hasCall),
+      _foreground = (() => AppVisibility.instance.foreground),
+      _renderLocalVideo = true,
+      _media = ((withVideo) => navigator.mediaDevices.getUserMedia({
+        'audio': {
+          'echoCancellation': true,
+          'noiseSuppression': true,
+          'autoGainControl': true,
+        },
+        'video': withVideo
+            ? {
+                'facingMode': 'user',
+                'width': {'ideal': 640},
+                'height': {'ideal': 480},
+                'frameRate': {'ideal': 20, 'max': 24},
+              }
+            : false,
+      })),
+      _connection = (() => createPeerConnection({
+        'sdpSemantics': 'unified-plan',
+        'iceServers': TurnCredentialService.iceServers,
+      }));
 
   @visibleForTesting
   GroupCallService.forTesting({
@@ -66,14 +62,14 @@ class GroupCallService extends ChangeNotifier {
     required String user,
     required Future<MediaStream> Function() media,
     required Future<RTCPeerConnection> Function() connection,
-  })  : _send = send,
-        _user = (() => user),
-        _authenticated = (() => true),
-        _privateBusy = (() => false),
-        _foreground = (() => false),
-        _renderLocalVideo = false,
-        _media = ((_) => media()),
-        _connection = connection;
+  }) : _send = send,
+       _user = (() => user),
+       _authenticated = (() => true),
+       _privateBusy = (() => false),
+       _foreground = (() => false),
+       _renderLocalVideo = false,
+       _media = ((_) => media()),
+       _connection = connection;
 
   static final instance = GroupCallService._();
   final void Function(String, Map<String, dynamic>) _send;
@@ -87,7 +83,11 @@ class GroupCallService extends ChangeNotifier {
   final Map<String, int> _peerReconnectAttempts = {};
   final Map<String, List<Map<String, dynamic>>> _pendingSignals = {};
   final Map<String, RTCVideoRenderer> remoteVideos = {};
+  final Map<String, Future<void>> _remoteRendererInit = {};
   final Map<String, MediaStream> _fallbackRemoteStreams = {};
+  // FENYVO_VIDEO_RECOVERY_295: recover missing renderers without renegotiation.
+  final Set<String> _videoRecoveryInProgress = {};
+  final Map<String, DateTime> _lastVideoRecoveryAttempt = {};
   RTCVideoRenderer? localVideo;
   final Set<String> _dismissed = {};
   final Set<String> _expectedLeftSessions = {};
@@ -101,6 +101,7 @@ class GroupCallService extends ChangeNotifier {
   final Stopwatch _clock = Stopwatch();
   int _epoch = 0;
   bool _initialized = false, _speakerChanging = false;
+  Future<void> _stateApplyTail = Future<void>.value();
   bool _transitioningViewerToStage = false;
   String? _transitionGroupId;
   String? _requestId;
@@ -281,6 +282,7 @@ class GroupCallService extends ChangeNotifier {
 
   Future<void> _suspendForReconnect() async {
     ++_epoch;
+    await _stateApplyTail;
     _clearPendingJoin();
     _waitTimer?.cancel();
     _heartbeat?.cancel();
@@ -299,12 +301,12 @@ class GroupCallService extends ChangeNotifier {
 
     try {
       await IncomingCallAlertService.instance.stop().timeout(
-            const Duration(seconds: 2),
-          );
+        const Duration(seconds: 2),
+      );
     } catch (_) {}
 
     for (final peer in peers) {
-      await _releasePeer(peer).timeout(const Duration(seconds: 3));
+      await _releasePeer(peer);
     }
 
     for (final renderer in remoteVideos.values) {
@@ -314,6 +316,7 @@ class GroupCallService extends ChangeNotifier {
       } catch (_) {}
     }
     remoteVideos.clear();
+    _fallbackRemoteStreams.clear();
 
     if (stream != null) {
       await _releaseStream(stream);
@@ -354,6 +357,8 @@ class GroupCallService extends ChangeNotifier {
     String? existingCallId,
     bool withVideo = true,
   }) async {
+    final previousLeave = _leaving;
+    if (previousLeave != null) await previousLeave;
     if (!supported) {
       _notifyError(
         'Для групповых звонков нужно перезапустить обновлённый сервер.',
@@ -396,8 +401,8 @@ class GroupCallService extends ChangeNotifier {
     try {
       try {
         await IncomingCallAlertService.instance.stop().timeout(
-              const Duration(seconds: 2),
-            );
+          const Duration(seconds: 2),
+        );
       } catch (_) {}
       if (epoch != _epoch) return;
       if (Platform.isAndroid)
@@ -448,8 +453,7 @@ class GroupCallService extends ChangeNotifier {
     } catch (_) {
       if (epoch == _epoch)
         await leave(
-          message:
-              'Не удалось подключить микрофон. Проверьте разрешение и закройте другие звонки.',
+          message: 'Не удалось подключить микрофон. Проверьте разрешение и закройте другие звонки.',
         );
     }
   }
@@ -467,10 +471,10 @@ class GroupCallService extends ChangeNotifier {
   }
 
   Map<String, dynamic> get _lease => {
-        'groupId': groupId,
-        'callId': current?.id,
-        'sessionId': sessionId,
-      };
+    'groupId': groupId,
+    'callId': current?.id,
+    'sessionId': sessionId,
+  };
 
   void setMicrophoneEnabled(bool enabled) {
     if (_stream == null || phase != GroupCallPhase.active) return;
@@ -580,7 +584,8 @@ class GroupCallService extends ChangeNotifier {
     final member = current?.member(target);
     if (member == null ||
         !canModerate(member) ||
-        phase != GroupCallPhase.active) return;
+        phase != GroupCallPhase.active)
+      return;
     _send('group_call_moderate', {
       ..._lease,
       'target': target,
@@ -647,12 +652,12 @@ class GroupCallService extends ChangeNotifier {
 
   @visibleForTesting
   Future<void> handlePacket(Map<String, dynamic> packet) {
-    _events = _events.then((_) => _handle(packet)).catchError((Object _) {
+    _events = _events.then((_) => _handle(packet)).catchError((Object error) {
+      debugPrint('GROUP_CALL_PACKET_ERROR: $error');
       if (hasCall)
         unawaited(
           leave(
-            message:
-                'Не удалось установить групповой звонок. Попробуйте войти снова.',
+            message: 'Не удалось установить групповой звонок. Попробуйте войти снова.',
           ),
         );
     });
@@ -738,10 +743,10 @@ class GroupCallService extends ChangeNotifier {
           return;
         }
 
-        requestJoin(
+        await begin(
           reconnectGroup,
           reconnectName,
-          reconnectCall,
+          existingCallId: reconnectCall,
           withVideo: _reconnectVideo,
         );
         return;
@@ -823,7 +828,7 @@ class GroupCallService extends ChangeNotifier {
       } else if (groupId == id &&
           room != null &&
           phase == GroupCallPhase.active) {
-        await _applyState(room);
+        unawaited(_queueStateApply(room));
       } else if (groupId == id && phase == GroupCallPhase.invited) {
         current = room;
       }
@@ -838,7 +843,8 @@ class GroupCallService extends ChangeNotifier {
           hasCall ||
           _privateBusy() ||
           _dismissed.contains(room.id) ||
-          room.startedBy == user) return;
+          room.startedBy == user)
+        return;
       supported = true;
       current = room;
       groupId = room.groupId;
@@ -858,7 +864,8 @@ class GroupCallService extends ChangeNotifier {
       final lease = data['sessionId']?.toString();
       if (room == null ||
           lease == null ||
-          room.member(user)?.sessionId != lease) return;
+          room.member(user)?.sessionId != lease)
+        return;
       if (phase != GroupCallPhase.joining || data['requestId'] != _requestId) {
         if (lease != sessionId)
           _send('group_call_leave', {
@@ -883,7 +890,7 @@ class GroupCallService extends ChangeNotifier {
         if (epoch == _epoch) notifyListeners();
       });
       _startSpeakingMonitor(epoch);
-      await _applyState(room);
+      unawaited(_queueStateApply(room));
       notifyListeners();
       return;
     }
@@ -917,7 +924,7 @@ class GroupCallService extends ChangeNotifier {
         data['callId'] == current?.id &&
         data['toSession'] == sessionId) {
       final peer = _peers[data['from']];
-      if (peer == null) {
+      if (peer == null || !peer.ready) {
         final from = data['from']?.toString() ?? '';
         if (from.isNotEmpty && data['signal'] is Map) {
           final queue = _pendingSignals.putIfAbsent(from, () => []);
@@ -974,8 +981,8 @@ class GroupCallService extends ChangeNotifier {
     final localMakesOffer = localMember?.isViewer == true
         ? false
         : peer.member.isViewer
-            ? true
-            : GroupCallState.makesOffer(sessionId!, peer.member.sessionId);
+        ? true
+        : GroupCallState.makesOffer(sessionId!, peer.member.sessionId);
     if (peer.remoteSet || offer == localMakesOffer) {
       return;
     }
@@ -999,10 +1006,20 @@ class GroupCallService extends ChangeNotifier {
     }
   }
 
+  Future<void> _queueStateApply(GroupCallState room) {
+    _stateApplyTail = _stateApplyTail.then((_) => _applyState(room)).catchError(
+      (Object error, StackTrace stackTrace) {
+        debugPrint('GROUP_CALL_STATE_APPLY_ERROR: $error');
+        debugPrintStack(stackTrace: stackTrace);
+      },
+    );
+    return _stateApplyTail;
+  }
+
   Future<void> _applyState(GroupCallState room) async {
     final epoch = _epoch;
     if (room.member(user)?.sessionId != sessionId) {
-      await leave(message: 'Вы больше не участвуете в звонке');
+      debugPrint('GROUP_CALL_STALE_STATE_IGNORED');
       return;
     }
     current = room;
@@ -1011,11 +1028,21 @@ class GroupCallService extends ChangeNotifier {
       featuredUser = room.featuredUser;
       layout = GroupCallLayout.spotlight;
     }
+    var releasedPeer = false;
     for (final peer in _peers.values.toList()) {
       if (room.member(peer.member.user)?.sessionId != peer.member.sessionId) {
         _peers.remove(peer.member.user);
-        await _releasePeer(peer).timeout(const Duration(seconds: 3));
+        await _releasePeer(peer);
+        releasedPeer = true;
       }
+    }
+    // Android WebRTC can crash in native code when a connection for the same
+    // user is disposed and recreated concurrently during viewer -> stage.
+    // State snapshots are serialized above; let the native teardown finish
+    // before a replacement peer is allocated.
+    if (releasedPeer && Platform.isAndroid) {
+      await Future<void>.delayed(const Duration(milliseconds: 180));
+      if (epoch != _epoch) return;
     }
     for (final member in room.members) {
       if (epoch != _epoch) return;
@@ -1040,7 +1067,8 @@ class GroupCallService extends ChangeNotifier {
         };
         if (peer.localSet)
           _signal(peer, {'kind': 'ice', 'candidate': candidate});
-        else if (peer.localIce.length < 256) peer.localIce.add(candidate);
+        else if (peer.localIce.length < 256)
+          peer.localIce.add(candidate);
       };
       pc.onTrack = (event) {
         if (!valid()) return;
@@ -1050,15 +1078,11 @@ class GroupCallService extends ChangeNotifier {
         }
 
         if (event.track.kind == 'video') {
+          debugPrint(
+            'FENYVO_VIDEO_DIAG track_received peer=${peer.member.user} streams=${event.streams.length}',
+          );
           unawaited(() async {
             if (!valid()) return;
-
-            if (event.streams.isEmpty && Platform.isAndroid) {
-              debugPrint(
-                'Group call Android video track arrived without a MediaStream',
-              );
-              return;
-            }
 
             MediaStream? stream = event.streams.isNotEmpty
                 ? event.streams.first
@@ -1090,8 +1114,8 @@ class GroupCallService extends ChangeNotifier {
 
             if (event.streams.isEmpty &&
                 !remoteStream.getTracks().any(
-                      (track) => track.id == event.track.id,
-                    )) {
+                  (track) => track.id == event.track.id,
+                )) {
               try {
                 await remoteStream.addTrack(event.track);
               } catch (error) {
@@ -1105,11 +1129,14 @@ class GroupCallService extends ChangeNotifier {
             if (!valid()) return;
 
             event.track.enabled = true;
-            await _attachRemoteVideo(peer.member.user, remoteStream);
+            await _attachRemoteVideo(peer.member.user, remoteStream, valid);
           }());
         }
       };
       pc.onConnectionState = (state) {
+        debugPrint(
+          'FENYVO_VIDEO_DIAG connection peer=${peer.member.user} state=$state',
+        );
         if (!valid()) return;
         if (state == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
           peer.timeout?.cancel();
@@ -1127,7 +1154,7 @@ class GroupCallService extends ChangeNotifier {
         }
         notifyListeners();
       };
-      peer.timeout = Timer(const Duration(seconds: 35), () {
+      peer.timeout = Timer(const Duration(seconds: 45), () {
         if (valid() && peer.status != 'В сети') {
           peer.status = 'Переподключение…';
           _schedulePeerReconnect(peer, immediate: true);
@@ -1140,22 +1167,31 @@ class GroupCallService extends ChangeNotifier {
           await pc.addTrack(track, stream);
         }
       }
-      final pending = _pendingSignals.remove(member.user) ?? const [];
-      for (final packet in pending) {
-        if (!valid()) return;
-        await _handlePeerSignal(peer, packet);
+      Future<void> drainPendingSignals() async {
+        while (valid()) {
+          final pending = _pendingSignals.remove(member.user);
+          if (pending == null || pending.isEmpty) return;
+          for (final packet in pending) {
+            if (!valid()) return;
+            await _handlePeerSignal(peer, packet);
+          }
+        }
       }
+
+      await drainPendingSignals();
       final shouldOffer = localMember?.isViewer == true
           ? false
           : member.isViewer
-              ? true
-              : GroupCallState.makesOffer(sessionId!, member.sessionId);
+          ? true
+          : GroupCallState.makesOffer(sessionId!, member.sessionId);
       if (valid() && shouldOffer) {
         final offer = await pc.createOffer();
         if (!valid()) return;
         await pc.setLocalDescription(offer);
         if (valid()) _sendDescription(peer, offer);
       }
+      await drainPendingSignals();
+      if (valid()) peer.ready = true;
     }
   }
 
@@ -1198,22 +1234,41 @@ class GroupCallService extends ChangeNotifier {
         if (epoch != _epoch || phase != GroupCallPhase.active) return;
 
         try {
+          final peerForRecovery = entry.value;
+          if (peerForRecovery.connection.connectionState ==
+                  RTCPeerConnectionState.RTCPeerConnectionStateConnected &&
+              remoteVideos[entry.key]?.srcObject == null &&
+              current?.member(entry.key)?.videoEnabled == true &&
+              current?.member(entry.key)?.away != true &&
+              current?.member(entry.key)?.disconnected != true) {
+            unawaited(_recoverRemoteVideo(peerForRecovery, epoch));
+          }
           final reports = await entry.value.connection.getStats();
 
           if (epoch != _epoch || phase != GroupCallPhase.active) return;
 
           for (final report in reports) {
+            if (report.type == 'inbound-rtp' &&
+                (report.values['kind'] ?? report.values['mediaType'])
+                        ?.toString()
+                        .toLowerCase() ==
+                    'video') {
+              debugPrint(
+                'FENYVO_VIDEO_STATS peer=${entry.key} frames=${report.values['framesReceived']} bytes=${report.values['bytesReceived']} decoded=${report.values['framesDecoded']}',
+              );
+            }
             final values = report.values;
 
-            final kind =
-                '${values['kind'] ?? values['mediaType'] ?? ''}'.toLowerCase();
+            final kind = '${values['kind'] ?? values['mediaType'] ?? ''}'
+                .toLowerCase();
 
             if (kind != 'audio') continue;
 
             final raw = values['audioLevel'];
 
-            final level =
-                raw is num ? raw.toDouble() : double.tryParse('$raw') ?? 0.0;
+            final level = raw is num
+                ? raw.toDouble()
+                : double.tryParse('$raw') ?? 0.0;
 
             if (level <= 0) continue;
 
@@ -1278,9 +1333,19 @@ class GroupCallService extends ChangeNotifier {
       immediate ? Duration.zero : const Duration(seconds: 4),
       () {
         if (!identical(_peers[peer.member.user], peer)) return;
-        unawaited(_restartPeer(peer));
+        unawaited(_queuePeerRestart(peer));
       },
     );
+  }
+
+  Future<void> _queuePeerRestart(_GroupPeer peer) {
+    _stateApplyTail = _stateApplyTail
+        .then((_) => _restartPeer(peer))
+        .catchError((Object error, StackTrace stackTrace) {
+          debugPrint('GROUP_CALL_PEER_RESTART_ERROR: $error');
+          debugPrintStack(stackTrace: stackTrace);
+        });
+    return _stateApplyTail;
   }
 
   Future<void> _restartPeer(_GroupPeer peer) async {
@@ -1289,7 +1354,7 @@ class GroupCallService extends ChangeNotifier {
     _peerReconnectAttempts[username] =
         (_peerReconnectAttempts[username] ?? 0) + 1;
     _peers.remove(username);
-    await _releasePeer(peer).timeout(const Duration(seconds: 3));
+    await _releasePeer(peer);
     final room = current;
     if (room != null && phase == GroupCallPhase.active) {
       await _applyState(room);
@@ -1348,6 +1413,7 @@ class GroupCallService extends ChangeNotifier {
     final room = current;
     final lease = Map<String, dynamic>.from(_lease);
     ++_epoch;
+    await _stateApplyTail;
     _waitTimer?.cancel();
     _heartbeat?.cancel();
     _clockTimer?.cancel();
@@ -1362,7 +1428,7 @@ class GroupCallService extends ChangeNotifier {
     _peerReconnectAttempts.clear();
     _pendingSignals.clear();
     for (final peer in peers) {
-      await _releasePeer(peer).timeout(const Duration(seconds: 3));
+      await _releasePeer(peer);
     }
     for (final renderer in remoteVideos.values) {
       try {
@@ -1371,6 +1437,7 @@ class GroupCallService extends ChangeNotifier {
       } catch (_) {}
     }
     remoteVideos.clear();
+    _fallbackRemoteStreams.clear();
     sessionId = null;
     current = null;
     groupId = null;
@@ -1381,10 +1448,89 @@ class GroupCallService extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> _attachRemoteVideo(String user, MediaStream stream) async {
+  Future<void> _recoverRemoteVideo(_GroupPeer peer, int epoch) async {
+    final userId = peer.member.user;
+    bool valid() =>
+        epoch == _epoch &&
+        phase == GroupCallPhase.active &&
+        identical(_peers[userId], peer);
+    if (!valid() || remoteVideos[userId]?.srcObject != null) return;
+    if (_videoRecoveryInProgress.contains(userId)) return;
+    final now = DateTime.now();
+    final last = _lastVideoRecoveryAttempt[userId];
+    if (last != null && now.difference(last) < const Duration(seconds: 5)) {
+      return;
+    }
+    _lastVideoRecoveryAttempt[userId] = now;
+    _videoRecoveryInProgress.add(userId);
+    try {
+      final receivers = await peer.connection.getReceivers();
+      if (!valid() || remoteVideos[userId]?.srcObject != null) return;
+      for (final receiver in receivers) {
+        final track = receiver.track;
+        if (track == null || track.kind != 'video') continue;
+        MediaStream? stream = _fallbackRemoteStreams[userId];
+        if (stream == null) {
+          stream = await createLocalMediaStream(
+            'fenyvo_remote_recovery_$userId',
+          );
+          if (!valid()) {
+            await stream.dispose();
+            return;
+          }
+          _fallbackRemoteStreams[userId] = stream;
+        }
+        if (!stream.getTracks().any((existing) => existing.id == track.id)) {
+          await stream.addTrack(track);
+        }
+        if (!valid()) return;
+        track.enabled = true;
+        await _attachRemoteVideo(userId, stream, valid);
+        debugPrint('FENYVO_VIDEO_RECOVERY_295 restored peer=$userId');
+        return;
+      }
+    } catch (error) {
+      debugPrint('FENYVO_VIDEO_RECOVERY_295 failed peer=$userId error=$error');
+    } finally {
+      _videoRecoveryInProgress.remove(userId);
+    }
+  }
+
+  Future<void> _attachRemoteVideo(
+    String user,
+    MediaStream stream,
+    bool Function() valid,
+  ) async {
     final renderer = remoteVideos[user] ??= RTCVideoRenderer();
-    if (renderer.textureId == null) await renderer.initialize();
+    renderer.onFirstFrameRendered = () {
+      debugPrint(
+        'FENYVO_FRAME_50 first_frame peer=$user texture=${renderer.textureId} size=${renderer.videoWidth}x${renderer.videoHeight}',
+      );
+    };
+    renderer.onResize = () {
+      debugPrint(
+        'FENYVO_FRAME_50 resize peer=$user texture=${renderer.textureId} size=${renderer.videoWidth}x${renderer.videoHeight}',
+      );
+    };
+    if (renderer.textureId == null) {
+      final pending = _remoteRendererInit[user];
+      if (pending != null) {
+        await pending;
+      } else {
+        final future = renderer.initialize();
+        _remoteRendererInit[user] = future;
+        try {
+          await future;
+        } finally {
+          if (identical(_remoteRendererInit[user], future)) {
+            _remoteRendererInit.remove(user);
+          }
+        }
+      }
+    }
+    if (!valid()) return;
     renderer.srcObject = stream;
+    debugPrint('FENYVO_VIDEO_DIAG renderer_attached peer=$user');
     notifyListeners();
   }
 
@@ -1428,6 +1574,8 @@ class GroupCallService extends ChangeNotifier {
   Future<void> _leave(String? message, {bool endForAll = false}) async {
     final old = current;
     ++_epoch;
+    phase = GroupCallPhase.leaving;
+    await _stateApplyTail;
     _clearReconnectIntent();
     if (old != null) {
       _dismissed.add(old.id);
@@ -1443,7 +1591,7 @@ class GroupCallService extends ChangeNotifier {
     _stopSpeakingMonitor();
     _controlsTimer?.cancel();
     _clock.stop();
-    phase = GroupCallPhase.leaving;
+
     notifyListeners();
     final peers = _peers.values.toList();
     _peers.clear();
@@ -1453,11 +1601,11 @@ class GroupCallService extends ChangeNotifier {
     _stream = null;
     try {
       await IncomingCallAlertService.instance.stop().timeout(
-            const Duration(seconds: 2),
-          );
+        const Duration(seconds: 2),
+      );
     } catch (_) {}
     for (final peer in peers) {
-      await _releasePeer(peer).timeout(const Duration(seconds: 3));
+      await _releasePeer(peer);
     }
     for (final renderer in remoteVideos.values) {
       try {
@@ -1466,9 +1614,10 @@ class GroupCallService extends ChangeNotifier {
       } catch (_) {}
     }
     remoteVideos.clear();
+    _fallbackRemoteStreams.clear();
     if (stream != null) {
       try {
-        await _releaseStream(stream).timeout(const Duration(seconds: 3));
+        await _releaseStream(stream);
       } catch (_) {}
     }
     if (_renderLocalVideo && localVideo != null) {
@@ -1499,9 +1648,26 @@ class GroupCallService extends ChangeNotifier {
     if (message != null) _notifyError(message);
   }
 
-  Future<void> _releasePeer(_GroupPeer peer) async {
+  Future<void> _releasePeer(_GroupPeer peer) {
+    return peer.releaseFuture ??= _releasePeerOnce(peer);
+  }
+
+  Future<void> _releasePeerOnce(_GroupPeer peer) async {
     peer.timeout?.cancel();
-    final renderer = remoteVideos.remove(peer.member.user);
+    if (_peers[peer.member.user] == null ||
+        identical(_peers[peer.member.user], peer)) {
+      _fallbackRemoteStreams.remove(peer.member.user);
+    }
+    final pending = _remoteRendererInit[peer.member.user];
+    if (pending != null) {
+      try {
+        await pending;
+      } catch (_) {}
+    }
+    final replacementPeer = _peers[peer.member.user];
+    final renderer = replacementPeer == null || identical(replacementPeer, peer)
+        ? remoteVideos.remove(peer.member.user)
+        : null;
     if (renderer != null) {
       try {
         renderer.srcObject = null;
@@ -1509,10 +1675,13 @@ class GroupCallService extends ChangeNotifier {
       } catch (_) {}
     }
     try {
-      await peer.connection.close().timeout(const Duration(seconds: 2));
+      peer.connection.onIceCandidate = null;
+      peer.connection.onTrack = null;
+      peer.connection.onConnectionState = null;
+      await peer.connection.close();
     } catch (_) {}
     try {
-      await peer.connection.dispose().timeout(const Duration(seconds: 2));
+      await peer.connection.dispose();
     } catch (_) {}
   }
 

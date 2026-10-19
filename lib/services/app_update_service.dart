@@ -222,7 +222,9 @@ class AppUpdateService {
     AppRelease? remote,
   ) {
     if (remote?.build == build) return remote;
-    if (build != 4236) return null;
+    if (build != 4236 && build != 4237 && build != 4238) return null;
+    final isGroupCallFix = build == 4237 || build == 4238;
+    final isSerializedGroupCallFix = build == 4238;
     return AppRelease(
       platform: platform,
       version: version,
@@ -230,11 +232,54 @@ class AppUpdateService {
       minimumSupportedBuild: 0,
       downloadUrl: Uri.parse(
         platform == 'windows'
-            ? 'https://fenyvo.com/download/Fenyvo-1.8.1-windows-x64.zip'
-            : 'https://fenyvo.com/download/Fenyvo-1.8.1-arm64.apk',
+            ? 'https://fenyvo.com/download/Fenyvo-${isGroupCallFix ? '1.8.2' : '1.8.1'}-windows-x64.zip'
+            : 'https://fenyvo.com/download/Fenyvo-${isGroupCallFix ? '1.8.2' : '1.8.1'}-arm64.apk',
       ),
-      publishedAt: DateTime.utc(2026, 10, 12),
-      notes: const {
+      publishedAt: isSerializedGroupCallFix
+          ? DateTime.utc(2026, 10, 17)
+          : isGroupCallFix
+          ? DateTime.utc(2026, 10, 15)
+          : DateTime.utc(2026, 10, 12),
+      notes: isSerializedGroupCallFix
+          ? const {
+              'ru': [
+                'Состояния группового звонка теперь обрабатываются последовательно.',
+                'Старое соединение полностью освобождается перед созданием нового.',
+                'Исправлен вылет при одобрении запроса участника ведущим.',
+              ],
+              'uk': [
+                'Стани групового дзвінка тепер обробляються послідовно.',
+                'Старе з’єднання повністю звільняється перед створенням нового.',
+                'Виправлено виліт після схвалення запиту учасника ведучим.',
+              ],
+              'en': [
+                'Group-call state updates are now processed sequentially.',
+                'The old peer is fully released before its replacement is created.',
+                'Fixed a crash after the host approves a participant request.',
+              ],
+            }
+          : isGroupCallFix
+          ? const {
+              'ru': [
+                'Участники стабильнее подключаются к групповому звонку.',
+                'Устаревшее состояние больше не выкидывает ведущего или участника.',
+                'Ранние сигналы соединения не теряются во время одновременного входа.',
+                'Групповые звонки используют защищённый TURN-сервер Fenyvo.',
+              ],
+              'uk': [
+                'Учасники стабільніше підключаються до групового дзвінка.',
+                'Застарілий стан більше не викидає ведучого або учасника.',
+                'Ранні сигнали з’єднання не губляться під час одночасного входу.',
+                'Групові дзвінки використовують захищений TURN-сервер Fenyvo.',
+              ],
+              'en': [
+                'Participants now join group calls more reliably.',
+                'Stale state no longer removes a host or participant.',
+                'Early connection signals survive simultaneous joins.',
+                'Group calls now use the authenticated Fenyvo TURN service.',
+              ],
+            }
+          : const {
         'ru': [
           'Fenyvo автоматически проверяет наличие новых версий.',
           'Обновление можно открыть прямо с экрана уведомления.',

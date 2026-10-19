@@ -2,7 +2,7 @@ name: spartan_chat_final
 description: Spartan Chat messenger
 publish_to: "none"
 
-version: 1.8.1+4236
+version: 1.8.2+4242
 
 environment:
   sdk: ">=3.13.0 <4.0.0"
@@ -62,6 +62,8 @@ dev_dependencies:
   flutter_lints: ^6.0.0
 
 dependency_overrides:
+  flutter_webrtc:
+    path: third_party/flutter_webrtc_1_6_1_local
   jni:
     path: third_party/jni
 

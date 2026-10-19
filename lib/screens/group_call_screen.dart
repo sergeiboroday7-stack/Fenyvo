@@ -2492,15 +2492,24 @@ class _VideoTile extends StatelessWidget {
     final avatar = _stableCallAvatar(member.user);
 
     final hasVideo =
-        !member.away && member.videoEnabled && renderer?.srcObject != null;
+        !member.away &&
+        !member.disconnected &&
+        member.videoEnabled &&
+        renderer?.srcObject != null;
+
+    debugPrint(
+      'FENYVO_VIDEO_UI peer=${member.user} me=$me away=${member.away} disconnected=${member.disconnected} enabled=${member.videoEnabled} renderer=${renderer != null} stream=${renderer?.srcObject != null} visible=$hasVideo',
+    );
 
     final speaking =
         active &&
         !member.away &&
+        !member.disconnected &&
         !member.muted &&
         call.speakingUser == member.user;
 
     return GestureDetector(
+      key: ValueKey('tile-${member.user}'),
       onTap: active ? call.revealControls : null,
       onDoubleTap: active && call.canManageBroadcast
           ? () => call.feature(member.user)
@@ -2532,6 +2541,7 @@ class _VideoTile extends StatelessWidget {
             children: [
               if (hasVideo)
                 RTCVideoView(
+                  key: ValueKey('video-${member.user}-${renderer?.textureId}'),
                   renderer!,
                   objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover,
                 )
@@ -2588,6 +2598,15 @@ class _VideoTile extends StatelessWidget {
                           ),
                         ),
                       ),
+                      if (member.disconnected)
+                        const Padding(
+                          padding: EdgeInsets.only(left: 6),
+                          child: Icon(
+                            Icons.wifi_off_rounded,
+                            color: Colors.white,
+                            size: 18,
+                          ),
+                        ),
                       if (member.muted)
                         const Padding(
                           padding: EdgeInsets.only(left: 6),
