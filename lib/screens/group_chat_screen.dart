@@ -1,3 +1,4 @@
+import '../main.dart';
 import '../theme/spartan_theme.dart';
 
 import 'dart:async';
@@ -527,14 +528,21 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
     final room = service.rooms[_groupId];
     if (room != null) {
       if (service.hasCall && service.groupId == _groupId) {
-        await Navigator.of(context)
-            .push(MaterialPageRoute(builder: (_) => const GroupCallScreen()));
+        groupCallReturnRequest.value++;
         return;
       }
-      await service.watch(_groupId, _groupName, room.id);
-      if (mounted) {
-        await Navigator.of(context)
-            .push(MaterialPageRoute(builder: (_) => const GroupCallScreen()));
+      if (room.owner == service.user) {
+        await service.begin(
+          _groupId,
+          _groupName,
+          existingCallId: room.id,
+          withVideo: withVideo,
+        );
+        if (mounted && service.hasCall && service.groupId == _groupId) {
+          groupCallReturnRequest.value++;
+        }
+      } else {
+        await service.watch(_groupId, _groupName, room.id);
       }
       return;
     }
@@ -609,6 +617,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
     final call = service.rooms[_groupId];
     if (call == null) return const SizedBox.shrink();
     final alreadyInside = service.hasCall && service.groupId == _groupId;
+    final canReturnAsHost = call.owner == service.user && !alreadyInside;
     final pending = service.isJoinPending(_groupId);
     return Material(
       color: SpartanPalette.blue,
@@ -638,6 +647,8 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                       ? 'Групповой видеозвонок · ${call.members.where((member) => !member.isViewer).length}/4\nВернуться в звонок'
                       : pending
                       ? 'Групповой видеозвонок · ${call.members.where((member) => !member.isViewer).length}/4\nЖдём разрешения ведущего…'
+                      : canReturnAsHost
+                      ? 'Групповой видеозвонок · ${call.members.where((member) => !member.isViewer).length}/4\nВернуться в эфир'
                       : 'Групповой видеозвонок · ${call.members.where((member) => !member.isViewer).length}/4\nСмотреть трансляцию и открыть чат',
                   style: const TextStyle(color: Colors.white),
                 ),

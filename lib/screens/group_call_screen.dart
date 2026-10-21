@@ -41,6 +41,9 @@ ImageProvider? _stableCallAvatar(String username) {
   return avatar;
 }
 
+final RouteObserver<ModalRoute<dynamic>> groupCallRouteObserver =
+    RouteObserver<ModalRoute<dynamic>>();
+
 class GroupCallScreen extends StatefulWidget {
   const GroupCallScreen({super.key, this.service});
 
@@ -50,7 +53,7 @@ class GroupCallScreen extends StatefulWidget {
   State<GroupCallScreen> createState() => _GroupCallScreenState();
 }
 
-class _GroupCallScreenState extends State<GroupCallScreen> {
+class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
   final TextEditingController _chatController = TextEditingController();
   final ImagePicker _imagePicker = ImagePicker();
   AudioRecorder? _audioRecorder;
@@ -96,7 +99,7 @@ class _GroupCallScreenState extends State<GroupCallScreen> {
 
     final targetGroupId = call.groupId?.trim() ?? '';
     final targetGroupName = call.groupName;
-    final endForAll = call.isOwner;
+    const endForAll = false;
 
     _closingScreen = true;
 
@@ -1346,11 +1349,37 @@ class _GroupCallScreenState extends State<GroupCallScreen> {
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final route = ModalRoute.of(context);
+    if (route != null) {
+      groupCallRouteObserver.subscribe(this, route);
+      (widget.service ?? GroupCallService.instance).setCallScreenVisible(
+        route.isCurrent,
+      );
+    }
+  }
+
+  @override
+  void didPush() =>
+      (widget.service ?? GroupCallService.instance).setCallScreenVisible(true);
+  @override
+  void didPopNext() =>
+      (widget.service ?? GroupCallService.instance).setCallScreenVisible(true);
+  @override
+  void didPushNext() =>
+      (widget.service ?? GroupCallService.instance).setCallScreenVisible(false);
+  @override
+  void didPop() =>
+      (widget.service ?? GroupCallService.instance).setCallScreenVisible(false);
+
+  @override
   void initState() {
     super.initState();
     if (Platform.isWindows) {
       HardwareKeyboard.instance.addHandler(_handleWindowsTypeToCallChat);
     }
+    debugPrint('FENYVO_GROUP_SCREEN INIT');
     final call = widget.service ?? GroupCallService.instance;
     _enteredCall = call.phase != GroupCallPhase.idle;
     call.addListener(_handleCallLifecycle);
@@ -1363,6 +1392,8 @@ class _GroupCallScreenState extends State<GroupCallScreen> {
 
   @override
   void dispose() {
+    groupCallRouteObserver.unsubscribe(this);
+    (widget.service ?? GroupCallService.instance).setCallScreenVisible(false);
     if (Platform.isWindows) {
       HardwareKeyboard.instance.removeHandler(_handleWindowsTypeToCallChat);
     }
@@ -1377,6 +1408,7 @@ class _GroupCallScreenState extends State<GroupCallScreen> {
     for (final timer in _callChatMessageTimers.values) {
       timer.cancel();
     }
+    debugPrint('FENYVO_GROUP_SCREEN DISPOSE');
     _callChatMessageTimers.clear();
 
     _communicationStateNotifier.dispose();
@@ -1394,6 +1426,7 @@ class _GroupCallScreenState extends State<GroupCallScreen> {
   @override
   Widget build(BuildContext context) {
     final call = widget.service ?? GroupCallService.instance;
+    debugPrint('FENYVO_GROUP_SCREEN BUILD phase=${call.phase}');
     _ensureCallChatHistory(call);
 
     return AnimatedBuilder(
@@ -2047,13 +2080,7 @@ class _CallStage extends StatelessWidget {
         avatar: _avatarFor(owner),
         onUserCard: () => onUserCard(owner),
         canTakeOver: call.isOwner || call.isModerator,
-        onTakeOver: () {
-          if (call.isModerator && !call.isViewer) {
-            call.takeHostRole();
-          } else {
-            unawaited(call.returnToStage());
-          }
-        },
+        onTakeOver: () => unawaited(call.returnToStage()),
       );
     }
 
@@ -2982,14 +3009,38 @@ class _TopAndBottomChrome extends StatelessWidget {
                   _showLayoutSheet(context);
                 },
               ),
-              ListTile(
-                leading: const Icon(Icons.call_end_rounded),
-                title: const Text('Выйти из звонка'),
-                onTap: () async {
-                  Navigator.pop(context);
-                  await onLeave();
-                },
-              ),
+              if (call.isOwner)
+                ListTile(
+                  leading: const Icon(
+                    Icons.stop_circle_outlined,
+                    color: Colors.red,
+                  ),
+                  title: const Text('Завершить эфир'),
+                  onTap: () async {
+                    Navigator.pop(context);
+                    final confirmed = await showDialog<bool>(
+                      context: context,
+                      builder: (dialogContext) => AlertDialog(
+                        title: const Text('Завершить эфир для всех?'),
+                        content: const Text(
+                          'Все участники будут отключены от звонка.',
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () =>
+                                Navigator.pop(dialogContext, false),
+                            child: const Text('Отмена'),
+                          ),
+                          TextButton(
+                            onPressed: () => Navigator.pop(dialogContext, true),
+                            child: const Text('Завершить для всех'),
+                          ),
+                        ],
+                      ),
+                    );
+                    if (confirmed == true) await call.leave(endForAll: true);
+                  },
+                ),
               const SizedBox(height: 8),
             ],
           ),

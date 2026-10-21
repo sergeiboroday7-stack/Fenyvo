@@ -24,6 +24,19 @@ import 'screens/splash_screen.dart';
 import 'theme/spartan_theme.dart';
 import 'widgets/app_update_host.dart';
 
+class FenyvoRouteDiagnostics extends NavigatorObserver {
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    debugPrint('FENYVO_NAV PUSH current=${route.runtimeType} previous=${previousRoute?.runtimeType}');
+  }
+  @override
+  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    debugPrint('FENYVO_NAV POP current=${route.runtimeType} previous=${previousRoute?.runtimeType}');
+  }
+}
+
+final ValueNotifier<int> groupCallReturnRequest = ValueNotifier<int>(0);
+
 final GlobalKey<NavigatorState> spartanNavigatorKey =
     GlobalKey<NavigatorState>();
 final GlobalKey<ScaffoldMessengerState> spartanMessengerKey =
@@ -70,6 +83,7 @@ class SpartanChatApp extends StatelessWidget {
       valueListenable: AppLanguageService.instance.code,
       builder: (context, _, _) => MaterialApp(
         navigatorKey: spartanNavigatorKey,
+        navigatorObservers: [FenyvoRouteDiagnostics(), groupCallRouteObserver],
         scaffoldMessengerKey: spartanMessengerKey,
         title: 'FENYVO',
         debugShowCheckedModeBanner: false,
@@ -114,6 +128,7 @@ class _CallNavigationHostState extends State<CallNavigationHost> {
   String? _shownPulseInviteId;
   String? _shownPulseMatchId;
   bool _syncScheduled = false;
+  int _handledGroupReturnRequest = 0;
   String? _shownCallResult;
 
   @override
@@ -121,6 +136,7 @@ class _CallNavigationHostState extends State<CallNavigationHost> {
     super.initState();
     CallService.instance.addListener(_scheduleSync);
     GroupCallService.instance.addListener(_scheduleSync);
+    groupCallReturnRequest.addListener(_scheduleSync);
     PulseService.instance.addListener(_scheduleSync);
     _scheduleSync();
   }
@@ -129,6 +145,7 @@ class _CallNavigationHostState extends State<CallNavigationHost> {
   void dispose() {
     CallService.instance.removeListener(_scheduleSync);
     GroupCallService.instance.removeListener(_scheduleSync);
+    groupCallReturnRequest.removeListener(_scheduleSync);
     PulseService.instance.removeListener(_scheduleSync);
     super.dispose();
   }
@@ -157,6 +174,10 @@ class _CallNavigationHostState extends State<CallNavigationHost> {
 
     final service = CallService.instance;
     final groupCall = GroupCallService.instance;
+    debugPrint('FENYVO_GROUP_ROUTE hasCall=${groupCall.hasCall} phase=${groupCall.phase} routeExists=${_groupCallRoute != null} routeCurrent=${_groupCallRoute?.isCurrent} privateCall=${service.hasCall}');
+    if (groupCall.hasCall && _groupCallRoute != null && !_groupCallRoute!.isActive) {
+      _groupCallRoute = null;
+    }
     if (groupCall.hasCall && _groupCallRoute == null && !service.hasCall) {
       final route = MaterialPageRoute<void>(
         fullscreenDialog: true,
@@ -169,13 +190,20 @@ class _CallNavigationHostState extends State<CallNavigationHost> {
       navigator.push(route).whenComplete(() {
         if (_groupCallRoute == route) {
           _groupCallRoute = null;
-          if (groupCall.hasCall) unawaited(groupCall.leave());
+          if (groupCall.hasCall) _scheduleSync();
         }
       });
     } else if (!groupCall.hasCall && _groupCallRoute != null) {
       final route = _groupCallRoute!;
       _groupCallRoute = null;
       if (route.isActive) navigator.removeRoute(route);
+    }
+    if (groupCallReturnRequest.value != _handledGroupReturnRequest) {
+      _handledGroupReturnRequest = groupCallReturnRequest.value;
+      final route = _groupCallRoute;
+      if (groupCall.hasCall && route != null && route.isActive && !route.isCurrent) {
+        navigator.popUntil((candidate) => candidate == route);
+      }
     }
     if (groupCall.noticeSerial != _shownGroupNotice &&
         groupCall.notice != null) {

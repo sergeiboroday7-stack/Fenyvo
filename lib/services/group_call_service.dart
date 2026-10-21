@@ -62,11 +62,12 @@ class GroupCallService extends ChangeNotifier {
     required String user,
     required Future<MediaStream> Function() media,
     required Future<RTCPeerConnection> Function() connection,
+    bool foreground = false,
   }) : _send = send,
        _user = (() => user),
        _authenticated = (() => true),
        _privateBusy = (() => false),
-       _foreground = (() => false),
+       _foreground = (() => foreground),
        _renderLocalVideo = false,
        _media = ((_) => media()),
        _connection = connection;
@@ -102,6 +103,9 @@ class GroupCallService extends ChangeNotifier {
   int _epoch = 0;
   bool _initialized = false, _speakerChanging = false;
   Future<void> _stateApplyTail = Future<void>.value();
+
+  @visibleForTesting
+  Future<void> waitForStateApplyForTesting() => _stateApplyTail;
   bool _transitioningViewerToStage = false;
   String? _transitionGroupId;
   String? _requestId;
@@ -151,7 +155,28 @@ class GroupCallService extends ChangeNotifier {
     if (_authenticated()) _send('group_call_sync', {});
   }
 
+  bool _callScreenVisible = false;
+
+  void setCallScreenVisible(bool visible) {
+    if (_callScreenVisible == visible) return;
+    _callScreenVisible = visible;
+    _applyMicrophoneVisibility();
+  }
+
+  void _applyMicrophoneVisibility() {
+    if (_stream == null) return;
+    final enabled =
+        phase == GroupCallPhase.active &&
+        microphoneEnabled &&
+        _callScreenVisible &&
+        AppVisibility.instance.foreground;
+    for (final track in _stream!.getAudioTracks()) {
+      track.enabled = enabled;
+    }
+  }
+
   void _handleVisibilityChange() {
+    _applyMicrophoneVisibility();
     if (phase != GroupCallPhase.active ||
         current == null ||
         sessionId == null) {
@@ -424,6 +449,7 @@ class GroupCallService extends ChangeNotifier {
         return;
       }
       _stream = stream;
+      _applyMicrophoneVisibility();
       if (_renderLocalVideo && stream.getVideoTracks().isNotEmpty) {
         try {
           final renderer = RTCVideoRenderer();
@@ -481,9 +507,7 @@ class GroupCallService extends ChangeNotifier {
     if (microphoneEnabled == enabled) return;
 
     microphoneEnabled = enabled;
-    for (final track in _stream!.getAudioTracks()) {
-      track.enabled = enabled;
-    }
+    _applyMicrophoneVisibility();
 
     _send('group_call_mute', {..._lease, 'muted': !enabled});
     notifyListeners();
@@ -879,6 +903,16 @@ class GroupCallService extends ChangeNotifier {
       sessionId = lease;
       current = room;
       phase = GroupCallPhase.active;
+      _applyMicrophoneVisibility();
+      // A reconnect can reuse the server-side stage member. That member may
+      // still be marked away, muted, or without video from the old socket.
+      // Republish the local state after the new lease is accepted so the host
+      // grace overlay is removed and peers render the returning camera.
+      _send('group_call_presence', {..._lease, 'away': !_foreground()});
+      if (type == 'group_call_joined') {
+        _send('group_call_mute', {..._lease, 'muted': !microphoneEnabled});
+        _send('group_call_video', {..._lease, 'videoEnabled': videoEnabled});
+      }
       _clearReconnectIntent();
       controlsVisible = true;
       _armControlsTimer();
@@ -1389,9 +1423,22 @@ class GroupCallService extends ChangeNotifier {
     final room = current;
     if (room == null ||
         phase != GroupCallPhase.active ||
-        !isViewer ||
         room.isWaitingForHost != true ||
         (!isOwner && !isModerator)) {
+      return;
+    }
+
+    if (!isViewer) {
+      if (isOwner) {
+        // The owner may already have rejoined the stage while the server still
+        // exposes the grace overlay from the previous socket. Confirming the
+        // current presence makes this button an effective recovery action.
+        _send('group_call_presence', {..._lease, 'away': !_foreground()});
+        _send('group_call_mute', {..._lease, 'muted': !microphoneEnabled});
+        _send('group_call_video', {..._lease, 'videoEnabled': videoEnabled});
+        return;
+      }
+      if (isModerator) takeHostRole();
       return;
     }
 
@@ -1575,6 +1622,7 @@ class GroupCallService extends ChangeNotifier {
     final old = current;
     ++_epoch;
     phase = GroupCallPhase.leaving;
+    _applyMicrophoneVisibility();
     await _stateApplyTail;
     _clearReconnectIntent();
     if (old != null) {

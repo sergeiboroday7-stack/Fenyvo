@@ -86,18 +86,32 @@ Map<String, dynamic> room({
   String local = 'a',
   String remote = 'b',
   bool includeRemote = true,
+  bool awaitingHost = false,
+  bool localAway = false,
 }) => {
   'id': 'call',
   'groupId': 'g',
   'name': 'Spartan 1',
   'startedBy': 'A',
+  'owner': 'A',
+  'awaitingHost': awaitingHost,
+  if (awaitingHost) 'hostGraceUntil': 300000,
   'participants': [
-    {'user': 'A', 'sessionId': local, 'muted': false},
+    {
+      'user': 'A',
+      'sessionId': local,
+      'muted': false,
+      'away': localAway,
+      'videoEnabled': true,
+    },
     if (includeRemote) {'user': 'B', 'sessionId': remote, 'muted': false},
   ],
 };
 
 class Fixture {
+  Fixture({bool foreground = false}) : _foreground = foreground;
+
+  final bool _foreground;
   final stream = Stream();
   final peers = <Peer>[];
   final sent = <Map<String, dynamic>>[];
@@ -105,6 +119,7 @@ class Fixture {
     send: (type, data) => sent.add({'type': type, 'data': data}),
     user: 'A',
     media: () async => stream,
+    foreground: _foreground,
     connection: () async {
       final pc = Peer();
       peers.add(pc);
@@ -116,6 +131,7 @@ class Fixture {
     String remote = 'b',
     bool includeRemote = true,
   }) async {
+    service.setCallScreenVisible(true);
     service.supported = true;
     await service.begin('g', 'Spartan 1');
     final requestId = sent.last['data']['requestId'];
@@ -131,6 +147,7 @@ class Fixture {
         ),
       },
     });
+    await service.waitForStateApplyForTesting();
   }
 
   Future<void> signal(
@@ -336,6 +353,7 @@ void main() {
         'type': 'group_call_state',
         'data': {'groupId': 'g', 'call': room(includeRemote: false)},
       });
+      await f.service.waitForStateApplyForTesting();
       expect(f.peers.single.closed, true);
       expect(f.service.phase, GroupCallPhase.active);
       expect(f.stream.track.stopped, false);
@@ -351,6 +369,7 @@ void main() {
         'type': 'group_call_state',
         'data': {'groupId': 'g', 'call': room(remote: 'c')},
       });
+      await f.service.waitForStateApplyForTesting();
       expect(f.peers.length, 2);
       expect(f.peers.first.closed, true);
       await f.signal({'kind': 'answer', 'sdp': 'stale'});
@@ -360,6 +379,50 @@ void main() {
         'data': {'callId': 'call', 'sessionId': 'old', 'reason': 'old'},
       });
       expect(f.service.phase, GroupCallPhase.active);
+      await f.service.leave();
+    },
+  );
+  test(
+    'join acknowledgement republishes presence microphone and video state',
+    () async {
+      final f = Fixture(foreground: true);
+
+      await f.join(includeRemote: false);
+
+      final presence = f.sent.lastWhere(
+        (item) => item['type'] == 'group_call_presence',
+      );
+      final mute = f.sent.lastWhere(
+        (item) => item['type'] == 'group_call_mute',
+      );
+      final video = f.sent.lastWhere(
+        (item) => item['type'] == 'group_call_video',
+      );
+      expect(presence['data']['away'], false);
+      expect(mute['data']['muted'], false);
+      expect(video['data']['videoEnabled'], true);
+      await f.service.leave();
+    },
+  );
+  test(
+    'return button confirms an already rejoined owner presence and video',
+    () async {
+      final f = Fixture(foreground: true);
+      await f.join(includeRemote: false);
+      f.service.current = GroupCallState.parse(
+        room(includeRemote: false, awaitingHost: true, localAway: true),
+      );
+      f.sent.clear();
+
+      await f.service.returnToStage();
+
+      expect(f.sent.map((item) => item['type']), [
+        'group_call_presence',
+        'group_call_mute',
+        'group_call_video',
+      ]);
+      expect(f.sent.first['data']['away'], false);
+      expect(f.sent.last['data']['videoEnabled'], true);
       await f.service.leave();
     },
   );
@@ -443,7 +506,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('Выключить микрофон').hitTestable(), findsOneWidget);
-      final exitFinder = find.text('Выйти из звонка');
+      final exitFinder = find.text('Завершить эфир');
       await tester.ensureVisible(exitFinder);
       await tester.pumpAndSettle();
       expect(exitFinder.hitTestable(), findsOneWidget);
