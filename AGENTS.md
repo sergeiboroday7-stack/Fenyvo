@@ -1,4 +1,4 @@
-# SPARTAN repository maintenance
+# Fenyvo repository maintenance
 
 The owner requests that after each successfully verified messenger improvement,
 reviewed source changes, README status and CHANGELOG are updated here.
@@ -10,13 +10,12 @@ API keys, Firebase Admin secrets, signing keys or encrypted DPAPI files.
 Review the exact staged paths and diff before committing; use explicit staging.
 Keep distributable APK/Windows bundles out of source commits.
 
-This repository now contains the GROUP VOICE V1 source snapshot (2026-09-04),
-ported from the owner's current Android/Windows project onto the cleaned
-STAGE17 history. Never overwrite newer local work with an older Git snapshot.
-Keep source updates deliberate; never copy an entire runtime project folder.
-Local launchers tied to a running server, caches, SDKs, old manifests and
-diagnostic files are excluded. Build paths and private signing keys must be
-configured locally. Read README build notes before building on another machine.
+The `main` branch is the current reviewed Fenyvo source line. Never overwrite
+newer local or remote work with an older snapshot. Keep updates deliberate;
+never copy an entire runtime project folder. Local launchers tied to a running
+server, caches, SDKs, old manifests and diagnostic files are excluded. Build
+paths and private signing keys must be configured locally. Read README build
+notes before building on another machine.
 
 Old clones retain the removed data and history. Never merge or push their old
 history back here. Future updates use normal fast-forward pushes.

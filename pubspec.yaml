@@ -1,8 +1,8 @@
 name: spartan_chat_final
-description: Spartan Chat messenger
+description: Fenyvo messenger for Android and Windows
 publish_to: "none"
 
-version: 1.8.2+4242
+version: 1.8.2+4249
 
 environment:
   sdk: ">=3.13.0 <4.0.0"
