@@ -70,6 +70,8 @@ service-account*.json
 *.zip
 *.tar
 *.bundle
+*.sha256
+*.sha256.txt
 /.android_sdk_local/
 /.gradle_user_home/
 /backups/
@@ -111,3 +113,22 @@ auto_reply_history.json
 auto_reply_settings.json
 assets/images/114f901a-bcae-468c-a5be-e7ca385fec28.png
 assets/images/adcfeb10-a5b8-4fb2-9f1d-5d68f2365fba.png
+
+# Local task caches and verification output (never source code)
+/.build-appdata/
+/.test-tmp/
+/.gradle-user/
+/.pub-cache/
+/.verify-*-public/
+/FENYVO_*_INSTALL/
+/release_packages/
+/public-*-verify.*
+
+# Local diagnostic and safety copies
+*.backup*
+*.broken*
+**/.cxx/
+/third_party/flutter_webrtc_1_6_1_local/example/
+/third_party/flutter_webrtc_1_6_1_local/test/
+/third_party/flutter_webrtc_1_6_1_local/flutter-webrtc.code-workspace
+/third_party/flutter_webrtc_1_6_1_local/format.sh

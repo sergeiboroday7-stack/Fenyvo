@@ -5,10 +5,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
-import 'package:spartan_chat_final/services/group_call_service.dart';
-import 'package:spartan_chat_final/services/group_call_state.dart';
-import 'package:spartan_chat_final/screens/group_call_screen.dart';
-import 'package:spartan_chat_final/theme/spartan_theme.dart';
+import 'package:fenyvo/services/group_call_service.dart';
+import 'package:fenyvo/services/group_call_state.dart';
+import 'package:fenyvo/screens/group_call_screen.dart';
+import 'package:fenyvo/theme/fenyvo_theme.dart';
 
 class Track extends Fake implements MediaStreamTrack {
   @override
@@ -91,7 +91,7 @@ Map<String, dynamic> room({
 }) => {
   'id': 'call',
   'groupId': 'g',
-  'name': 'Spartan 1',
+  'name': 'Fenyvo 1',
   'startedBy': 'A',
   'owner': 'A',
   'awaitingHost': awaitingHost,
@@ -133,7 +133,7 @@ class Fixture {
   }) async {
     service.setCallScreenVisible(true);
     service.supported = true;
-    await service.begin('g', 'Spartan 1');
+    await service.begin('g', 'Fenyvo 1');
     final requestId = sent.last['data']['requestId'];
     await service.handlePacket({
       'type': 'group_call_joined',
@@ -257,7 +257,7 @@ void main() {
       final watchingRoom = {
         'id': 'call',
         'groupId': 'g',
-        'name': 'Spartan 1',
+        'name': 'Fenyvo 1',
         'startedBy': 'B',
         'owner': 'B',
         'participants': [
@@ -266,7 +266,7 @@ void main() {
         ],
       };
       f.service.rooms['g'] = GroupCallState.parse(watchingRoom)!;
-      await f.service.watch('g', 'Spartan 1', 'call');
+      await f.service.watch('g', 'Fenyvo 1', 'call');
       final watchRequest = f.sent.last['data']['requestId'];
       await f.service.handlePacket({
         'type': 'group_call_watching',
@@ -276,7 +276,7 @@ void main() {
           'call': watchingRoom,
         },
       });
-      f.service.requestJoin('g', 'Spartan 1', 'call');
+      f.service.requestJoin('g', 'Fenyvo 1', 'call');
       await f.service.handlePacket({
         'type': 'group_call_join_response',
         'data': {'groupId': 'g', 'callId': 'call', 'accepted': true},
@@ -317,7 +317,7 @@ void main() {
           'call': {
             'id': 'call',
             'groupId': 'g',
-            'name': 'Spartan 1',
+            'name': 'Fenyvo 1',
             'startedBy': 'B',
             'owner': 'B',
             'participants': [
@@ -485,14 +485,14 @@ void main() {
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
       final f = Fixture();
-      f.service.groupName = 'Spartan 1';
+      f.service.groupName = 'Fenyvo 1';
       f.service.phase = GroupCallPhase.active;
       f.service.current = GroupCallState.parse(room());
       await tester.pumpWidget(
         MaterialApp(
           debugShowCheckedModeBanner: false,
-          theme: SpartanPalette.blueGoldTheme.copyWith(
-            textTheme: SpartanPalette.blueGoldTheme.textTheme.apply(
+          theme: FenyvoPalette.blueGoldTheme.copyWith(
+            textTheme: FenyvoPalette.blueGoldTheme.textTheme.apply(
               fontFamily: 'GroupPreview',
             ),
           ),

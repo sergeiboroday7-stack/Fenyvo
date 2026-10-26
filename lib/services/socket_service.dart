@@ -1,3 +1,5 @@
+import '../features/messages/domain/message_id_generator.dart';
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -15,7 +17,7 @@ import 'turn_credential_service.dart';
 import 'e2ee_settings_service.dart';
 import 'crypto/signal_e2ee_service.dart';
 
-enum SpartanConnectionPhase {
+enum FenyvoConnectionPhase {
   disconnected,
   connecting,
   authenticating,
@@ -23,11 +25,25 @@ enum SpartanConnectionPhase {
 }
 
 class SocketService {
+  // null means the server did not provide recovery status.
+  bool? recoveryConfigured;
   static final SocketService _instance = SocketService._internal();
 
   static SocketService get instance => _instance;
 
-  SocketService._internal();
+  SocketService._internal() {
+    AppVisibility.instance.changes.addListener(_syncPresence);
+  }
+
+  void _syncPresence() {
+    if (!_authenticated || !_isConnected || _channel == null) {
+      return;
+    }
+
+    _send('presence_update', <String, dynamic>{
+      'foreground': AppVisibility.instance.foreground,
+    });
+  }
 
   WebSocketChannel? _channel;
   int _connectionGeneration = 0;
@@ -49,9 +65,9 @@ class SocketService {
   bool _authenticated = false;
   bool get isAuthenticated => _isConnected && _authenticated;
 
-  final ValueNotifier<SpartanConnectionPhase> connectionPhase =
-      ValueNotifier<SpartanConnectionPhase>(
-        SpartanConnectionPhase.disconnected,
+  final ValueNotifier<FenyvoConnectionPhase> connectionPhase =
+      ValueNotifier<FenyvoConnectionPhase>(
+        FenyvoConnectionPhase.disconnected,
       );
 
   bool _manualDisconnect = false;
@@ -176,7 +192,7 @@ class SocketService {
 
     _isReconnecting = false;
 
-    connectionPhase.value = SpartanConnectionPhase.connecting;
+    connectionPhase.value = FenyvoConnectionPhase.connecting;
 
     try {
       print('🔌 Подключение к серверу: $url');
@@ -218,16 +234,25 @@ class SocketService {
         cancelOnError: false,
       );
 
+      await channel.ready;
+      if (_connectionGeneration != generation || !identical(_channel, channel))
+        return false;
       _isConnected = true;
 
       // Keep mobile WebSocket connections alive during quiet call periods.
       // Some Android vendors/NATs silently expire an otherwise idle socket.
       _heartbeatTimer?.cancel();
       _heartbeatTimer = Timer.periodic(const Duration(seconds: 20), (_) {
-        if (_isConnected && _channel != null) _send('ping', const {});
+        if (_isConnected && _channel != null) {
+          _send('ping', const {});
+
+          if (_authenticated && AppVisibility.instance.foreground) {
+            _syncPresence();
+          }
+        }
       });
 
-      connectionPhase.value = SpartanConnectionPhase.authenticating;
+      connectionPhase.value = FenyvoConnectionPhase.authenticating;
 
       print('✅ WebSocket подключён');
 
@@ -239,7 +264,7 @@ class SocketService {
 
       _channel = null;
 
-      connectionPhase.value = SpartanConnectionPhase.disconnected;
+      connectionPhase.value = FenyvoConnectionPhase.disconnected;
 
       _scheduleReconnect();
 
@@ -277,11 +302,15 @@ class SocketService {
 
       if (type == 'login_success') {
         _authenticated = true;
-        connectionPhase.value = SpartanConnectionPhase.connected;
+        recoveryConfigured = data['recoveryConfigured'] is bool
+            ? data['recoveryConfigured'] as bool
+            : null;
+        connectionPhase.value = FenyvoConnectionPhase.connected;
         final username = data['username']?.toString();
 
         if (username != null && username.isNotEmpty) {
           currentUser = username;
+          _syncPresence();
 
           final mediaToken = data['mediaToken']?.toString().trim() ?? '';
           final mediaPort =
@@ -884,7 +913,7 @@ class SocketService {
 
     _needsResyncAfterLogin = currentUser?.isNotEmpty == true;
 
-    connectionPhase.value = SpartanConnectionPhase.disconnected;
+    connectionPhase.value = FenyvoConnectionPhase.disconnected;
 
     if (_manualDisconnect) {
       print(
@@ -950,7 +979,7 @@ class SocketService {
 
       print('🔄 Попытка переподключения...');
 
-      connectionPhase.value = SpartanConnectionPhase.connecting;
+      connectionPhase.value = FenyvoConnectionPhase.connecting;
 
       final connected = await connect(url);
 
@@ -1059,7 +1088,7 @@ class SocketService {
 
     _lastPassword = password;
 
-    connectionPhase.value = SpartanConnectionPhase.authenticating;
+    connectionPhase.value = FenyvoConnectionPhase.authenticating;
 
     _send('login', {'username': user, 'password': password});
   }
@@ -1067,6 +1096,51 @@ class SocketService {
   // ========================================
   // ПОЛЬЗОВАТЕЛИ
   // ========================================
+
+  bool registerRecoveryKey({
+    required String publicKeyHex,
+    required String password,
+  }) {
+    if (!_isConnected ||
+        !_authenticated ||
+        password.isEmpty ||
+        !RegExp(r'^[0-9a-f]{64}$').hasMatch(publicKeyHex)) {
+      return false;
+    }
+    return _send('recovery_key_register', {
+      'publicKeyHex': publicKeyHex,
+      'password': password,
+    });
+  }
+
+  bool requestRecoveryChallenge(String username) {
+    final user = username.trim();
+    if (user.isEmpty || !_isConnected) return false;
+    return _send('recovery_challenge_request', {'username': user});
+  }
+
+  bool submitRecoveryPassword({
+    required String username,
+    required String challengeId,
+    required String signatureHex,
+    required String newPassword,
+  }) {
+    final user = username.trim();
+    if (user.isEmpty ||
+        !_isConnected ||
+        !RegExp(r'^[0-9a-f]{64}$').hasMatch(challengeId) ||
+        !RegExp(r'^[0-9a-f]{128}$').hasMatch(signatureHex) ||
+        newPassword.length < 8 ||
+        newPassword.length > 128) {
+      return false;
+    }
+    return _send('recovery_password_submit', {
+      'username': user,
+      'challengeId': challengeId,
+      'signatureHex': signatureHex,
+      'newPassword': newPassword,
+    });
+  }
 
   void getUsers() {
     _send('get_users', {});
@@ -1455,7 +1529,7 @@ class SocketService {
     }
 
     final messageData = <String, dynamic>{
-      'id': DateTime.now().microsecondsSinceEpoch.toString(),
+      'id': MessageIdGenerator.generate(),
       'from': currentUser ?? '',
       'to': target,
       'text': messageText,
@@ -2172,10 +2246,10 @@ class SocketService {
   }
 
   // ========================================
-  // SPARTAN AI
+  // FENYVO AI
   // ========================================
 
-  void requestSpartanAiHistory({required String requestId}) {
+  void requestFenyvoAiHistory({required String requestId}) {
     final id = requestId.trim();
 
     if (id.isEmpty) {
@@ -2185,7 +2259,7 @@ class SocketService {
     _send('get_spartan_ai_history', {'requestId': id});
   }
 
-  void sendSpartanAiRequest({
+  void sendFenyvoAiRequest({
     required String requestId,
     required String text,
     String? peer,
@@ -2205,7 +2279,7 @@ class SocketService {
     });
   }
 
-  void clearSpartanAiHistory({required String requestId}) {
+  void clearFenyvoAiHistory({required String requestId}) {
     final id = requestId.trim();
 
     if (id.isEmpty) {
@@ -2365,12 +2439,13 @@ class SocketService {
 
     _needsResyncAfterLogin = false;
 
-    connectionPhase.value = SpartanConnectionPhase.disconnected;
+    connectionPhase.value = FenyvoConnectionPhase.disconnected;
 
     final channel = _channel;
 
     if (clearUser) {
       _authenticated = false;
+      recoveryConfigured = null;
       await SystemCallService.clearAccount();
       activeGroupId = null;
       _activeChatUser = null;

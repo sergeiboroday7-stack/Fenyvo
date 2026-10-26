@@ -39,6 +39,8 @@ class FlutterWindow : public Win32Window {
   // The Flutter instance hosted by this window.
   std::unique_ptr<flutter::FlutterViewController> flutter_controller_;
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> window_channel_;
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
+      screen_security_channel_;
   NOTIFYICONDATAW tray_icon_{};
   UINT taskbar_created_message_ = 0;
   UINT restore_message_ = 0;

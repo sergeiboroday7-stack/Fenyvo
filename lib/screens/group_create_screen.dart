@@ -1,4 +1,4 @@
-import '../theme/spartan_theme.dart';
+import '../theme/fenyvo_theme.dart';
 
 import 'package:flutter/material.dart';
 
@@ -12,7 +12,7 @@ class GroupCreateScreen extends StatefulWidget {
 }
 
 class _GroupCreateScreenState extends State<GroupCreateScreen> {
-  static const Color _gold = SpartanPalette.ink;
+  static const Color _gold = FenyvoPalette.ink;
 
   final TextEditingController _nameController = TextEditingController();
   final Set<String> _selectedUsers = <String>{};
@@ -87,7 +87,7 @@ class _GroupCreateScreenState extends State<GroupCreateScreen> {
                 ? 'Не удалось создать группу'
                 : reason,
           ),
-          backgroundColor: SpartanPalette.surface,
+          backgroundColor: FenyvoPalette.surface,
         ),
       );
     }
@@ -120,10 +120,10 @@ class _GroupCreateScreenState extends State<GroupCreateScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: SpartanPalette.canvas,
+      backgroundColor: FenyvoPalette.canvas,
       appBar: AppBar(
-        backgroundColor: SpartanPalette.canvas,
-        foregroundColor: SpartanPalette.ink,
+        backgroundColor: FenyvoPalette.canvas,
+        foregroundColor: FenyvoPalette.ink,
         title: const Text(
           'Новая группа',
           style: TextStyle(color: _gold, fontWeight: FontWeight.w800),
@@ -137,16 +137,16 @@ class _GroupCreateScreenState extends State<GroupCreateScreen> {
               child: TextField(
                 controller: _nameController,
                 maxLength: 60,
-                style: const TextStyle(color: SpartanPalette.ink),
+                style: const TextStyle(color: FenyvoPalette.ink),
                 decoration: InputDecoration(
                   labelText: 'Название группы',
-                  labelStyle: const TextStyle(color: SpartanPalette.secondary),
+                  labelStyle: const TextStyle(color: FenyvoPalette.secondary),
                   prefixIcon: const Icon(Icons.groups_rounded, color: _gold),
                   filled: true,
-                  fillColor: SpartanPalette.surface,
+                  fillColor: FenyvoPalette.surface,
                   enabledBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(16),
-                    borderSide: const BorderSide(color: SpartanPalette.line),
+                    borderSide: const BorderSide(color: FenyvoPalette.line),
                   ),
                   focusedBorder: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(16),
@@ -162,7 +162,7 @@ class _GroupCreateScreenState extends State<GroupCreateScreen> {
                   const Text(
                     'Участники',
                     style: TextStyle(
-                      color: SpartanPalette.ink,
+                      color: FenyvoPalette.ink,
                       fontWeight: FontWeight.w700,
                       fontSize: 16,
                     ),
@@ -183,7 +183,7 @@ class _GroupCreateScreenState extends State<GroupCreateScreen> {
                   ? const Center(
                       child: Text(
                         'Нет доступных пользователей',
-                        style: TextStyle(color: SpartanPalette.secondary),
+                        style: TextStyle(color: FenyvoPalette.secondary),
                       ),
                     )
                   : ListView.builder(
@@ -194,14 +194,14 @@ class _GroupCreateScreenState extends State<GroupCreateScreen> {
 
                         return CheckboxListTile(
                           value: selected,
-                          activeColor: SpartanPalette.blue,
-                          checkColor: SpartanPalette.ink,
+                          activeColor: FenyvoPalette.blue,
+                          checkColor: FenyvoPalette.ink,
                           title: Text(
                             user,
-                            style: const TextStyle(color: SpartanPalette.ink),
+                            style: const TextStyle(color: FenyvoPalette.ink),
                           ),
                           secondary: CircleAvatar(
-                            backgroundColor: SpartanPalette.surface,
+                            backgroundColor: FenyvoPalette.surface,
                             child: Text(
                               user.isEmpty ? '?' : user[0].toUpperCase(),
                               style: const TextStyle(
@@ -238,14 +238,14 @@ class _GroupCreateScreenState extends State<GroupCreateScreen> {
                           height: 20,
                           child: CircularProgressIndicator(
                             strokeWidth: 2,
-                            color: SpartanPalette.ink,
+                            color: FenyvoPalette.ink,
                           ),
                         )
                       : const Icon(Icons.group_add_rounded),
                   label: Text(_creating ? 'Создание...' : 'Создать группу'),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: SpartanPalette.blue,
-                    foregroundColor: SpartanPalette.ink,
+                    backgroundColor: FenyvoPalette.blue,
+                    foregroundColor: FenyvoPalette.ink,
                     textStyle: const TextStyle(
                       fontWeight: FontWeight.w800,
                       fontSize: 16,

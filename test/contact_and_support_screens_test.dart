@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:spartan_chat_final/screens/my_contact_screen.dart';
-import 'package:spartan_chat_final/screens/support_ai_screen.dart';
+import 'package:fenyvo/screens/my_contact_screen.dart';
+import 'package:fenyvo/screens/support_ai_screen.dart';
 
 void main() {
   testWidgets('my contact screen shows username and sharing actions', (

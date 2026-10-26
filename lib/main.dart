@@ -21,17 +21,23 @@ import 'screens/group_call_screen.dart';
 import 'services/group_call_service.dart';
 import 'services/pulse_service.dart';
 import 'screens/splash_screen.dart';
-import 'theme/spartan_theme.dart';
+import 'theme/fenyvo_theme.dart';
 import 'widgets/app_update_host.dart';
+import 'services/windows_update_ready_service.dart';
 
 class FenyvoRouteDiagnostics extends NavigatorObserver {
   @override
   void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
-    debugPrint('FENYVO_NAV PUSH current=${route.runtimeType} previous=${previousRoute?.runtimeType}');
+    debugPrint(
+      'FENYVO_NAV PUSH current=${route.runtimeType} previous=${previousRoute?.runtimeType}',
+    );
   }
+
   @override
   void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
-    debugPrint('FENYVO_NAV POP current=${route.runtimeType} previous=${previousRoute?.runtimeType}');
+    debugPrint(
+      'FENYVO_NAV POP current=${route.runtimeType} previous=${previousRoute?.runtimeType}',
+    );
   }
 }
 
@@ -42,7 +48,7 @@ final GlobalKey<NavigatorState> spartanNavigatorKey =
 final GlobalKey<ScaffoldMessengerState> spartanMessengerKey =
     GlobalKey<ScaffoldMessengerState>();
 
-Future<void> main() async {
+Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
 
   await StorageService.init();
@@ -71,11 +77,15 @@ Future<void> main() async {
     await FirebaseMessagingService.instance.initialize();
   }
 
-  runApp(const SpartanChatApp());
+  if (Platform.isWindows) {
+    WindowsUpdateReadyService.initialize(args);
+  }
+
+  runApp(const FenyvoChatApp());
 }
 
-class SpartanChatApp extends StatelessWidget {
-  const SpartanChatApp({super.key});
+class FenyvoChatApp extends StatelessWidget {
+  const FenyvoChatApp({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -87,7 +97,7 @@ class SpartanChatApp extends StatelessWidget {
         scaffoldMessengerKey: spartanMessengerKey,
         title: 'FENYVO',
         debugShowCheckedModeBanner: false,
-        theme: SpartanPalette.blueGoldTheme,
+        theme: FenyvoPalette.blueGoldTheme,
         locale: AppLanguageService.instance.locale,
         supportedLocales: AppLanguageService.languages
             .where((language) => language.code != 'system')
@@ -100,9 +110,7 @@ class SpartanChatApp extends StatelessWidget {
         builder: (context, child) {
           return AppUpdateHost(
             navigatorKey: spartanNavigatorKey,
-            child: CallNavigationHost(
-              child: child ?? const SizedBox.shrink(),
-            ),
+            child: CallNavigationHost(child: child ?? const SizedBox.shrink()),
           );
         },
         home: const SplashScreen(),
@@ -174,15 +182,19 @@ class _CallNavigationHostState extends State<CallNavigationHost> {
 
     final service = CallService.instance;
     final groupCall = GroupCallService.instance;
-    debugPrint('FENYVO_GROUP_ROUTE hasCall=${groupCall.hasCall} phase=${groupCall.phase} routeExists=${_groupCallRoute != null} routeCurrent=${_groupCallRoute?.isCurrent} privateCall=${service.hasCall}');
-    if (groupCall.hasCall && _groupCallRoute != null && !_groupCallRoute!.isActive) {
+    debugPrint(
+      'FENYVO_GROUP_ROUTE hasCall=${groupCall.hasCall} phase=${groupCall.phase} routeExists=${_groupCallRoute != null} routeCurrent=${_groupCallRoute?.isCurrent} privateCall=${service.hasCall}',
+    );
+    if (groupCall.hasCall &&
+        _groupCallRoute != null &&
+        !_groupCallRoute!.isActive) {
       _groupCallRoute = null;
     }
     if (groupCall.hasCall && _groupCallRoute == null && !service.hasCall) {
       final route = MaterialPageRoute<void>(
         fullscreenDialog: true,
         builder: (_) => Theme(
-          data: SpartanPalette.blueGoldTheme,
+          data: FenyvoPalette.blueGoldTheme,
           child: const GroupCallScreen(),
         ),
       );
@@ -201,7 +213,10 @@ class _CallNavigationHostState extends State<CallNavigationHost> {
     if (groupCallReturnRequest.value != _handledGroupReturnRequest) {
       _handledGroupReturnRequest = groupCallReturnRequest.value;
       final route = _groupCallRoute;
-      if (groupCall.hasCall && route != null && route.isActive && !route.isCurrent) {
+      if (groupCall.hasCall &&
+          route != null &&
+          route.isActive &&
+          !route.isCurrent) {
         navigator.popUntil((candidate) => candidate == route);
       }
     }
@@ -219,7 +234,7 @@ class _CallNavigationHostState extends State<CallNavigationHost> {
       final route = MaterialPageRoute<void>(
         fullscreenDialog: true,
         builder: (_) =>
-            Theme(data: SpartanPalette.callTheme, child: const CallScreen()),
+            Theme(data: FenyvoPalette.callTheme, child: const CallScreen()),
       );
 
       _callRoute = route;
@@ -263,7 +278,7 @@ class _CallNavigationHostState extends State<CallNavigationHost> {
     final pulse = service.current;
     if (messenger == null) return;
 
-    if (service.phase == SpartanPulsePhase.incoming &&
+    if (service.phase == FenyvoPulsePhase.incoming &&
         pulse != null &&
         _shownPulseInviteId != pulse.id) {
       _shownPulseInviteId = pulse.id;
@@ -276,7 +291,7 @@ class _CallNavigationHostState extends State<CallNavigationHost> {
           behavior: SnackBarBehavior.floating,
           content: Row(
             children: [
-              const Icon(Icons.bolt_rounded, color: SpartanPalette.gold),
+              const Icon(Icons.bolt_rounded, color: FenyvoPalette.gold),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
@@ -291,7 +306,7 @@ class _CallNavigationHostState extends State<CallNavigationHost> {
       return;
     }
 
-    if (service.phase == SpartanPulsePhase.matched &&
+    if (service.phase == FenyvoPulsePhase.matched &&
         pulse != null &&
         _shownPulseMatchId != pulse.id) {
       _shownPulseMatchId = pulse.id;
@@ -301,7 +316,7 @@ class _CallNavigationHostState extends State<CallNavigationHost> {
         SnackBar(
           duration: const Duration(seconds: 12),
           behavior: SnackBarBehavior.floating,
-          backgroundColor: SpartanPalette.surface,
+          backgroundColor: FenyvoPalette.surface,
           content: _PulseMatchCard(pulse: pulse),
         ),
       );
@@ -310,8 +325,8 @@ class _CallNavigationHostState extends State<CallNavigationHost> {
 
     if (service.noticeSerial != _shownPulseNotice && service.notice != null) {
       _shownPulseNotice = service.noticeSerial;
-      if (service.phase != SpartanPulsePhase.incoming &&
-          service.phase != SpartanPulsePhase.matched) {
+      if (service.phase != FenyvoPulsePhase.incoming &&
+          service.phase != FenyvoPulsePhase.matched) {
         messenger.hideCurrentSnackBar();
         messenger.showSnackBar(
           SnackBar(
@@ -331,7 +346,7 @@ class _CallNavigationHostState extends State<CallNavigationHost> {
         GroupCallService.instance,
         PulseService.instance,
       ]),
-      builder: (context, _) => SpartanLightFrame(
+      builder: (context, _) => FenyvoLightFrame(
         enabled:
             !CallService.instance.hasCall && !GroupCallService.instance.hasCall,
         child: widget.child,
@@ -343,7 +358,7 @@ class _CallNavigationHostState extends State<CallNavigationHost> {
 class _PulseMatchCard extends StatelessWidget {
   const _PulseMatchCard({required this.pulse});
 
-  final SpartanPulse pulse;
+  final FenyvoPulse pulse;
 
   @override
   Widget build(BuildContext context) {
@@ -360,10 +375,10 @@ class _PulseMatchCard extends StatelessWidget {
               alignment: Alignment.center,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: SpartanPalette.gold,
+                color: FenyvoPalette.gold,
                 boxShadow: [
                   BoxShadow(
-                    color: SpartanPalette.gold.withValues(alpha: .35),
+                    color: FenyvoPalette.gold.withValues(alpha: .35),
                     blurRadius: 18,
                     spreadRadius: 2,
                   ),
@@ -372,7 +387,7 @@ class _PulseMatchCard extends StatelessWidget {
               child: Text(
                 '$seconds',
                 style: const TextStyle(
-                  color: SpartanPalette.onGold,
+                  color: FenyvoPalette.onGold,
                   fontWeight: FontWeight.w900,
                   fontSize: 19,
                 ),
@@ -387,13 +402,13 @@ class _PulseMatchCard extends StatelessWidget {
                   const Text(
                     'ОБА ГОТОВЫ',
                     style: TextStyle(
-                      color: SpartanPalette.gold,
+                      color: FenyvoPalette.gold,
                       fontWeight: FontWeight.w800,
                     ),
                   ),
                   Text(
                     '${pulse.video ? 'Видеозвонок' : 'Аудиозвонок'} начинается…',
-                    style: const TextStyle(color: SpartanPalette.ink),
+                    style: const TextStyle(color: FenyvoPalette.ink),
                   ),
                 ],
               ),
@@ -404,7 +419,7 @@ class _PulseMatchCard extends StatelessWidget {
                 service.cancel();
                 ScaffoldMessenger.of(context).hideCurrentSnackBar();
               },
-              icon: const Icon(Icons.close_rounded, color: SpartanPalette.ink),
+              icon: const Icon(Icons.close_rounded, color: FenyvoPalette.ink),
             ),
           ],
         );

@@ -1,4 +1,5 @@
-import 'theme/spartan_theme.dart';
+import 'screens/recovery_setup_screen.dart';
+import 'theme/fenyvo_theme.dart';
 
 import 'dart:convert';
 import 'dart:io';
@@ -10,11 +11,13 @@ import 'package:path_provider/path_provider.dart';
 import 'package:qr_flutter/qr_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import 'config/support_links.dart';
 import 'services/socket_service.dart';
 import 'services/storage_service.dart';
 import 'services/app_language_service.dart';
 import 'services/e2ee_settings_service.dart';
 import 'screens/my_contact_screen.dart';
+import 'screens/support_payment_screens.dart';
 import 'screens/support_ai_screen.dart';
 import 'widgets/my_fenyvo_dashboard.dart';
 
@@ -60,24 +63,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _profilePhoneVisible = false;
   bool _profileBirthDateVisible = false;
 
-  void _showSupportDialog() {
-    final language = AppLanguageService.instance;
-    showDialog<void>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text(language.text('supportSpartan')),
-        content: SizedBox(
-          width: 420,
-          height: MediaQuery.sizeOf(context).height * 0.68,
-          child: _SupportPaymentCard(language: language),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: Text(language.text('close')),
-          ),
-        ],
-      ),
+  void _openSupportScreen() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const SupportOptionsScreen()),
     );
   }
 
@@ -189,13 +177,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
         builder: (context, setDialogState) => Theme(
           data: Theme.of(context).copyWith(
             inputDecorationTheme: const InputDecorationTheme(
-              labelStyle: TextStyle(color: SpartanPalette.gold),
-              hintStyle: TextStyle(color: SpartanPalette.secondary),
+              labelStyle: TextStyle(color: FenyvoPalette.gold),
+              hintStyle: TextStyle(color: FenyvoPalette.secondary),
               enabledBorder: UnderlineInputBorder(
-                borderSide: BorderSide(color: SpartanPalette.secondary),
+                borderSide: BorderSide(color: FenyvoPalette.secondary),
               ),
               focusedBorder: UnderlineInputBorder(
-                borderSide: BorderSide(color: SpartanPalette.gold, width: 2),
+                borderSide: BorderSide(color: FenyvoPalette.gold, width: 2),
               ),
             ),
           ),
@@ -203,16 +191,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
             contentPadding: const EdgeInsets.fromLTRB(24, 8, 24, 12),
             titlePadding: const EdgeInsets.fromLTRB(24, 20, 24, 8),
             actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-            backgroundColor: SpartanPalette.surfaceRaised,
+            backgroundColor: FenyvoPalette.surfaceRaised,
             surfaceTintColor: Colors.transparent,
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(24),
               side: BorderSide(
-                color: SpartanPalette.gold.withValues(alpha: 0.65),
+                color: FenyvoPalette.gold.withValues(alpha: 0.65),
               ),
             ),
             titleTextStyle: const TextStyle(
-              color: SpartanPalette.gold,
+              color: FenyvoPalette.gold,
               fontSize: 21,
               fontWeight: FontWeight.w800,
             ),
@@ -301,7 +289,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     child: Text(
                       'Телефон и дата рождения скрыты, пока вы сами не включите их показ.',
                       style: TextStyle(
-                        color: SpartanPalette.secondary,
+                        color: FenyvoPalette.secondary,
                         fontSize: 12,
                       ),
                     ),
@@ -313,15 +301,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
               TextButton(
                 onPressed: () => Navigator.pop(dialogContext, false),
                 style: TextButton.styleFrom(
-                  foregroundColor: SpartanPalette.gold,
+                  foregroundColor: FenyvoPalette.gold,
                 ),
                 child: const Text('Отмена'),
               ),
               FilledButton(
                 onPressed: () => Navigator.pop(dialogContext, true),
                 style: FilledButton.styleFrom(
-                  backgroundColor: SpartanPalette.gold,
-                  foregroundColor: SpartanPalette.canvasDeep,
+                  backgroundColor: FenyvoPalette.gold,
+                  foregroundColor: FenyvoPalette.canvasDeep,
                 ),
                 child: const Text('Сохранить'),
               ),
@@ -443,7 +431,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Аватарка обновлена'),
-          backgroundColor: SpartanPalette.blue,
+          backgroundColor: FenyvoPalette.blue,
         ),
       );
     } catch (e) {
@@ -661,7 +649,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Фон обновлён'),
-          backgroundColor: SpartanPalette.blue,
+          backgroundColor: FenyvoPalette.blue,
         ),
       );
     } catch (e) {
@@ -704,7 +692,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(
         content: Text('Включён стандартный фон'),
-        backgroundColor: SpartanPalette.blue,
+        backgroundColor: FenyvoPalette.blue,
       ),
     );
   }
@@ -733,10 +721,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     showDialog(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        backgroundColor: SpartanPalette.surface,
+        backgroundColor: FenyvoPalette.surface,
         title: const Text(
           'Выберите цвет текста',
-          style: TextStyle(color: SpartanPalette.ink),
+          style: TextStyle(color: FenyvoPalette.ink),
         ),
         content: SizedBox(
           width: double.infinity,
@@ -789,12 +777,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
           color: color,
           shape: BoxShape.circle,
           border: Border.all(
-            color: isSelected ? SpartanPalette.ink : Colors.transparent,
+            color: isSelected ? FenyvoPalette.ink : Colors.transparent,
             width: 3,
           ),
         ),
         child: isSelected
-            ? const Icon(Icons.check, color: SpartanPalette.ink, size: 20)
+            ? const Icon(Icons.check, color: FenyvoPalette.ink, size: 20)
             : null,
       ),
     );
@@ -825,7 +813,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       if (avatarImage != null) {
         return CircleAvatar(
           radius: 36,
-          backgroundColor: SpartanPalette.blue,
+          backgroundColor: FenyvoPalette.blue,
           backgroundImage: avatarImage,
         );
       }
@@ -833,11 +821,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
     return CircleAvatar(
       radius: 36,
-      backgroundColor: SpartanPalette.blue,
+      backgroundColor: FenyvoPalette.blue,
       child: Text(
         widget.username.isNotEmpty ? widget.username[0].toUpperCase() : '?',
         style: const TextStyle(
-          color: SpartanPalette.ink,
+          color: FenyvoPalette.ink,
           fontSize: 26,
           fontWeight: FontWeight.bold,
         ),
@@ -856,30 +844,32 @@ class _SettingsScreenState extends State<SettingsScreen> {
     Key? sectionKey,
     ExpansibleController? controller,
   }) {
-    return Container(
-      margin: const EdgeInsets.fromLTRB(16, 5, 16, 7),
-      decoration: BoxDecoration(
-        color: SpartanPalette.surfaceRaised,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: SpartanPalette.gold.withValues(alpha: 0.28)),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: ExpansionTile(
-        controller: controller,
-        key: sectionKey,
-        initiallyExpanded: initiallyExpanded,
-        maintainState: true,
-        iconColor: SpartanPalette.gold,
-        collapsedIconColor: SpartanPalette.gold,
-        title: Text(
-          title,
-          style: const TextStyle(
-            color: SpartanPalette.ink,
-            fontWeight: FontWeight.w700,
-            fontSize: 15,
-          ),
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 5, 16, 7),
+      child: Material(
+        color: FenyvoPalette.surfaceRaised,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(18),
+          side: BorderSide(color: FenyvoPalette.gold.withValues(alpha: 0.28)),
         ),
-        children: children,
+        clipBehavior: Clip.antiAlias,
+        child: ExpansionTile(
+          controller: controller,
+          key: sectionKey,
+          initiallyExpanded: initiallyExpanded,
+          maintainState: true,
+          iconColor: FenyvoPalette.gold,
+          collapsedIconColor: FenyvoPalette.gold,
+          title: Text(
+            title,
+            style: const TextStyle(
+              color: FenyvoPalette.ink,
+              fontWeight: FontWeight.w700,
+              fontSize: 15,
+            ),
+          ),
+          children: children,
+        ),
       ),
     );
   }
@@ -889,15 +879,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
     required String title,
     required String subtitle,
     required VoidCallback onTap,
-    Color iconColor = SpartanPalette.ink,
-    Color titleColor = SpartanPalette.ink,
+    Color iconColor = FenyvoPalette.ink,
+    Color titleColor = FenyvoPalette.ink,
   }) {
     return ListTile(
       leading: Icon(icon, color: iconColor),
       title: Text(title, style: TextStyle(color: titleColor)),
       subtitle: Text(
         subtitle,
-        style: const TextStyle(color: SpartanPalette.secondary, fontSize: 12),
+        style: const TextStyle(color: FenyvoPalette.secondary, fontSize: 12),
       ),
       onTap: onTap,
     );
@@ -921,22 +911,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
           gradient: const LinearGradient(
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
-            colors: [SpartanPalette.surface, SpartanPalette.canvas],
+            colors: [FenyvoPalette.surface, FenyvoPalette.canvas],
           ),
         ),
         child: Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(
-                Icons.local_fire_department,
-                color: SpartanPalette.ink,
-              ),
+              const Icon(Icons.local_fire_department, color: FenyvoPalette.ink),
               const SizedBox(height: 5),
               Text(
                 language.text('blueGoldTheme'),
                 style: const TextStyle(
-                  color: SpartanPalette.ink,
+                  color: FenyvoPalette.ink,
                   fontSize: 12,
                   fontWeight: FontWeight.bold,
                 ),
@@ -961,7 +948,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             height: 110,
             width: double.infinity,
             child: ColoredBox(
-              color: SpartanPalette.canvas,
+              color: FenyvoPalette.canvas,
               child: Opacity(
                 opacity: _backgroundOpacity,
                 child: Image.file(
@@ -982,12 +969,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
-                color: SpartanPalette.surface.withValues(alpha: 0.65),
+                color: FenyvoPalette.surface.withValues(alpha: 0.65),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Text(
                 AppLanguageService.instance.text('preview'),
-                style: const TextStyle(color: SpartanPalette.ink, fontSize: 11),
+                style: const TextStyle(color: FenyvoPalette.ink, fontSize: 11),
               ),
             ),
           ),
@@ -1004,7 +991,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       child: Container(
         padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
         decoration: BoxDecoration(
-          color: SpartanPalette.surface,
+          color: FenyvoPalette.surface,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(color: Color(0x33171B20)),
         ),
@@ -1013,7 +1000,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           children: [
             Row(
               children: [
-                const Icon(Icons.opacity, color: SpartanPalette.ink, size: 21),
+                const Icon(Icons.opacity, color: FenyvoPalette.ink, size: 21),
 
                 const SizedBox(width: 10),
 
@@ -1021,7 +1008,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   child: Text(
                     AppLanguageService.instance.text('backgroundVisibility'),
                     style: const TextStyle(
-                      color: SpartanPalette.ink,
+                      color: FenyvoPalette.ink,
                       fontSize: 15,
                       fontWeight: FontWeight.w500,
                     ),
@@ -1031,7 +1018,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Text(
                   '$percent%',
                   style: const TextStyle(
-                    color: SpartanPalette.ink,
+                    color: FenyvoPalette.ink,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
@@ -1043,8 +1030,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
               min: 0.0,
               max: 1.0,
               divisions: 20,
-              activeColor: SpartanPalette.blue,
-              inactiveColor: SpartanPalette.surface,
+              activeColor: FenyvoPalette.blue,
+              inactiveColor: FenyvoPalette.surface,
               label: '$percent%',
               onChanged: (value) {
                 setState(() {
@@ -1059,7 +1046,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             Text(
               AppLanguageService.instance.text('backgroundScale'),
               style: const TextStyle(
-                color: SpartanPalette.secondary,
+                color: FenyvoPalette.secondary,
                 fontSize: 11,
               ),
             ),
@@ -1078,18 +1065,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final language = AppLanguageService.instance;
     String t(String key) => language.text(key);
     return Scaffold(
-      backgroundColor: SpartanPalette.canvas,
+      backgroundColor: FenyvoPalette.canvas,
 
       appBar: AppBar(
-        backgroundColor: SpartanPalette.canvas,
+        backgroundColor: FenyvoPalette.canvas,
         title: Text(
           'Мой Fenyvo',
           style: const TextStyle(
-            color: SpartanPalette.ink,
+            color: FenyvoPalette.ink,
             fontWeight: FontWeight.bold,
           ),
         ),
-        iconTheme: const IconThemeData(color: SpartanPalette.ink),
+        iconTheme: const IconThemeData(color: FenyvoPalette.ink),
       ),
 
       body: Container(
@@ -1097,7 +1084,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           gradient: LinearGradient(
             begin: Alignment.topCenter,
             end: Alignment.bottomCenter,
-            colors: [SpartanPalette.canvas, SpartanPalette.surface],
+            colors: [FenyvoPalette.canvas, FenyvoPalette.surface],
           ),
         ),
 
@@ -1141,10 +1128,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ),
               ),
-              _SpartanSupportTile(
-                title: t('supportSpartan'),
+              _FenyvoSupportTile(
+                title: t('supportFenyvo'),
                 subtitle: t('supportSubtitle'),
-                onTap: _showSupportDialog,
+                onTap: _openSupportScreen,
               ),
             ]),
 
@@ -1229,8 +1216,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     title: t('defaultBackground'),
                     subtitle: t('restoreBlueBackground'),
                     onTap: _removeBackground,
-                    iconColor: SpartanPalette.ink,
-                    titleColor: SpartanPalette.ink,
+                    iconColor: FenyvoPalette.ink,
+                    titleColor: FenyvoPalette.ink,
                   ),
 
                 _buildSectionTile(
@@ -1242,24 +1229,41 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ], controller: _appearanceExpansionController),
             ),
 
-            const Divider(color: SpartanPalette.ink, height: 30),
+            const Divider(color: FenyvoPalette.ink, height: 30),
 
             // =================================
             // АККАУНТ
             // =================================
             _buildSection(t('account'), [
+              // RECOVERY_SETTINGS_ENTRY_V1
               ListTile(
-                leading: const Icon(Icons.person, color: SpartanPalette.ink),
+                leading: const Icon(
+                  Icons.key_outlined,
+                  color: FenyvoPalette.ink,
+                ),
+                title: const Text('Секретные слова восстановления'),
+                subtitle: const Text(
+                  'Создание и привязка 12 слов для восстановления доступа',
+                ),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const RecoverySetupScreen(),
+                  ),
+                ),
+              ),
+              ListTile(
+                leading: const Icon(Icons.person, color: FenyvoPalette.ink),
                 title: Text(
                   widget.username,
                   style: const TextStyle(
-                    color: SpartanPalette.ink,
+                    color: FenyvoPalette.ink,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
                 subtitle: Text(
                   t('currentAccount'),
-                  style: const TextStyle(color: SpartanPalette.secondary),
+                  style: const TextStyle(color: FenyvoPalette.secondary),
                 ),
               ),
 
@@ -1405,6 +1409,18 @@ class _SupportPaymentCardState extends State<_SupportPaymentCard> {
     return '${value.substring(0, 9)}...${value.substring(value.length - 6)}';
   }
 
+  Future<void> _openMonobank(BuildContext context) async {
+    final opened = await launchUrl(
+      SupportLinks.monobankJar,
+      mode: LaunchMode.externalApplication,
+    );
+    if (!opened && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(widget.language.text('paymentLinkError'))),
+      );
+    }
+  }
+
   Future<void> _copyAddress(
     BuildContext context,
     _CryptoNetwork network,
@@ -1472,7 +1488,7 @@ class _SupportPaymentCardState extends State<_SupportPaymentCard> {
               const SizedBox(height: 14),
               FilledButton.icon(
                 style: FilledButton.styleFrom(
-                  backgroundColor: SpartanPalette.gold,
+                  backgroundColor: FenyvoPalette.gold,
                   foregroundColor: const Color(0xFF091B2D),
                   minimumSize: const Size.fromHeight(48),
                 ),
@@ -1517,10 +1533,68 @@ class _SupportPaymentCardState extends State<_SupportPaymentCard> {
 
     return Column(
       children: [
+        Container(
+          width: double.infinity,
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: FenyvoPalette.gold.withValues(alpha: 0.09),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(
+              color: FenyvoPalette.gold.withValues(alpha: 0.55),
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(
+                    Icons.account_balance_rounded,
+                    color: FenyvoPalette.gold,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      t('supportCardTitle'),
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                t('supportCardDescription'),
+                style: const TextStyle(fontSize: 13, height: 1.35),
+              ),
+              const SizedBox(height: 14),
+              FilledButton.icon(
+                key: const ValueKey('support-monobank-button'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: FenyvoPalette.gold,
+                  foregroundColor: const Color(0xFF091B2D),
+                  minimumSize: const Size.fromHeight(48),
+                ),
+                onPressed: () => _openMonobank(context),
+                icon: const Icon(Icons.open_in_new_rounded),
+                label: Text(t('openMonobank')),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 16),
+        Text(
+          t('supportCryptoTitle'),
+          textAlign: TextAlign.center,
+          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700),
+        ),
+        const SizedBox(height: 4),
         Text(
           t('cryptoInstruction'),
           textAlign: TextAlign.center,
-          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+          style: const TextStyle(fontSize: 12),
         ),
         const SizedBox(height: 8),
         Expanded(
@@ -1587,8 +1661,8 @@ class _SupportPaymentCardState extends State<_SupportPaymentCard> {
   }
 }
 
-class _SpartanSupportTile extends StatefulWidget {
-  const _SpartanSupportTile({
+class _FenyvoSupportTile extends StatefulWidget {
+  const _FenyvoSupportTile({
     required this.title,
     required this.subtitle,
     required this.onTap,
@@ -1599,10 +1673,10 @@ class _SpartanSupportTile extends StatefulWidget {
   final VoidCallback onTap;
 
   @override
-  State<_SpartanSupportTile> createState() => _SpartanSupportTileState();
+  State<_FenyvoSupportTile> createState() => _FenyvoSupportTileState();
 }
 
-class _SpartanSupportTileState extends State<_SpartanSupportTile>
+class _FenyvoSupportTileState extends State<_FenyvoSupportTile>
     with SingleTickerProviderStateMixin {
   late final AnimationController _controller = AnimationController(
     vsync: this,
@@ -1631,7 +1705,7 @@ class _SpartanSupportTileState extends State<_SpartanSupportTile>
               gradient: const LinearGradient(
                 colors: [Color(0xFF263D57), Color(0xFF162B43)],
               ),
-              border: Border.all(color: SpartanPalette.gold, width: 1.2),
+              border: Border.all(color: FenyvoPalette.gold, width: 1.2),
               boxShadow: const [
                 BoxShadow(
                   color: Color(0x44D4AF37),
@@ -1654,14 +1728,14 @@ class _SpartanSupportTileState extends State<_SpartanSupportTile>
                         shape: BoxShape.circle,
                         color: const Color(0xFF091B2D),
                         border: Border.all(
-                          color: SpartanPalette.gold.withValues(
+                          color: FenyvoPalette.gold.withValues(
                             alpha: 0.55 + (_controller.value * 0.45),
                           ),
                           width: 2,
                         ),
                         boxShadow: [
                           BoxShadow(
-                            color: SpartanPalette.gold.withValues(
+                            color: FenyvoPalette.gold.withValues(
                               alpha: 0.12 + (_controller.value * 0.25),
                             ),
                             blurRadius: 10 + (_controller.value * 12),
@@ -1681,7 +1755,7 @@ class _SpartanSupportTileState extends State<_SpartanSupportTile>
                       Text(
                         widget.title,
                         style: const TextStyle(
-                          color: SpartanPalette.ink,
+                          color: FenyvoPalette.ink,
                           fontSize: 17,
                           fontWeight: FontWeight.w800,
                         ),
@@ -1690,7 +1764,7 @@ class _SpartanSupportTileState extends State<_SpartanSupportTile>
                       Text(
                         widget.subtitle,
                         style: const TextStyle(
-                          color: SpartanPalette.secondary,
+                          color: FenyvoPalette.secondary,
                           fontSize: 12,
                         ),
                       ),
@@ -1699,7 +1773,7 @@ class _SpartanSupportTileState extends State<_SpartanSupportTile>
                 ),
                 const Icon(
                   Icons.arrow_forward_ios_rounded,
-                  color: SpartanPalette.gold,
+                  color: FenyvoPalette.gold,
                   size: 18,
                 ),
               ],

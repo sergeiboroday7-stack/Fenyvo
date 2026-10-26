@@ -19,6 +19,8 @@ assert.match(html, /id="download-count-windows"/);
 assert.match(html, /id="download-count-ios"/);
 assert.match(html, /data-download-platform="android"/);
 assert.match(html, /data-download-platform="windows"/);
+assert.match(html, /id="share-fenyvo"/);
+assert.match(html, /navigator\.share/);
 assert.match(html, /class="brand notranslate" translate="no"/i);
 assert.doesNotMatch(html, /<(?:html|body)[^>]*translate\s*=\s*["']no["']/i);
 new vm.Script(source);
@@ -49,6 +51,13 @@ new vm.Script(source);
   "iosPreparing: 'iPhone · версія готується'",
   "iosPreparing: 'iPhone · version in development'"
 ].forEach((text) => assert.ok(source.includes(text), `Missing download translation: ${text}`));
+
+[
+  "shareFenyvo: '↗ Поділитися Fenyvo'",
+  "shareFenyvo: '↗ Share Fenyvo'",
+  "shareCopied: 'Посилання на Fenyvo скопійовано'",
+  "shareCopied: 'Fenyvo link copied'"
+].forEach((text) => assert.ok(source.includes(text), `Missing share translation: ${text}`));
 
 function load({ languages, saved }) {
   const textNode = {

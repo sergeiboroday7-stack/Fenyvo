@@ -8,6 +8,29 @@ import 'media_cache_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class StorageService {
+  static String _screenSecurityKey(String currentUser, String contact) {
+    final owner = Uri.encodeComponent(currentUser.trim().toLowerCase());
+    final peer = Uri.encodeComponent(contact.trim().toLowerCase());
+    return 'screen_security_${owner}_$peer';
+  }
+
+  static Future<bool> getChatScreenSecurity(
+    String currentUser,
+    String contact,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_screenSecurityKey(currentUser, contact)) ?? false;
+  }
+
+  static Future<void> setChatScreenSecurity(
+    String currentUser,
+    String contact,
+    bool enabled,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_screenSecurityKey(currentUser, contact), enabled);
+  }
+
   static late Box _messagesBox;
   static late Box _avatarsBox;
   static late Box _unreadBox;

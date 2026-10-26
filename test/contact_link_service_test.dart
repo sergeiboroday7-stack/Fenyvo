@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:spartan_chat_final/services/contact_link_service.dart';
+import 'package:fenyvo/services/contact_link_service.dart';
 
 void main() {
   test('extracts a valid Fenyvo contact username', () {

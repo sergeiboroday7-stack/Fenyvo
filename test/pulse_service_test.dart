@@ -1,6 +1,6 @@
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:spartan_chat_final/services/pulse_service.dart';
+import 'package:fenyvo/services/pulse_service.dart';
 
 Map<String, dynamic> pulsePacket({
   String id = 'pulse-1',
@@ -23,11 +23,11 @@ Map<String, dynamic> pulsePacket({
 }
 
 void main() {
-  test('SpartanPulse validates packets and calculates its window', () {
-    expect(SpartanPulse.parse(null), isNull);
-    expect(SpartanPulse.parse(<String, dynamic>{'id': 'incomplete'}), isNull);
+  test('FenyvoPulse validates packets and calculates its window', () {
+    expect(FenyvoPulse.parse(null), isNull);
+    expect(FenyvoPulse.parse(<String, dynamic>{'id': 'incomplete'}), isNull);
 
-    final pulse = SpartanPulse.parse(pulsePacket());
+    final pulse = FenyvoPulse.parse(pulsePacket());
     expect(pulse, isNotNull);
     expect(pulse!.peerFor('Alice'), 'Bob');
     expect(pulse.peerFor('Bob'), 'Alice');
@@ -54,12 +54,12 @@ void main() {
       'type': 'pulse_invite',
       'data': <String, dynamic>{'pulse': pulsePacket()},
     });
-    expect(service.phase, SpartanPulsePhase.incoming);
+    expect(service.phase, FenyvoPulsePhase.incoming);
     expect(service.activeFor('Alice'), isNotNull);
 
     service.accept();
     expect(sent.last['type'], 'pulse_accept');
-    expect(service.phase, SpartanPulsePhase.outgoing);
+    expect(service.phase, FenyvoPulsePhase.outgoing);
     service.dispose();
   });
 
@@ -84,7 +84,7 @@ void main() {
       await Future<void>.delayed(Duration.zero);
 
       expect(calls, [(peer: 'Bob', video: true)]);
-      expect(service.phase, SpartanPulsePhase.matched);
+      expect(service.phase, FenyvoPulsePhase.matched);
       service.dispose();
     },
   );

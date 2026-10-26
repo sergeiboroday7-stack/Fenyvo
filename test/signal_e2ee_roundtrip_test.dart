@@ -4,7 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:libsignal/libsignal.dart';
-import 'package:spartan_chat_final/services/crypto/signal_secure_store.dart';
+import 'package:fenyvo/services/crypto/signal_secure_store.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();

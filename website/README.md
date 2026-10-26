@@ -9,6 +9,9 @@ Deployment layout:
   index.html
   .well-known/assetlinks.json
   assets/fenyvo-logo.png
+  assets/fenyvo-promo-4249.png
+  robots.txt
+  sitemap.xml
   download/Fenyvo-1.8.2-arm64.apk
   download/Fenyvo-1.8.2-arm64.sha256.txt
   download/Fenyvo-1.8.2-windows-x64.zip
@@ -35,6 +38,11 @@ the brand name without disabling external translation for the rest of a page.
 The generated `fenyvo-network-landscape-20261010.jpg` asset contains no user
 data, text or third-party marks. Motion is implemented in CSS and respects the
 browser/OS `prefers-reduced-motion` accessibility setting.
+
+The hero includes a localized `Share Fenyvo` action. Supporting browsers open
+the native Web Share sheet; other browsers copy the localized description and
+canonical `https://fenyvo.com/` URL, with a prompt fallback if clipboard access
+is unavailable.
 
 The public landing page displays separate Android, Windows and iPhone download
 counters. Android and Windows are counted only after the visitor accepts the

@@ -1,5 +1,8 @@
+import '../features/messages/domain/message_identity.dart';
+import '../features/messages/domain/message_reactions.dart';
+import '../features/messages/domain/message_date.dart';
 import '../services/message_chronology.dart';
-import '../theme/spartan_theme.dart';
+import '../theme/fenyvo_theme.dart';
 import '../widgets/emoji_picker.dart';
 import '../services/saved_messages_service.dart';
 
@@ -21,15 +24,18 @@ import '../services/socket_service.dart';
 import '../services/call_service.dart';
 import '../services/call_history_service.dart';
 import '../services/pulse_service.dart';
-import '../services/spartan_shield_service.dart';
-import '../services/spartan_trust_service.dart';
+import '../services/fenyvo_shield_service.dart';
+import '../services/fenyvo_trust_service.dart';
 import '../services/storage_service.dart';
+import '../services/screen_security_service.dart';
 import '../services/media_cache_service.dart';
 import '../services/download_service.dart';
 import '../services/media_transfer_service.dart';
 import '../services/app_language_service.dart';
+import '../services/message_search_service.dart';
 import '../services/e2ee_settings_service.dart';
 import '../services/crypto/signal_e2ee_service.dart';
+part '../widgets/private_video_widgets.dart';
 
 String _chatText(String key, [Map<String, Object> values = const {}]) {
   var result = AppLanguageService.instance.text(key);
@@ -37,491 +43,6 @@ String _chatText(String key, [Map<String, Object> values = const {}]) {
     result = result.replaceAll('{${entry.key}}', entry.value.toString());
   }
   return result;
-}
-
-class _InlinePrivateVideo extends StatefulWidget {
-  final Uint8List? bytes;
-  final String? filePath;
-  final String fileName;
-  final String? networkUrl;
-  final Map<String, String> httpHeaders;
-  final Map<String, dynamic>? mediaMessage;
-  final bool isMe;
-  final Color gold;
-  final VoidCallback onDownload;
-
-  const _InlinePrivateVideo({
-    super.key,
-    this.bytes,
-    this.filePath,
-    required this.fileName,
-    this.networkUrl,
-    this.httpHeaders = const <String, String>{},
-    this.mediaMessage,
-    required this.isMe,
-    required this.gold,
-    required this.onDownload,
-  });
-
-  @override
-  State<_InlinePrivateVideo> createState() => _InlinePrivateVideoState();
-}
-
-class _InlinePrivateVideoState extends State<_InlinePrivateVideo> {
-  VideoPlayerController? _controller;
-  File? _tempFile;
-  bool _loading = false;
-  String? _error;
-
-  @override
-  void initState() {
-    super.initState();
-    // Start preparing immediately so the existing first-frame cover appears
-    // without an extra tap. Duplicate requests are coalesced by the cache.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) unawaited(_prepare());
-    });
-  }
-
-  Future<void> _prepare() async {
-    if (_loading || _controller != null) return;
-    if (mounted) {
-      setState(() {
-        _loading = true;
-        _error = null;
-      });
-    }
-    try {
-      File file;
-      var ownsTemp = false;
-
-      final localPath = widget.filePath?.trim() ?? '';
-      VideoPlayerController controller;
-      if (localPath.isNotEmpty && File(localPath).existsSync()) {
-        file = File(localPath);
-        controller = VideoPlayerController.file(file);
-      } else {
-        final mediaMessage = widget.mediaMessage;
-        if (mediaMessage != null &&
-            MediaCacheService.hasRemoteMedia(mediaMessage)) {
-          final cached = await MediaCacheService.cacheRemoteMedia(mediaMessage);
-          final cachedPath = MediaCacheService.existingLocalPath(cached);
-          if (cachedPath == null || !File(cachedPath).existsSync()) {
-            throw StateError('Видео не удалось скачать в кэш');
-          }
-          file = File(cachedPath);
-          controller = VideoPlayerController.file(file);
-        } else {
-          final networkUrl = widget.networkUrl?.trim() ?? '';
-          if (networkUrl.isNotEmpty) {
-            file = File('');
-            controller = VideoPlayerController.networkUrl(
-              Uri.parse(networkUrl),
-              httpHeaders: widget.httpHeaders,
-            );
-          } else {
-            final bytes = widget.bytes;
-            if (bytes == null || bytes.isEmpty) {
-              throw StateError('Видео недоступно');
-            }
-            final temp = await getTemporaryDirectory();
-            final extension = widget.fileName.contains('.')
-                ? '.${widget.fileName.split('.').last.toLowerCase()}'
-                : '.mp4';
-            file = File(
-              '${temp.path}${Platform.pathSeparator}'
-              'spartan_private_video_${DateTime.now().microsecondsSinceEpoch}$extension',
-            );
-            await file.writeAsBytes(bytes, flush: true);
-            ownsTemp = true;
-            controller = VideoPlayerController.file(file);
-          }
-        }
-      }
-
-      await controller.initialize();
-      controller.addListener(_changed);
-      if (!mounted) {
-        await controller.dispose();
-        if (ownsTemp) {
-          try {
-            await file.delete();
-          } catch (_) {}
-        }
-        return;
-      }
-      setState(() {
-        _tempFile = ownsTemp ? file : null;
-        _controller = controller;
-        _loading = false;
-        _error = null;
-      });
-    } catch (error) {
-      debugPrint('🎥 Private video prepare failed: $error');
-      if (!mounted) return;
-      setState(() {
-        _loading = false;
-        _error = error.toString();
-      });
-    }
-  }
-
-  void _changed() {
-    if (mounted) setState(() {});
-  }
-
-  Future<void> _toggle() async {
-    final controller = _controller;
-    if (controller == null) return;
-    if (controller.value.position >= controller.value.duration &&
-        controller.value.duration > Duration.zero) {
-      await controller.seekTo(Duration.zero);
-    }
-    if (controller.value.isPlaying) {
-      await controller.pause();
-    } else {
-      await controller.play();
-    }
-  }
-
-  Future<void> _openFullScreen() async {
-    final controller = _controller;
-    if (controller == null || !controller.value.isInitialized) return;
-    await Navigator.of(context).push<void>(
-      MaterialPageRoute<void>(
-        fullscreenDialog: true,
-        builder: (_) => _PrivateVideoFullScreen(
-          controller: controller,
-          fileName: widget.fileName,
-          gold: widget.gold,
-          onDownload: widget.onDownload,
-        ),
-      ),
-    );
-    if (mounted) setState(() {});
-  }
-
-  @override
-  void dispose() {
-    final controller = _controller;
-    if (controller != null) {
-      controller.removeListener(_changed);
-      unawaited(controller.dispose());
-    }
-    final file = _tempFile;
-    if (file != null) {
-      unawaited(
-        Future<void>(() async {
-          try {
-            if (await file.exists()) await file.delete();
-          } catch (_) {}
-        }),
-      );
-    }
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (_loading) {
-      return const SizedBox(
-        width: 250,
-        height: 140,
-        child: Center(child: CircularProgressIndicator()),
-      );
-    }
-    final controller = _controller;
-    if (_error != null ||
-        controller == null ||
-        !controller.value.isInitialized) {
-      return Material(
-        color: SpartanPalette.surface.withValues(alpha: 0.18),
-        borderRadius: BorderRadius.circular(12),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(12),
-          onTap: () => unawaited(_prepare()),
-          child: SizedBox(
-            width: 250,
-            height: 140,
-            child: Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    _error == null
-                        ? Icons.play_circle_fill_rounded
-                        : Icons.refresh_rounded,
-                    color: widget.gold,
-                    size: 48,
-                  ),
-                  const SizedBox(height: 8),
-                  Text(
-                    _error == null
-                        ? '${_chatText('download')} ${_chatText('video').toLowerCase()}'
-                        : _chatText('videoUnavailable'),
-                    style: const TextStyle(color: SpartanPalette.ink),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-    final playing = controller.value.isPlaying;
-    return Container(
-      constraints: const BoxConstraints(minWidth: 230, maxWidth: 340),
-      decoration: BoxDecoration(
-        color: Colors.black,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          AspectRatio(
-            aspectRatio: controller.value.aspectRatio > 0
-                ? controller.value.aspectRatio
-                : 16 / 9,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                VideoPlayer(controller),
-                Material(
-                  color: Colors.transparent,
-                  child: InkWell(
-                    onTap: () => unawaited(_toggle()),
-                    child: Center(
-                      child: AnimatedOpacity(
-                        duration: const Duration(milliseconds: 150),
-                        opacity: playing ? 0 : 1,
-                        child: Container(
-                          width: 54,
-                          height: 54,
-                          decoration: BoxDecoration(
-                            color: Colors.black.withValues(alpha: 0.70),
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(
-                            Icons.play_arrow_rounded,
-                            color: Colors.white,
-                            size: 38,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ),
-                ),
-                Positioned(
-                  left: 8,
-                  right: 8,
-                  bottom: 6,
-                  child: VideoProgressIndicator(
-                    controller,
-                    allowScrubbing: true,
-                    colors: VideoProgressColors(
-                      playedColor: widget.gold,
-                      bufferedColor: Colors.white38,
-                      backgroundColor: Colors.white24,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Container(
-            color: Colors.black.withValues(alpha: 0.88),
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            child: Row(
-              children: [
-                IconButton(
-                  visualDensity: VisualDensity.compact,
-                  onPressed: () => unawaited(_toggle()),
-                  icon: Icon(
-                    playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                    color: widget.gold,
-                  ),
-                ),
-                Expanded(
-                  child: Text(
-                    widget.fileName,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 11.5,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-                IconButton(
-                  tooltip: _chatText('fullScreen'),
-                  visualDensity: VisualDensity.compact,
-                  onPressed: () => unawaited(_openFullScreen()),
-                  icon: const Icon(
-                    Icons.fullscreen_rounded,
-                    color: Colors.white,
-                  ),
-                ),
-                IconButton(
-                  tooltip: _chatText('download'),
-                  visualDensity: VisualDensity.compact,
-                  onPressed: widget.onDownload,
-                  icon: Icon(Icons.download_rounded, color: widget.gold),
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _PrivateVideoFullScreen extends StatefulWidget {
-  final VideoPlayerController controller;
-  final String fileName;
-  final Color gold;
-  final VoidCallback onDownload;
-
-  const _PrivateVideoFullScreen({
-    required this.controller,
-    required this.fileName,
-    required this.gold,
-    required this.onDownload,
-  });
-
-  @override
-  State<_PrivateVideoFullScreen> createState() =>
-      _PrivateVideoFullScreenState();
-}
-
-class _PrivateVideoFullScreenState extends State<_PrivateVideoFullScreen> {
-  @override
-  void initState() {
-    super.initState();
-    widget.controller.addListener(_changed);
-  }
-
-  void _changed() {
-    if (mounted) setState(() {});
-  }
-
-  Future<void> _toggle() async {
-    final controller = widget.controller;
-    if (controller.value.position >= controller.value.duration &&
-        controller.value.duration > Duration.zero) {
-      await controller.seekTo(Duration.zero);
-    }
-    if (controller.value.isPlaying) {
-      await controller.pause();
-    } else {
-      await controller.play();
-    }
-  }
-
-  @override
-  void dispose() {
-    widget.controller.removeListener(_changed);
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final controller = widget.controller;
-    final playing = controller.value.isPlaying;
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        foregroundColor: Colors.white,
-        title: Text(
-          widget.fileName,
-          maxLines: 1,
-          overflow: TextOverflow.ellipsis,
-        ),
-        actions: [
-          IconButton(
-            tooltip: _chatText('download'),
-            onPressed: widget.onDownload,
-            icon: Icon(Icons.download_rounded, color: widget.gold),
-          ),
-        ],
-      ),
-      body: SafeArea(
-        child: Column(
-          children: [
-            Expanded(
-              child: Center(
-                child: AspectRatio(
-                  aspectRatio: controller.value.aspectRatio > 0
-                      ? controller.value.aspectRatio
-                      : 16 / 9,
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: [
-                      VideoPlayer(controller),
-                      Material(
-                        color: Colors.transparent,
-                        child: InkWell(
-                          onTap: () => unawaited(_toggle()),
-                          child: Center(
-                            child: AnimatedOpacity(
-                              duration: const Duration(milliseconds: 150),
-                              opacity: playing ? 0 : 1,
-                              child: Container(
-                                width: 68,
-                                height: 68,
-                                decoration: BoxDecoration(
-                                  color: Colors.black.withValues(alpha: 0.70),
-                                  shape: BoxShape.circle,
-                                ),
-                                child: const Icon(
-                                  Icons.play_arrow_rounded,
-                                  color: Colors.white,
-                                  size: 48,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(14, 4, 14, 14),
-              child: Row(
-                children: [
-                  IconButton(
-                    onPressed: () => unawaited(_toggle()),
-                    icon: Icon(
-                      playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                      color: widget.gold,
-                    ),
-                  ),
-                  Expanded(
-                    child: VideoProgressIndicator(
-                      controller,
-                      allowScrubbing: true,
-                      padding: const EdgeInsets.symmetric(vertical: 10),
-                      colors: VideoProgressColors(
-                        playedColor: widget.gold,
-                        bufferedColor: Colors.white38,
-                        backgroundColor: Colors.white24,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 }
 
 class ChatScreen extends StatefulWidget {
@@ -545,6 +66,9 @@ class _ChatScreenState extends State<ChatScreen>
   final ScrollController _messageScrollController = ScrollController();
 
   final Map<String, GlobalKey> _messageItemKeys = <String, GlobalKey>{};
+
+  final TextEditingController _searchController = TextEditingController();
+  final FocusNode _searchFocusNode = FocusNode();
 
   final List<Map<String, dynamic>> _messages = [];
 
@@ -593,11 +117,15 @@ class _ChatScreenState extends State<ChatScreen>
   int _newMessagesWhileScrolledUp = 0;
 
   String? _highlightedMessageId;
+  bool _searchMode = false;
+  String _searchQuery = '';
+  List<String> _searchMatchIds = <String>[];
+  int _searchMatchIndex = -1;
 
   final Map<String, Completer<String>> _chatGptCompleters =
       <String, Completer<String>>{};
 
-  final Map<String, Completer<Map<String, dynamic>>> _spartanAiCompleters =
+  final Map<String, Completer<Map<String, dynamic>>> _fenyvoAiCompleters =
       <String, Completer<Map<String, dynamic>>>{};
 
   bool _autoReplyEnabled = false;
@@ -621,6 +149,7 @@ class _ChatScreenState extends State<ChatScreen>
   bool _e2eeKeyChanged = false;
   bool _e2eeKeyChangeWarningShown = false;
   bool _changingE2ee = false;
+  bool _screenSecurityEnabled = false;
 
   Timer? _typingStopTimer;
   Timer? _remoteTypingTimeoutTimer;
@@ -628,7 +157,7 @@ class _ChatScreenState extends State<ChatScreen>
 
   late final AnimationController _typingAnimationController;
 
-  static const Color _gold = SpartanPalette.gold;
+  static const Color _gold = FenyvoPalette.gold;
 
   static const List<String> _supportedReactions = [
     '\u2764\uFE0F',
@@ -670,7 +199,9 @@ class _ChatScreenState extends State<ChatScreen>
       return false;
     }
 
-    if (_messageFocusNode.hasFocus) {
+    if (_messageFocusNode.hasFocus ||
+        _searchMode ||
+        _searchFocusNode.hasFocus) {
       return false;
     }
 
@@ -795,6 +326,9 @@ class _ChatScreenState extends State<ChatScreen>
 
     _loadMessages();
     _loadBackgroundSettings();
+    if (Platform.isAndroid || Platform.isWindows) {
+      unawaited(_loadScreenSecuritySetting());
+    }
     _loadContactAvatar();
     unawaited(_loadTrustState());
 
@@ -821,6 +355,9 @@ class _ChatScreenState extends State<ChatScreen>
     AppLanguageService.instance.code.removeListener(_refreshLanguage);
     CallHistoryService.changes.removeListener(_refreshCallHistory);
     SocketService.instance.clearActiveChatUser(widget.targetUser);
+    if (Platform.isAndroid || Platform.isWindows) {
+      unawaited(ScreenSecurityService.setSecure(false));
+    }
 
     if (_typingSent) {
       SocketService.instance.sendTyping(widget.targetUser, false);
@@ -839,14 +376,14 @@ class _ChatScreenState extends State<ChatScreen>
     }
     _chatGptCompleters.clear();
 
-    for (final completer in _spartanAiCompleters.values) {
+    for (final completer in _fenyvoAiCompleters.values) {
       if (!completer.isCompleted) {
         completer.completeError(
           StateError('\u0427\u0430\u0442 \u0437\u0430\u043A\u0440\u044B\u0442'),
         );
       }
     }
-    _spartanAiCompleters.clear();
+    _fenyvoAiCompleters.clear();
 
     _typingAnimationController.dispose();
 
@@ -856,6 +393,8 @@ class _ChatScreenState extends State<ChatScreen>
     _messageScrollController.dispose();
 
     _messageFocusNode.dispose();
+    _searchController.dispose();
+    _searchFocusNode.dispose();
     _drafts[_draftKey] = _messageController.text;
     _messageController.dispose();
 
@@ -933,10 +472,10 @@ class _ChatScreenState extends State<ChatScreen>
     }
 
     final ringColor = _contactTrusted
-        ? SpartanPalette.gold
+        ? FenyvoPalette.gold
         : _contactOnline
-        ? SpartanPalette.online
-        : SpartanPalette.line;
+        ? FenyvoPalette.online
+        : FenyvoPalette.line;
     final avatarStack = Container(
       padding: const EdgeInsets.all(2.5),
       decoration: BoxDecoration(
@@ -956,7 +495,7 @@ class _ChatScreenState extends State<ChatScreen>
         children: [
           CircleAvatar(
             radius: Platform.isWindows ? 22 : 20,
-            backgroundColor: SpartanPalette.surface,
+            backgroundColor: FenyvoPalette.surface,
             backgroundImage: imageProvider,
             child: imageProvider == null
                 ? Text(
@@ -978,10 +517,10 @@ class _ChatScreenState extends State<ChatScreen>
                 width: Platform.isWindows ? 13 : 12,
                 height: Platform.isWindows ? 13 : 12,
                 decoration: BoxDecoration(
-                  color: SpartanPalette.online,
+                  color: FenyvoPalette.online,
                   shape: BoxShape.circle,
                   border: Border.all(
-                    color: SpartanPalette.canvasDeep,
+                    color: FenyvoPalette.canvasDeep,
                     width: 2,
                   ),
                 ),
@@ -1185,7 +724,7 @@ class _ChatScreenState extends State<ChatScreen>
               height: active ? 7 : 5,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: SpartanPalette.blue.withValues(
+                color: FenyvoPalette.blue.withValues(
                   alpha: active ? 1.0 : 0.40,
                 ),
                 boxShadow: active
@@ -1213,7 +752,7 @@ class _ChatScreenState extends State<ChatScreen>
               key: const ValueKey('typing_indicator'),
               width: double.infinity,
               padding: const EdgeInsets.fromLTRB(18, 7, 18, 5),
-              color: SpartanPalette.surface,
+              color: FenyvoPalette.surface,
               child: Row(
                 children: [
                   const Icon(Icons.edit_outlined, size: 14, color: _gold),
@@ -1224,7 +763,7 @@ class _ChatScreenState extends State<ChatScreen>
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                        color: SpartanPalette.secondary,
+                        color: FenyvoPalette.secondary,
                         fontSize: 12,
                         fontWeight: FontWeight.w500,
                       ),
@@ -1510,37 +1049,7 @@ class _ChatScreenState extends State<ChatScreen>
   // ========================================
 
   Map<String, String> _getMessageReactions(Map<String, dynamic> message) {
-    final result = <String, String>{};
-    final rawReactions = message['reactions'];
-
-    if (rawReactions is Map) {
-      rawReactions.forEach((rawUser, rawReaction) {
-        final user = rawUser.toString().trim();
-        final reaction = rawReaction.toString().trim();
-
-        if (user.isEmpty || !_supportedReactions.contains(reaction)) {
-          return;
-        }
-
-        result[user] = reaction;
-      });
-    }
-
-    if (result.isNotEmpty) {
-      return result;
-    }
-
-    final legacyUsers = message['reactionUsers'];
-    if (legacyUsers is List) {
-      for (final rawUser in legacyUsers) {
-        final user = rawUser.toString().trim();
-        if (user.isNotEmpty) {
-          result[user] = '\u2764\uFE0F';
-        }
-      }
-    }
-
-    return result;
+    return parseStoredMessageReactions(message, _supportedReactions);
   }
 
   void _normalizeReactionUsers(Map<String, dynamic> message) {
@@ -1563,6 +1072,55 @@ class _ChatScreenState extends State<ChatScreen>
   void _showE2eeNotice(String text) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+  }
+
+  Future<void> _loadScreenSecuritySetting() async {
+    if (!Platform.isAndroid && !Platform.isWindows) return;
+
+    // Keep the chat protected while its stored preference is loading.
+    await ScreenSecurityService.setSecure(true);
+
+    final currentUser = SocketService.instance.currentUser ?? '';
+    if (currentUser.isEmpty) {
+      if (mounted) await ScreenSecurityService.setSecure(false);
+      return;
+    }
+
+    final enabled = await StorageService.getChatScreenSecurity(
+      currentUser,
+      widget.targetUser,
+    );
+
+    if (!mounted) return;
+
+    await ScreenSecurityService.setSecure(enabled);
+    if (!mounted) return;
+
+    setState(() {
+      _screenSecurityEnabled = enabled;
+    });
+  }
+
+  Future<void> _toggleScreenSecurity() async {
+    if (!Platform.isAndroid && !Platform.isWindows) return;
+
+    final currentUser = SocketService.instance.currentUser ?? '';
+    if (currentUser.isEmpty) return;
+
+    final enabled = !_screenSecurityEnabled;
+
+    await ScreenSecurityService.setSecure(enabled);
+    await StorageService.setChatScreenSecurity(
+      currentUser,
+      widget.targetUser,
+      enabled,
+    );
+
+    if (!mounted) return;
+
+    setState(() {
+      _screenSecurityEnabled = enabled;
+    });
   }
 
   Future<void> _toggleChatE2ee() async {
@@ -1856,6 +1414,28 @@ class _ChatScreenState extends State<ChatScreen>
 
     final currentUser = SocketService.instance.currentUser ?? '';
 
+    // PRESENCE_STEP13: a disconnected socket cannot confirm peer presence.
+    if (type == 'disconnected') {
+      if (mounted) {
+        setState(() {
+          _contactOnline = false;
+          _contactLastSeen = null;
+        });
+      }
+      return;
+    }
+
+    // Re-query the peer status after successful authentication.
+    if (type == 'login_success') {
+      if (mounted) {
+        setState(() {
+          _contactOnline = false;
+          _contactLastSeen = null;
+        });
+        SocketService.instance.getUserStatus(widget.targetUser);
+      }
+      return;
+    }
     if (type == 'registered_users') {
       final rawUsers = data['users'];
       if (rawUsers is List) {
@@ -1921,7 +1501,7 @@ class _ChatScreenState extends State<ChatScreen>
     if (type == 'spartan_ai_result' || type == 'spartan_ai_history') {
       final requestId = data['requestId']?.toString().trim() ?? '';
 
-      final completer = _spartanAiCompleters.remove(requestId);
+      final completer = _fenyvoAiCompleters.remove(requestId);
 
       if (completer != null && !completer.isCompleted) {
         completer.complete(data);
@@ -1934,7 +1514,7 @@ class _ChatScreenState extends State<ChatScreen>
       final requestId = data['requestId']?.toString().trim() ?? '';
       final reason = data['reason']?.toString().trim() ?? 'FENYVO AI error';
 
-      final completer = _spartanAiCompleters.remove(requestId);
+      final completer = _fenyvoAiCompleters.remove(requestId);
 
       if (completer != null && !completer.isCompleted) {
         completer.completeError(Exception(reason));
@@ -2033,7 +1613,7 @@ class _ChatScreenState extends State<ChatScreen>
                     ? '\u{1F916} FENYVO AI \u0430\u0432\u0442\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435 \u0432\u043A\u043B\u044E\u0447\u0435\u043D\u043E \u0434\u043B\u044F ${widget.targetUser}'
                     : 'FENYVO AI \u0430\u0432\u0442\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435 \u0432\u044B\u043A\u043B\u044E\u0447\u0435\u043D\u043E \u0434\u043B\u044F ${widget.targetUser}',
               ),
-              backgroundColor: SpartanPalette.surface,
+              backgroundColor: FenyvoPalette.surface,
               duration: const Duration(milliseconds: 1700),
             ),
           );
@@ -2055,7 +1635,7 @@ class _ChatScreenState extends State<ChatScreen>
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             duration: const Duration(seconds: 10),
-            backgroundColor: SpartanPalette.surface,
+            backgroundColor: FenyvoPalette.surface,
             content: Text(
               '\u{1F916} FENYVO AI \u043F\u0440\u0435\u0434\u043B\u0430\u0433\u0430\u0435\u0442: $suggestion',
               maxLines: 4,
@@ -2092,7 +1672,7 @@ class _ChatScreenState extends State<ChatScreen>
 
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            backgroundColor: SpartanPalette.surface,
+            backgroundColor: FenyvoPalette.surface,
             content: Text(
               '\u2705 FENYVO AI: \u0446\u0435\u043B\u044C \u0434\u0438\u0430\u043B\u043E\u0433\u0430 \u0434\u043E\u0441\u0442\u0438\u0433\u043D\u0443\u0442\u0430. \u0410\u0432\u0442\u043E\u0440\u0435\u0436\u0438\u043C \u043E\u0441\u0442\u0430\u043D\u043E\u0432\u043B\u0435\u043D.',
             ),
@@ -2116,7 +1696,7 @@ class _ChatScreenState extends State<ChatScreen>
             content: Text(
               '\u041F\u0430\u043C\u044F\u0442\u044C FENYVO AI \u044D\u0442\u043E\u0433\u043E \u0434\u0438\u0430\u043B\u043E\u0433\u0430 \u043E\u0447\u0438\u0449\u0435\u043D\u0430',
             ),
-            backgroundColor: SpartanPalette.surface,
+            backgroundColor: FenyvoPalette.surface,
           ),
         );
       }
@@ -2366,7 +1946,7 @@ class _ChatScreenState extends State<ChatScreen>
             content: Text(
               '\u0421\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435 \u0443\u0434\u0430\u043B\u0435\u043D\u043E \u0431\u0435\u0437 \u0441\u043B\u0435\u0434\u043E\u0432',
             ),
-            backgroundColor: SpartanPalette.surface,
+            backgroundColor: FenyvoPalette.surface,
             duration: Duration(milliseconds: 1100),
           ),
         );
@@ -2680,20 +2260,9 @@ class _ChatScreenState extends State<ChatScreen>
   void _addMessageIfNotExists(Map<String, dynamic> newMessage) {
     _normalizeReactionUsers(newMessage);
 
-    final newId = newMessage['id']?.toString().trim() ?? '';
-
-    final exists = _messages.any((message) {
-      final existingId = message['id']?.toString().trim() ?? '';
-
-      if (newId.isNotEmpty && existingId.isNotEmpty) {
-        return newId == existingId;
-      }
-
-      return message['from'] == newMessage['from'] &&
-          message['to'] == newMessage['to'] &&
-          message['text'] == newMessage['text'] &&
-          message['time'] == newMessage['time'];
-    });
+    final exists = _messages.any(
+      (message) => isSameStoredMessage(message, newMessage),
+    );
 
     if (exists) {
       return;
@@ -2722,12 +2291,16 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   void _focusMessageComposer() {
+    if (_searchMode || _searchFocusNode.hasFocus) return;
     if (!Platform.isWindows || !mounted) {
       return;
     }
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted || !_messageFocusNode.canRequestFocus) {
+      if (!mounted ||
+          !_messageFocusNode.canRequestFocus ||
+          _searchMode ||
+          _searchFocusNode.hasFocus) {
         return;
       }
 
@@ -2793,7 +2366,7 @@ class _ChatScreenState extends State<ChatScreen>
   void _privateMediaSnack(String text) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(text), backgroundColor: SpartanPalette.surface),
+      SnackBar(content: Text(text), backgroundColor: FenyvoPalette.surface),
     );
   }
 
@@ -2802,7 +2375,7 @@ class _ChatScreenState extends State<ChatScreen>
 
     await showModalBottomSheet<void>(
       context: context,
-      backgroundColor: SpartanPalette.surface,
+      backgroundColor: FenyvoPalette.surface,
       showDragHandle: true,
       builder: (sheetContext) {
         Widget item(
@@ -2815,7 +2388,7 @@ class _ChatScreenState extends State<ChatScreen>
             title: Text(
               title,
               style: const TextStyle(
-                color: SpartanPalette.ink,
+                color: FenyvoPalette.ink,
                 fontWeight: FontWeight.w600,
               ),
             ),
@@ -2885,7 +2458,7 @@ class _ChatScreenState extends State<ChatScreen>
 
     final selected = await showModalBottomSheet<String>(
       context: context,
-      backgroundColor: SpartanPalette.surface,
+      backgroundColor: FenyvoPalette.surface,
       showDragHandle: true,
       builder: (sheetContext) => SafeArea(
         child: SizedBox(
@@ -2897,7 +2470,7 @@ class _ChatScreenState extends State<ChatScreen>
                 child: Text(
                   'Поделиться контактом',
                   style: TextStyle(
-                    color: SpartanPalette.ink,
+                    color: FenyvoPalette.ink,
                     fontSize: 20,
                     fontWeight: FontWeight.w700,
                   ),
@@ -2916,13 +2489,13 @@ class _ChatScreenState extends State<ChatScreen>
                       title: Text(
                         user,
                         style: const TextStyle(
-                          color: SpartanPalette.ink,
+                          color: FenyvoPalette.ink,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
                       subtitle: Text(
                         '@$user',
-                        style: const TextStyle(color: SpartanPalette.secondary),
+                        style: const TextStyle(color: FenyvoPalette.secondary),
                       ),
                       trailing: Icon(Icons.send_rounded, color: _gold),
                       onTap: () => Navigator.of(sheetContext).pop(user),
@@ -3139,12 +2712,12 @@ class _ChatScreenState extends State<ChatScreen>
         _privateMimeFromName(original, 'application/octet-stream');
 
     try {
-      final savedPath = await SpartanDownloadService.saveBytes(
+      final savedPath = await FenyvoDownloadService.saveBytes(
         bytes: bytes,
         fileName: original,
         mimeType: mime,
       );
-      _privateMediaSnack(_chatText('savedToSpartan', {'path': savedPath}));
+      _privateMediaSnack(_chatText('savedToFenyvo', {'path': savedPath}));
     } catch (error) {
       _privateMediaSnack(_chatText('fileSaveError', {'error': error}));
     }
@@ -3262,7 +2835,7 @@ class _ChatScreenState extends State<ChatScreen>
         return Text(
           '📷 ${_chatText('photoUnavailable')}',
           style: TextStyle(
-            color: isMe ? SpartanPalette.ink : SpartanPalette.ink,
+            color: isMe ? FenyvoPalette.ink : FenyvoPalette.ink,
           ),
         );
       }
@@ -3373,7 +2946,7 @@ class _ChatScreenState extends State<ChatScreen>
             right: 6,
             top: 6,
             child: Material(
-              color: SpartanPalette.surface.withValues(alpha: 0.68),
+              color: FenyvoPalette.surface.withValues(alpha: 0.68),
               shape: const CircleBorder(),
               child: IconButton(
                 tooltip: _chatText('download'),
@@ -3381,7 +2954,7 @@ class _ChatScreenState extends State<ChatScreen>
                 onPressed: () => unawaited(_savePrivateAttachment(message)),
                 icon: const Icon(
                   Icons.download_rounded,
-                  color: SpartanPalette.ink,
+                  color: FenyvoPalette.ink,
                   size: 21,
                 ),
               ),
@@ -3398,7 +2971,7 @@ class _ChatScreenState extends State<ChatScreen>
         return Text(
           '🎥 ${_chatText('videoUnavailable')}',
           style: TextStyle(
-            color: isMe ? SpartanPalette.ink : SpartanPalette.ink,
+            color: isMe ? FenyvoPalette.ink : FenyvoPalette.ink,
           ),
         );
       }
@@ -3411,7 +2984,7 @@ class _ChatScreenState extends State<ChatScreen>
         httpHeaders: MediaCacheService.remoteHeaders,
         mediaMessage: Map<String, dynamic>.from(message),
         isMe: isMe,
-        gold: SpartanPalette.mediaAccent,
+        gold: FenyvoPalette.mediaAccent,
         onDownload: () => unawaited(_savePrivateAttachment(message)),
       );
     }
@@ -3425,14 +2998,14 @@ class _ChatScreenState extends State<ChatScreen>
         constraints: const BoxConstraints(minWidth: 220, maxWidth: 330),
         padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
-          color: SpartanPalette.surface.withValues(alpha: isMe ? 0.08 : 0.18),
+          color: FenyvoPalette.surface.withValues(alpha: isMe ? 0.08 : 0.18),
           borderRadius: BorderRadius.circular(12),
         ),
         child: Row(
           children: [
             Icon(
               Icons.insert_drive_file_outlined,
-              color: isMe ? SpartanPalette.ink : _gold,
+              color: isMe ? FenyvoPalette.ink : _gold,
               size: 30,
             ),
             const SizedBox(width: 10),
@@ -3446,7 +3019,7 @@ class _ChatScreenState extends State<ChatScreen>
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      color: isMe ? SpartanPalette.ink : SpartanPalette.ink,
+                      color: isMe ? FenyvoPalette.ink : FenyvoPalette.ink,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -3455,8 +3028,8 @@ class _ChatScreenState extends State<ChatScreen>
                       size,
                       style: TextStyle(
                         color: isMe
-                            ? SpartanPalette.secondary
-                            : SpartanPalette.secondary,
+                            ? FenyvoPalette.secondary
+                            : FenyvoPalette.secondary,
                         fontSize: 11,
                       ),
                     ),
@@ -3465,7 +3038,7 @@ class _ChatScreenState extends State<ChatScreen>
             ),
             Icon(
               Icons.download_rounded,
-              color: isMe ? SpartanPalette.secondary : SpartanPalette.secondary,
+              color: isMe ? FenyvoPalette.secondary : FenyvoPalette.secondary,
             ),
           ],
         ),
@@ -3997,15 +3570,15 @@ class _ChatScreenState extends State<ChatScreen>
         ? 0.0
         : (position.inMilliseconds / duration.inMilliseconds).clamp(0.0, 1.0);
 
-    final foreground = isMe ? SpartanPalette.ink : _gold;
+    final foreground = isMe ? FenyvoPalette.ink : _gold;
 
     final inactive = isMe
-        ? SpartanPalette.ink.withValues(alpha: 0.24)
-        : SpartanPalette.ink.withValues(alpha: 0.23);
+        ? FenyvoPalette.ink.withValues(alpha: 0.24)
+        : FenyvoPalette.ink.withValues(alpha: 0.23);
 
     final secondaryText = isMe
-        ? SpartanPalette.ink.withValues(alpha: 0.58)
-        : SpartanPalette.ink.withValues(alpha: 0.62);
+        ? FenyvoPalette.ink.withValues(alpha: 0.58)
+        : FenyvoPalette.ink.withValues(alpha: 0.62);
 
     final waveformSeed = messageId.hashCode.abs();
 
@@ -4196,11 +3769,11 @@ class _ChatScreenState extends State<ChatScreen>
         height: 48,
         decoration: const BoxDecoration(
           shape: BoxShape.circle,
-          color: SpartanPalette.gold,
+          color: FenyvoPalette.gold,
         ),
         child: const Icon(
           Icons.mic_rounded,
-          color: SpartanPalette.onGold,
+          color: FenyvoPalette.onGold,
           size: 24,
         ),
       ),
@@ -4216,7 +3789,7 @@ class _ChatScreenState extends State<ChatScreen>
         _buildComposerReplyPreview(),
         Container(
           padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
-          decoration: const BoxDecoration(color: SpartanPalette.surface),
+          decoration: const BoxDecoration(color: FenyvoPalette.surface),
           child: SafeArea(
             top: false,
             child: Row(
@@ -4235,7 +3808,7 @@ class _ChatScreenState extends State<ChatScreen>
                   child: Text(
                     _formatVoiceDuration(_voiceRecordDuration),
                     style: const TextStyle(
-                      color: SpartanPalette.ink,
+                      color: FenyvoPalette.ink,
                       fontSize: 15,
                       fontWeight: FontWeight.w700,
                     ),
@@ -4258,7 +3831,7 @@ class _ChatScreenState extends State<ChatScreen>
                               margin: const EdgeInsets.symmetric(horizontal: 1),
                               height: height,
                               decoration: BoxDecoration(
-                                color: SpartanPalette.blue,
+                                color: FenyvoPalette.blue,
                                 borderRadius: BorderRadius.circular(2),
                               ),
                             ),
@@ -4285,7 +3858,7 @@ class _ChatScreenState extends State<ChatScreen>
                   decoration: const BoxDecoration(
                     shape: BoxShape.circle,
                     gradient: LinearGradient(
-                      colors: [SpartanPalette.blue, SpartanPalette.blueDeep],
+                      colors: [FenyvoPalette.blue, FenyvoPalette.blueDeep],
                     ),
                   ),
                   child: IconButton(
@@ -4295,7 +3868,7 @@ class _ChatScreenState extends State<ChatScreen>
                     },
                     icon: const Icon(
                       Icons.send_rounded,
-                      color: SpartanPalette.ink,
+                      color: FenyvoPalette.ink,
                     ),
                   ),
                 ),
@@ -4416,12 +3989,12 @@ class _ChatScreenState extends State<ChatScreen>
       padding: const EdgeInsets.fromLTRB(10, 7, 10, 7),
       decoration: BoxDecoration(
         color: isMe
-            ? SpartanPalette.surface.withValues(alpha: 0.18)
-            : SpartanPalette.surface.withValues(alpha: 0.32),
+            ? FenyvoPalette.surface.withValues(alpha: 0.18)
+            : FenyvoPalette.surface.withValues(alpha: 0.32),
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
           color: isMe
-              ? SpartanPalette.secondary
+              ? FenyvoPalette.secondary
               : _gold.withValues(alpha: 0.55),
           width: 1,
         ),
@@ -4435,7 +4008,7 @@ class _ChatScreenState extends State<ChatScreen>
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                color: isMe ? SpartanPalette.ink : _gold,
+                color: isMe ? FenyvoPalette.ink : _gold,
                 fontSize: 11,
                 fontWeight: FontWeight.w700,
               ),
@@ -4446,7 +4019,7 @@ class _ChatScreenState extends State<ChatScreen>
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              color: isMe ? SpartanPalette.ink : SpartanPalette.secondary,
+              color: isMe ? FenyvoPalette.ink : FenyvoPalette.secondary,
               fontSize: 11.5,
               height: 1.2,
             ),
@@ -4475,7 +4048,7 @@ class _ChatScreenState extends State<ChatScreen>
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(14, 8, 8, 8),
       decoration: BoxDecoration(
-        color: SpartanPalette.surface,
+        color: FenyvoPalette.surface,
         border: Border(
           top: BorderSide(color: _gold.withValues(alpha: 0.22), width: 0.8),
         ),
@@ -4486,7 +4059,7 @@ class _ChatScreenState extends State<ChatScreen>
             width: 3,
             height: 38,
             decoration: BoxDecoration(
-              color: SpartanPalette.blue,
+              color: FenyvoPalette.blue,
               borderRadius: BorderRadius.circular(3),
               boxShadow: [
                 BoxShadow(color: _gold.withValues(alpha: 0.06), blurRadius: 6),
@@ -4514,7 +4087,7 @@ class _ChatScreenState extends State<ChatScreen>
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                    color: SpartanPalette.secondary,
+                    color: FenyvoPalette.secondary,
                     fontSize: 12,
                   ),
                 ),
@@ -4525,7 +4098,7 @@ class _ChatScreenState extends State<ChatScreen>
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
               decoration: BoxDecoration(
-                color: SpartanPalette.blue.withValues(alpha: 0.08),
+                color: FenyvoPalette.blue.withValues(alpha: 0.08),
                 borderRadius: BorderRadius.circular(5),
                 border: Border.all(
                   color: _gold.withValues(alpha: 0.18),
@@ -4535,7 +4108,7 @@ class _ChatScreenState extends State<ChatScreen>
               child: const Text(
                 'ESC',
                 style: TextStyle(
-                  color: SpartanPalette.secondary,
+                  color: FenyvoPalette.secondary,
                   fontSize: 9,
                   fontWeight: FontWeight.w600,
                   letterSpacing: 0.5,
@@ -4658,7 +4231,7 @@ class _ChatScreenState extends State<ChatScreen>
                   children: [
                     Positioned.fill(
                       child: Container(
-                        color: SpartanPalette.surface.withValues(
+                        color: FenyvoPalette.surface.withValues(
                           alpha: 0.12 * fadeOut,
                         ),
                       ),
@@ -4729,29 +4302,14 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   DateTime? _parseMessageLocalDate(dynamic timeData) {
-    if (timeData == null) {
-      return null;
-    }
-
-    try {
-      return DateTime.parse(timeData.toString()).toLocal();
-    } catch (_) {
-      return null;
-    }
+    return parseMessageLocalDate(timeData);
   }
 
   bool _isSameMessageDay(dynamic firstTime, dynamic secondTime) {
     final first = _parseMessageLocalDate(firstTime);
-
     final second = _parseMessageLocalDate(secondTime);
-
-    if (first == null || second == null) {
-      return false;
-    }
-
-    return first.year == second.year &&
-        first.month == second.month &&
-        first.day == second.day;
+    if (first == null || second == null) return false;
+    return isSameMessageCalendarDay(first, second);
   }
 
   String _formatMessageDateLabel(dynamic timeData) {
@@ -4799,7 +4357,7 @@ class _ChatScreenState extends State<ChatScreen>
           Expanded(
             child: Container(
               height: 1,
-              color: SpartanPalette.blue.withValues(alpha: 0.12),
+              color: FenyvoPalette.blue.withValues(alpha: 0.12),
             ),
           ),
           Container(
@@ -4809,7 +4367,7 @@ class _ChatScreenState extends State<ChatScreen>
               vertical: isWindowsDesktop ? 5 : 4,
             ),
             decoration: BoxDecoration(
-              color: SpartanPalette.surface,
+              color: FenyvoPalette.surface,
               borderRadius: BorderRadius.circular(14),
               border: Border.all(
                 color: _gold.withValues(alpha: 0.24),
@@ -4838,7 +4396,7 @@ class _ChatScreenState extends State<ChatScreen>
           Expanded(
             child: Container(
               height: 1,
-              color: SpartanPalette.blue.withValues(alpha: 0.12),
+              color: FenyvoPalette.blue.withValues(alpha: 0.12),
             ),
           ),
         ],
@@ -4878,6 +4436,164 @@ class _ChatScreenState extends State<ChatScreen>
     return _messageItemKeys.putIfAbsent(messageId, GlobalKey.new);
   }
 
+  void _recalculateSearchMatches() {
+    final previousId =
+        _searchMatchIndex >= 0 && _searchMatchIndex < _searchMatchIds.length
+        ? _searchMatchIds[_searchMatchIndex]
+        : '';
+
+    _searchMatchIds = _messages
+        .where((message) => MessageSearchService.matches(message, _searchQuery))
+        .map(_getMessageId)
+        .where((id) => id.isNotEmpty)
+        .toList(growable: false);
+
+    if (_searchMatchIds.isEmpty) {
+      _searchMatchIndex = -1;
+      return;
+    }
+
+    final previousIndex = previousId.isEmpty
+        ? -1
+        : _searchMatchIds.indexOf(previousId);
+    _searchMatchIndex = previousIndex >= 0
+        ? previousIndex
+        : _searchMatchIds.length - 1;
+  }
+
+  void _openMessageSearch() {
+    setState(() {
+      _searchMode = true;
+      _searchQuery = _searchController.text.trim();
+      _recalculateSearchMatches();
+    });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _searchFocusNode.requestFocus();
+    });
+  }
+
+  void _closeMessageSearch() {
+    _searchController.clear();
+    _searchFocusNode.unfocus();
+    setState(() {
+      _searchMode = false;
+      _searchQuery = '';
+      _searchMatchIds = <String>[];
+      _searchMatchIndex = -1;
+    });
+  }
+
+  void _onMessageSearchChanged(String value) {
+    setState(() {
+      _searchQuery = value.trim();
+      _recalculateSearchMatches();
+    });
+
+    if (_searchMatchIndex >= 0) {
+      unawaited(_jumpToCurrentSearchMatch());
+    }
+  }
+
+  Future<void> _jumpToCurrentSearchMatch() async {
+    if (_searchMatchIndex < 0 || _searchMatchIndex >= _searchMatchIds.length) {
+      return;
+    }
+
+    final id = _searchMatchIds[_searchMatchIndex];
+    final index = _messages.indexWhere(
+      (message) => _getMessageId(message) == id,
+    );
+    if (index >= 0) await _jumpToPinnedMessage(_messages[index]);
+  }
+
+  Future<void> _nextMessageSearchMatch({required bool newer}) async {
+    if (_searchMatchIds.isEmpty) return;
+
+    setState(() {
+      if (_searchMatchIndex < 0) {
+        _searchMatchIndex = _searchMatchIds.length - 1;
+      } else if (newer) {
+        _searchMatchIndex = (_searchMatchIndex + 1) % _searchMatchIds.length;
+      } else {
+        _searchMatchIndex =
+            (_searchMatchIndex - 1 + _searchMatchIds.length) %
+            _searchMatchIds.length;
+      }
+    });
+
+    await _jumpToCurrentSearchMatch();
+  }
+
+  Widget _buildMessageSearchBar() {
+    final matchCount = _searchMatchIds.length;
+    final current = _searchMatchIndex >= 0 ? _searchMatchIndex + 1 : 0;
+
+    return Container(
+      color: FenyvoPalette.surface,
+      padding: EdgeInsets.fromLTRB(
+        Platform.isWindows ? 16 : 10,
+        7,
+        Platform.isWindows ? 16 : 10,
+        7,
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _searchController,
+              focusNode: _searchFocusNode,
+              onChanged: _onMessageSearchChanged,
+              textInputAction: TextInputAction.search,
+              style: const TextStyle(color: FenyvoPalette.ink),
+              decoration: InputDecoration(
+                hintText: _chatText('searchConversationHint'),
+                hintStyle: const TextStyle(color: FenyvoPalette.muted),
+                prefixIcon: const Icon(Icons.search_rounded, color: _gold),
+                suffixText: _searchQuery.isEmpty
+                    ? null
+                    : '$current/$matchCount',
+                suffixStyle: const TextStyle(
+                  color: _gold,
+                  fontWeight: FontWeight.w700,
+                ),
+                filled: true,
+                fillColor: FenyvoPalette.canvasDeep,
+                isDense: true,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(20),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+            ),
+          ),
+          IconButton(
+            tooltip: _chatText('previousMatch'),
+            onPressed: matchCount == 0
+                ? null
+                : () => unawaited(_nextMessageSearchMatch(newer: false)),
+            icon: const Icon(Icons.keyboard_arrow_up_rounded, color: _gold),
+          ),
+          IconButton(
+            tooltip: _chatText('nextMatch'),
+            onPressed: matchCount == 0
+                ? null
+                : () => unawaited(_nextMessageSearchMatch(newer: true)),
+            icon: const Icon(Icons.keyboard_arrow_down_rounded, color: _gold),
+          ),
+          IconButton(
+            tooltip: _chatText('closeSearch'),
+            onPressed: _closeMessageSearch,
+            icon: const Icon(
+              Icons.close_rounded,
+              color: FenyvoPalette.secondary,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   bool _isMessagePinned(Map<String, dynamic> message) {
     return message['isPinned'] == true;
   }
@@ -4901,7 +4617,7 @@ class _ChatScreenState extends State<ChatScreen>
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(_chatText('pinLimit')),
-          backgroundColor: SpartanPalette.surface,
+          backgroundColor: FenyvoPalette.surface,
         ),
       );
       return;
@@ -4945,7 +4661,7 @@ class _ChatScreenState extends State<ChatScreen>
       SnackBar(
         duration: const Duration(milliseconds: 1100),
         behavior: SnackBarBehavior.floating,
-        backgroundColor: SpartanPalette.surface,
+        backgroundColor: FenyvoPalette.surface,
         content: Row(
           children: [
             Icon(
@@ -4959,7 +4675,7 @@ class _ChatScreenState extends State<ChatScreen>
                 wasPinned
                     ? '\u0421\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435 \u043E\u0442\u043A\u0440\u0435\u043F\u043B\u0435\u043D\u043E'
                     : '\u0421\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435 \u0437\u0430\u043A\u0440\u0435\u043F\u043B\u0435\u043D\u043E',
-                style: const TextStyle(color: SpartanPalette.ink),
+                style: const TextStyle(color: FenyvoPalette.ink),
               ),
             ),
           ],
@@ -5136,9 +4852,9 @@ class _ChatScreenState extends State<ChatScreen>
     return Container(
       height: 46,
       decoration: const BoxDecoration(
-        color: SpartanPalette.surface,
+        color: FenyvoPalette.surface,
         border: Border(
-          bottom: BorderSide(color: SpartanPalette.line, width: .5),
+          bottom: BorderSide(color: FenyvoPalette.line, width: .5),
         ),
       ),
       padding: const EdgeInsets.symmetric(horizontal: 12),
@@ -5147,7 +4863,7 @@ class _ChatScreenState extends State<ChatScreen>
           const Icon(
             Icons.push_pin_outlined,
             size: 18,
-            color: SpartanPalette.gold,
+            color: FenyvoPalette.gold,
           ),
           const SizedBox(width: 8),
           Expanded(
@@ -5174,7 +4890,7 @@ class _ChatScreenState extends State<ChatScreen>
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
                                 fontSize: 13,
-                                color: SpartanPalette.ink,
+                                color: FenyvoPalette.ink,
                               ),
                             ),
                           ),
@@ -5198,7 +4914,7 @@ class _ChatScreenState extends State<ChatScreen>
           Text(
             '${pinned.length}/10',
             style: const TextStyle(
-              color: SpartanPalette.secondary,
+              color: FenyvoPalette.secondary,
               fontSize: 11,
             ),
           ),
@@ -5217,7 +4933,7 @@ class _ChatScreenState extends State<ChatScreen>
             gradient: LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
-              colors: [SpartanPalette.canvasDeep, SpartanPalette.canvas],
+              colors: [FenyvoPalette.canvasDeep, FenyvoPalette.canvas],
             ),
           ),
         ),
@@ -5228,13 +4944,13 @@ class _ChatScreenState extends State<ChatScreen>
 
     if (!file.existsSync()) {
       return const Positioned.fill(
-        child: ColoredBox(color: SpartanPalette.canvas),
+        child: ColoredBox(color: FenyvoPalette.canvas),
       );
     }
 
     return Positioned.fill(
       child: ColoredBox(
-        color: SpartanPalette.canvas,
+        color: FenyvoPalette.canvas,
         child: Opacity(
           opacity: _backgroundOpacity,
           child: Image.file(
@@ -5267,7 +4983,7 @@ class _ChatScreenState extends State<ChatScreen>
         alignment: Alignment.center,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          color: SpartanPalette.surface.withValues(alpha: 0.72),
+          color: FenyvoPalette.surface.withValues(alpha: 0.72),
           border: Border.all(
             color: _gold.withValues(alpha: enabled ? 0.95 : 0.70),
             width: 1,
@@ -5304,8 +5020,8 @@ class _ChatScreenState extends State<ChatScreen>
         alignment: Alignment.center,
         decoration: BoxDecoration(
           color: selected
-              ? SpartanPalette.blue.withValues(alpha: 0.22)
-              : SpartanPalette.surface.withValues(alpha: 0.72),
+              ? FenyvoPalette.blue.withValues(alpha: 0.22)
+              : FenyvoPalette.surface.withValues(alpha: 0.72),
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
             color: _gold.withValues(alpha: selected ? 1.0 : 0.75),
@@ -5329,7 +5045,7 @@ class _ChatScreenState extends State<ChatScreen>
               Text(
                 '$count',
                 style: const TextStyle(
-                  color: SpartanPalette.ink,
+                  color: FenyvoPalette.ink,
                   fontSize: 11,
                   fontWeight: FontWeight.w700,
                 ),
@@ -5351,10 +5067,7 @@ class _ChatScreenState extends State<ChatScreen>
 
     if (reactions.isEmpty) return const SizedBox.shrink();
 
-    final counts = <String, int>{};
-    for (final reaction in reactions.values) {
-      counts[reaction] = (counts[reaction] ?? 0) + 1;
-    }
+    final counts = countMessageReactions(reactions.values);
 
     final widgets = <Widget>[];
     for (final reaction in _supportedReactions) {
@@ -5402,7 +5115,7 @@ class _ChatScreenState extends State<ChatScreen>
       return Icon(
         Icons.schedule_rounded,
         size: 15,
-        color: SpartanPalette.secondary,
+        color: FenyvoPalette.secondary,
         semanticLabel: _chatText('waitingToSend'),
       );
     }
@@ -5410,7 +5123,7 @@ class _ChatScreenState extends State<ChatScreen>
       return Icon(
         Icons.sync_rounded,
         size: 15,
-        color: SpartanPalette.secondary,
+        color: FenyvoPalette.secondary,
         semanticLabel: _chatText('sending'),
       );
     }
@@ -5428,7 +5141,7 @@ class _ChatScreenState extends State<ChatScreen>
           ? Icons.done_all_rounded
           : Icons.done_rounded,
       size: 15,
-      color: isRead ? SpartanPalette.gold : SpartanPalette.secondary,
+      color: isRead ? FenyvoPalette.gold : FenyvoPalette.secondary,
       semanticLabel: isRead
           ? _chatText('read')
           : status == 'delivered'
@@ -5459,7 +5172,7 @@ class _ChatScreenState extends State<ChatScreen>
         content: Text(
           '\u0421\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435 \u0441\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u043D\u043E',
         ),
-        backgroundColor: SpartanPalette.surface,
+        backgroundColor: FenyvoPalette.surface,
         duration: Duration(milliseconds: 1000),
       ),
     );
@@ -5493,7 +5206,7 @@ class _ChatScreenState extends State<ChatScreen>
 
       request.headers.set(
         HttpHeaders.userAgentHeader,
-        'Mozilla/5.0 SpartanChat/1.0',
+        'Mozilla/5.0 FenyvoChat/1.0',
       );
 
       final response = await request.close().timeout(
@@ -5617,11 +5330,11 @@ class _ChatScreenState extends State<ChatScreen>
                           },
                     style: OutlinedButton.styleFrom(
                       foregroundColor: selected
-                          ? SpartanPalette.ink
-                          : SpartanPalette.ink,
+                          ? FenyvoPalette.ink
+                          : FenyvoPalette.ink,
                       backgroundColor: selected
-                          ? SpartanPalette.blue
-                          : SpartanPalette.surface,
+                          ? FenyvoPalette.blue
+                          : FenyvoPalette.surface,
                       side: BorderSide(
                         color: selected ? _gold : _gold.withValues(alpha: 0.45),
                       ),
@@ -5651,7 +5364,7 @@ class _ChatScreenState extends State<ChatScreen>
                   maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.88,
                 ),
                 decoration: const BoxDecoration(
-                  color: SpartanPalette.surface,
+                  color: FenyvoPalette.surface,
                   borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
                   border: Border(top: BorderSide(color: _gold, width: 1.2)),
                 ),
@@ -5665,7 +5378,7 @@ class _ChatScreenState extends State<ChatScreen>
                           width: 42,
                           height: 4,
                           decoration: BoxDecoration(
-                            color: SpartanPalette.line,
+                            color: FenyvoPalette.line,
                             borderRadius: BorderRadius.circular(3),
                           ),
                         ),
@@ -5679,7 +5392,7 @@ class _ChatScreenState extends State<ChatScreen>
                             child: Text(
                               '\u041F\u0435\u0440\u0435\u0432\u043E\u0434 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F',
                               style: TextStyle(
-                                color: SpartanPalette.ink,
+                                color: FenyvoPalette.ink,
                                 fontSize: 18,
                                 fontWeight: FontWeight.w800,
                               ),
@@ -5702,7 +5415,7 @@ class _ChatScreenState extends State<ChatScreen>
                         width: double.infinity,
                         padding: const EdgeInsets.all(14),
                         decoration: BoxDecoration(
-                          color: SpartanPalette.surface,
+                          color: FenyvoPalette.surface,
                           borderRadius: BorderRadius.circular(16),
                           border: Border.all(
                             color: _gold.withValues(alpha: 0.30),
@@ -5711,7 +5424,7 @@ class _ChatScreenState extends State<ChatScreen>
                         child: SelectableText(
                           originalText,
                           style: const TextStyle(
-                            color: SpartanPalette.ink,
+                            color: FenyvoPalette.ink,
                             fontSize: 15,
                             height: 1.35,
                           ),
@@ -5761,8 +5474,8 @@ class _ChatScreenState extends State<ChatScreen>
                         child: FilledButton.icon(
                           onPressed: isLoading ? null : performTranslation,
                           style: FilledButton.styleFrom(
-                            backgroundColor: SpartanPalette.blue,
-                            foregroundColor: SpartanPalette.ink,
+                            backgroundColor: FenyvoPalette.blue,
+                            foregroundColor: FenyvoPalette.ink,
                             disabledBackgroundColor: _gold.withValues(
                               alpha: 0.35,
                             ),
@@ -5777,7 +5490,7 @@ class _ChatScreenState extends State<ChatScreen>
                                   height: 18,
                                   child: CircularProgressIndicator(
                                     strokeWidth: 2.2,
-                                    color: SpartanPalette.ink,
+                                    color: FenyvoPalette.ink,
                                   ),
                                 )
                               : const Icon(Icons.translate_rounded),
@@ -5826,7 +5539,7 @@ class _ChatScreenState extends State<ChatScreen>
                           width: double.infinity,
                           padding: const EdgeInsets.all(14),
                           decoration: BoxDecoration(
-                            color: SpartanPalette.surface,
+                            color: FenyvoPalette.surface,
                             borderRadius: BorderRadius.circular(16),
                             border: Border.all(
                               color: _gold.withValues(alpha: 0.55),
@@ -5841,7 +5554,7 @@ class _ChatScreenState extends State<ChatScreen>
                                 ? TextAlign.right
                                 : TextAlign.left,
                             style: const TextStyle(
-                              color: SpartanPalette.ink,
+                              color: FenyvoPalette.ink,
                               fontSize: 16,
                               height: 1.4,
                               fontWeight: FontWeight.w600,
@@ -5866,7 +5579,7 @@ class _ChatScreenState extends State<ChatScreen>
                                   content: Text(
                                     '\u041F\u0435\u0440\u0435\u0432\u043E\u0434 \u0441\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u043D',
                                   ),
-                                  backgroundColor: SpartanPalette.surface,
+                                  backgroundColor: FenyvoPalette.surface,
                                   duration: Duration(milliseconds: 1000),
                                 ),
                               );
@@ -5900,11 +5613,11 @@ class _ChatScreenState extends State<ChatScreen>
     );
   }
 
-  String _spartanAiRequestId(String suffix) {
+  String _fenyvoAiRequestId(String suffix) {
     return '${DateTime.now().microsecondsSinceEpoch}_${suffix.hashCode.abs()}';
   }
 
-  Future<Map<String, dynamic>> _waitForSpartanAiRequest({
+  Future<Map<String, dynamic>> _waitForFenyvoAiRequest({
     required String requestId,
     required void Function() sendRequest,
   }) async {
@@ -5916,7 +5629,7 @@ class _ChatScreenState extends State<ChatScreen>
 
     final completer = Completer<Map<String, dynamic>>();
 
-    _spartanAiCompleters[requestId] = completer;
+    _fenyvoAiCompleters[requestId] = completer;
 
     sendRequest();
 
@@ -5930,17 +5643,17 @@ class _ChatScreenState extends State<ChatScreen>
         },
       );
     } finally {
-      _spartanAiCompleters.remove(requestId);
+      _fenyvoAiCompleters.remove(requestId);
     }
   }
 
-  Future<List<Map<String, String>>> _getSpartanAiHistory() async {
-    final requestId = _spartanAiRequestId('history');
+  Future<List<Map<String, String>>> _getFenyvoAiHistory() async {
+    final requestId = _fenyvoAiRequestId('history');
 
-    final data = await _waitForSpartanAiRequest(
+    final data = await _waitForFenyvoAiRequest(
       requestId: requestId,
       sendRequest: () {
-        SocketService.instance.requestSpartanAiHistory(requestId: requestId);
+        SocketService.instance.requestFenyvoAiHistory(requestId: requestId);
       },
     );
 
@@ -5969,7 +5682,7 @@ class _ChatScreenState extends State<ChatScreen>
     return result;
   }
 
-  Future<String> _requestSpartanAi(String text) async {
+  Future<String> _requestFenyvoAi(String text) async {
     final cleanText = text.trim();
 
     if (cleanText.isEmpty) {
@@ -5978,12 +5691,12 @@ class _ChatScreenState extends State<ChatScreen>
       );
     }
 
-    final requestId = _spartanAiRequestId('ask');
+    final requestId = _fenyvoAiRequestId('ask');
 
-    final data = await _waitForSpartanAiRequest(
+    final data = await _waitForFenyvoAiRequest(
       requestId: requestId,
       sendRequest: () {
-        SocketService.instance.sendSpartanAiRequest(
+        SocketService.instance.sendFenyvoAiRequest(
           requestId: requestId,
           text: cleanText,
           peer: widget.targetUser,
@@ -6002,18 +5715,18 @@ class _ChatScreenState extends State<ChatScreen>
     return result;
   }
 
-  Future<void> _clearSpartanAi() async {
-    final requestId = _spartanAiRequestId('clear');
+  Future<void> _clearFenyvoAi() async {
+    final requestId = _fenyvoAiRequestId('clear');
 
-    await _waitForSpartanAiRequest(
+    await _waitForFenyvoAiRequest(
       requestId: requestId,
       sendRequest: () {
-        SocketService.instance.clearSpartanAiHistory(requestId: requestId);
+        SocketService.instance.clearFenyvoAiHistory(requestId: requestId);
       },
     );
   }
 
-  Future<void> _showSpartanAiSheet() async {
+  Future<void> _showFenyvoAiSheet() async {
     if (!mounted) {
       return;
     }
@@ -6022,7 +5735,7 @@ class _ChatScreenState extends State<ChatScreen>
     String? initialError;
 
     try {
-      messages = await _getSpartanAiHistory();
+      messages = await _getFenyvoAiHistory();
     } catch (error) {
       var text = error.toString();
       if (text.startsWith('Exception: ')) {
@@ -6081,7 +5794,7 @@ class _ChatScreenState extends State<ChatScreen>
               scrollToBottom();
 
               try {
-                final answer = await _requestSpartanAi(question);
+                final answer = await _requestFenyvoAi(question);
 
                 if (!sheetContext.mounted) {
                   return;
@@ -6121,7 +5834,7 @@ class _ChatScreenState extends State<ChatScreen>
               });
 
               try {
-                await _clearSpartanAi();
+                await _clearFenyvoAi();
 
                 if (!sheetContext.mounted) {
                   return;
@@ -6169,19 +5882,19 @@ class _ChatScreenState extends State<ChatScreen>
                     ),
                     decoration: BoxDecoration(
                       color: isUser
-                          ? SpartanPalette.blue.withValues(alpha: 0.20)
-                          : SpartanPalette.surface,
+                          ? FenyvoPalette.blue.withValues(alpha: 0.20)
+                          : FenyvoPalette.surface,
                       borderRadius: BorderRadius.circular(18),
                       border: Border.all(
                         color: isUser
                             ? _gold.withValues(alpha: 0.70)
-                            : SpartanPalette.line,
+                            : FenyvoPalette.line,
                       ),
                     ),
                     child: SelectableText(
                       text,
                       style: const TextStyle(
-                        color: SpartanPalette.ink,
+                        color: FenyvoPalette.ink,
                         fontSize: 15,
                         height: 1.35,
                       ),
@@ -6202,7 +5915,7 @@ class _ChatScreenState extends State<ChatScreen>
                   heightFactor: 0.94,
                   child: Container(
                     decoration: BoxDecoration(
-                      color: SpartanPalette.surface,
+                      color: FenyvoPalette.surface,
                       borderRadius: BorderRadius.circular(28),
                       border: Border.all(color: _gold.withValues(alpha: 0.45)),
                       boxShadow: [
@@ -6219,7 +5932,7 @@ class _ChatScreenState extends State<ChatScreen>
                           height: 4,
                           margin: const EdgeInsets.only(top: 10),
                           decoration: BoxDecoration(
-                            color: SpartanPalette.line,
+                            color: FenyvoPalette.line,
                             borderRadius: BorderRadius.circular(10),
                           ),
                         ),
@@ -6232,7 +5945,7 @@ class _ChatScreenState extends State<ChatScreen>
                                 height: 44,
                                 decoration: BoxDecoration(
                                   shape: BoxShape.circle,
-                                  color: SpartanPalette.blue.withValues(
+                                  color: FenyvoPalette.blue.withValues(
                                     alpha: 0.15,
                                   ),
                                   border: Border.all(color: _gold),
@@ -6250,7 +5963,7 @@ class _ChatScreenState extends State<ChatScreen>
                                     const Text(
                                       'FENYVO AI',
                                       style: TextStyle(
-                                        color: SpartanPalette.ink,
+                                        color: FenyvoPalette.ink,
                                         fontSize: 20,
                                         fontWeight: FontWeight.w800,
                                       ),
@@ -6259,7 +5972,7 @@ class _ChatScreenState extends State<ChatScreen>
                                     Text(
                                       _chatText('aiAssistantSubtitle'),
                                       style: const TextStyle(
-                                        color: SpartanPalette.secondary,
+                                        color: FenyvoPalette.secondary,
                                         fontSize: 12,
                                       ),
                                     ),
@@ -6275,7 +5988,7 @@ class _ChatScreenState extends State<ChatScreen>
                                       },
                                 icon: const Icon(
                                   Icons.delete_outline_rounded,
-                                  color: SpartanPalette.secondary,
+                                  color: FenyvoPalette.secondary,
                                 ),
                               ),
                               IconButton(
@@ -6284,13 +5997,13 @@ class _ChatScreenState extends State<ChatScreen>
                                 },
                                 icon: const Icon(
                                   Icons.close_rounded,
-                                  color: SpartanPalette.secondary,
+                                  color: FenyvoPalette.secondary,
                                 ),
                               ),
                             ],
                           ),
                         ),
-                        const Divider(height: 1, color: SpartanPalette.line),
+                        const Divider(height: 1, color: FenyvoPalette.line),
                         Expanded(
                           child: messages.isEmpty
                               ? Center(
@@ -6309,7 +6022,7 @@ class _ChatScreenState extends State<ChatScreen>
                                           _chatText('askAiAnything'),
                                           textAlign: TextAlign.center,
                                           style: const TextStyle(
-                                            color: SpartanPalette.ink,
+                                            color: FenyvoPalette.ink,
                                             fontSize: 18,
                                             fontWeight: FontWeight.w700,
                                           ),
@@ -6319,7 +6032,7 @@ class _ChatScreenState extends State<ChatScreen>
                                           _chatText('aiEmptyDescription'),
                                           textAlign: TextAlign.center,
                                           style: const TextStyle(
-                                            color: SpartanPalette.secondary,
+                                            color: FenyvoPalette.secondary,
                                             fontSize: 13,
                                             height: 1.4,
                                           ),
@@ -6364,7 +6077,7 @@ class _ChatScreenState extends State<ChatScreen>
                                                 'FENYVO AI...',
                                                 style: TextStyle(
                                                   color:
-                                                      SpartanPalette.secondary,
+                                                      FenyvoPalette.secondary,
                                                 ),
                                               ),
                                             ],
@@ -6410,15 +6123,15 @@ class _ChatScreenState extends State<ChatScreen>
                                   maxLines: 5,
                                   textInputAction: TextInputAction.newline,
                                   style: const TextStyle(
-                                    color: SpartanPalette.ink,
+                                    color: FenyvoPalette.ink,
                                   ),
                                   decoration: InputDecoration(
                                     hintText: _chatText('askQuestionHint'),
                                     hintStyle: const TextStyle(
-                                      color: SpartanPalette.muted,
+                                      color: FenyvoPalette.muted,
                                     ),
                                     filled: true,
-                                    fillColor: SpartanPalette.surface,
+                                    fillColor: FenyvoPalette.surface,
                                     contentPadding: const EdgeInsets.symmetric(
                                       horizontal: 16,
                                       vertical: 12,
@@ -6453,8 +6166,8 @@ class _ChatScreenState extends State<ChatScreen>
                                           unawaited(sendQuestion());
                                         },
                                   style: FilledButton.styleFrom(
-                                    backgroundColor: SpartanPalette.blue,
-                                    foregroundColor: SpartanPalette.ink,
+                                    backgroundColor: FenyvoPalette.blue,
+                                    foregroundColor: FenyvoPalette.ink,
                                     padding: EdgeInsets.zero,
                                     shape: const CircleBorder(),
                                   ),
@@ -6469,7 +6182,7 @@ class _ChatScreenState extends State<ChatScreen>
                           child: Text(
                             _chatText('aiDisclaimer'),
                             style: const TextStyle(
-                              color: SpartanPalette.muted,
+                              color: FenyvoPalette.muted,
                               fontSize: 10,
                             ),
                           ),
@@ -6622,11 +6335,11 @@ class _ChatScreenState extends State<ChatScreen>
                       },
                 style: OutlinedButton.styleFrom(
                   foregroundColor: selected
-                      ? SpartanPalette.ink
-                      : SpartanPalette.ink,
+                      ? FenyvoPalette.ink
+                      : FenyvoPalette.ink,
                   backgroundColor: selected
-                      ? SpartanPalette.blue
-                      : SpartanPalette.surface,
+                      ? FenyvoPalette.blue
+                      : FenyvoPalette.surface,
                   side: BorderSide(
                     color: selected ? _gold : _gold.withValues(alpha: 0.45),
                   ),
@@ -6656,7 +6369,7 @@ class _ChatScreenState extends State<ChatScreen>
                   maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.90,
                 ),
                 decoration: const BoxDecoration(
-                  color: SpartanPalette.surface,
+                  color: FenyvoPalette.surface,
                   borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
                   border: Border(top: BorderSide(color: _gold, width: 1.2)),
                 ),
@@ -6670,7 +6383,7 @@ class _ChatScreenState extends State<ChatScreen>
                           width: 42,
                           height: 4,
                           decoration: BoxDecoration(
-                            color: SpartanPalette.line,
+                            color: FenyvoPalette.line,
                             borderRadius: BorderRadius.circular(3),
                           ),
                         ),
@@ -6684,7 +6397,7 @@ class _ChatScreenState extends State<ChatScreen>
                             child: Text(
                               'ChatGPT \u0434\u043B\u044F \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F',
                               style: TextStyle(
-                                color: SpartanPalette.ink,
+                                color: FenyvoPalette.ink,
                                 fontSize: 18,
                                 fontWeight: FontWeight.w800,
                               ),
@@ -6707,7 +6420,7 @@ class _ChatScreenState extends State<ChatScreen>
                         width: double.infinity,
                         padding: const EdgeInsets.all(14),
                         decoration: BoxDecoration(
-                          color: SpartanPalette.surface,
+                          color: FenyvoPalette.surface,
                           borderRadius: BorderRadius.circular(16),
                           border: Border.all(
                             color: _gold.withValues(alpha: 0.30),
@@ -6716,7 +6429,7 @@ class _ChatScreenState extends State<ChatScreen>
                         child: SelectableText(
                           originalText,
                           style: const TextStyle(
-                            color: SpartanPalette.ink,
+                            color: FenyvoPalette.ink,
                             fontSize: 15,
                             height: 1.35,
                           ),
@@ -6761,8 +6474,8 @@ class _ChatScreenState extends State<ChatScreen>
                         child: FilledButton.icon(
                           onPressed: isLoading ? null : performAction,
                           style: FilledButton.styleFrom(
-                            backgroundColor: SpartanPalette.blue,
-                            foregroundColor: SpartanPalette.ink,
+                            backgroundColor: FenyvoPalette.blue,
+                            foregroundColor: FenyvoPalette.ink,
                             disabledBackgroundColor: _gold.withValues(
                               alpha: 0.35,
                             ),
@@ -6777,7 +6490,7 @@ class _ChatScreenState extends State<ChatScreen>
                                   height: 18,
                                   child: CircularProgressIndicator(
                                     strokeWidth: 2.2,
-                                    color: SpartanPalette.ink,
+                                    color: FenyvoPalette.ink,
                                   ),
                                 )
                               : const Icon(Icons.auto_awesome_rounded),
@@ -6826,7 +6539,7 @@ class _ChatScreenState extends State<ChatScreen>
                           width: double.infinity,
                           padding: const EdgeInsets.all(14),
                           decoration: BoxDecoration(
-                            color: SpartanPalette.surface,
+                            color: FenyvoPalette.surface,
                             borderRadius: BorderRadius.circular(16),
                             border: Border.all(
                               color: _gold.withValues(alpha: 0.55),
@@ -6835,7 +6548,7 @@ class _ChatScreenState extends State<ChatScreen>
                           child: SelectableText(
                             resultText,
                             style: const TextStyle(
-                              color: SpartanPalette.ink,
+                              color: FenyvoPalette.ink,
                               fontSize: 16,
                               height: 1.4,
                               fontWeight: FontWeight.w600,
@@ -6863,7 +6576,7 @@ class _ChatScreenState extends State<ChatScreen>
                                       content: Text(
                                         '\u041E\u0442\u0432\u0435\u0442 ChatGPT \u0441\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u043D',
                                       ),
-                                      backgroundColor: SpartanPalette.surface,
+                                      backgroundColor: FenyvoPalette.surface,
                                       duration: Duration(milliseconds: 1000),
                                     ),
                                   );
@@ -6907,8 +6620,8 @@ class _ChatScreenState extends State<ChatScreen>
                                   _messageFocusNode.requestFocus();
                                 },
                                 style: FilledButton.styleFrom(
-                                  backgroundColor: SpartanPalette.blue,
-                                  foregroundColor: SpartanPalette.ink,
+                                  backgroundColor: FenyvoPalette.blue,
+                                  foregroundColor: FenyvoPalette.ink,
                                   padding: const EdgeInsets.symmetric(
                                     vertical: 12,
                                   ),
@@ -6930,7 +6643,7 @@ class _ChatScreenState extends State<ChatScreen>
                       Text(
                         '\u0422\u0435\u043A\u0441\u0442 \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u044F\u0435\u0442\u0441\u044F \u0432 ChatGPT \u0442\u043E\u043B\u044C\u043A\u043E \u043F\u043E\u0441\u043B\u0435 \u0432\u044B\u0431\u043E\u0440\u0430 \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u044F.',
                         style: TextStyle(
-                          color: SpartanPalette.ink.withValues(alpha: 0.45),
+                          color: FenyvoPalette.ink.withValues(alpha: 0.45),
                           fontSize: 11,
                           height: 1.3,
                         ),
@@ -7009,7 +6722,7 @@ class _ChatScreenState extends State<ChatScreen>
         child: Text(
           text,
           style: const TextStyle(
-            color: SpartanPalette.ink,
+            color: FenyvoPalette.ink,
             fontSize: 14,
             fontWeight: FontWeight.w800,
           ),
@@ -7020,13 +6733,13 @@ class _ChatScreenState extends State<ChatScreen>
     InputDecoration inputDecoration(String hint) {
       return InputDecoration(
         hintText: hint,
-        hintStyle: const TextStyle(color: SpartanPalette.muted),
+        hintStyle: const TextStyle(color: FenyvoPalette.muted),
         filled: true,
-        fillColor: SpartanPalette.surface,
-        counterStyle: const TextStyle(color: SpartanPalette.muted),
+        fillColor: FenyvoPalette.surface,
+        counterStyle: const TextStyle(color: FenyvoPalette.muted),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: SpartanPalette.line),
+          borderSide: const BorderSide(color: FenyvoPalette.line),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(14),
@@ -7051,7 +6764,7 @@ class _ChatScreenState extends State<ChatScreen>
               child: Container(
                 constraints: const BoxConstraints(maxWidth: 620),
                 decoration: const BoxDecoration(
-                  color: SpartanPalette.canvas,
+                  color: FenyvoPalette.canvas,
                   borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
                 ),
                 child: SingleChildScrollView(
@@ -7065,7 +6778,7 @@ class _ChatScreenState extends State<ChatScreen>
                           width: 44,
                           height: 4,
                           decoration: BoxDecoration(
-                            color: SpartanPalette.line,
+                            color: FenyvoPalette.line,
                             borderRadius: BorderRadius.circular(99),
                           ),
                         ),
@@ -7077,7 +6790,7 @@ class _ChatScreenState extends State<ChatScreen>
                             width: 44,
                             height: 44,
                             decoration: BoxDecoration(
-                              color: SpartanPalette.blue.withValues(
+                              color: FenyvoPalette.blue.withValues(
                                 alpha: 0.12,
                               ),
                               shape: BoxShape.circle,
@@ -7098,7 +6811,7 @@ class _ChatScreenState extends State<ChatScreen>
                                 Text(
                                   _chatText('aiAutoTitle'),
                                   style: const TextStyle(
-                                    color: SpartanPalette.ink,
+                                    color: FenyvoPalette.ink,
                                     fontSize: 18,
                                     fontWeight: FontWeight.w800,
                                   ),
@@ -7109,7 +6822,7 @@ class _ChatScreenState extends State<ChatScreen>
                                     'user': widget.targetUser,
                                   }),
                                   style: const TextStyle(
-                                    color: SpartanPalette.secondary,
+                                    color: FenyvoPalette.secondary,
                                     fontSize: 12,
                                   ),
                                 ),
@@ -7121,12 +6834,12 @@ class _ChatScreenState extends State<ChatScreen>
                       const SizedBox(height: 18),
                       Container(
                         decoration: BoxDecoration(
-                          color: SpartanPalette.surface,
+                          color: FenyvoPalette.surface,
                           borderRadius: BorderRadius.circular(16),
                           border: Border.all(
                             color: enabled
                                 ? _gold.withValues(alpha: 0.55)
-                                : SpartanPalette.line,
+                                : FenyvoPalette.line,
                           ),
                         ),
                         child: SwitchListTile.adaptive(
@@ -7165,14 +6878,14 @@ class _ChatScreenState extends State<ChatScreen>
                                 ? _chatText('autoReplyEnabled')
                                 : _chatText('autoReplyDisabled'),
                             style: const TextStyle(
-                              color: SpartanPalette.ink,
+                              color: FenyvoPalette.ink,
                               fontWeight: FontWeight.w700,
                             ),
                           ),
                           subtitle: Text(
                             _chatText('autoReplyDescription'),
                             style: const TextStyle(
-                              color: SpartanPalette.secondary,
+                              color: FenyvoPalette.secondary,
                               fontSize: 12,
                             ),
                           ),
@@ -7216,14 +6929,14 @@ class _ChatScreenState extends State<ChatScreen>
                                   });
                                 },
                                 selectedColor: _gold,
-                                backgroundColor: SpartanPalette.surface,
+                                backgroundColor: FenyvoPalette.surface,
                                 side: BorderSide(
-                                  color: selected ? _gold : SpartanPalette.line,
+                                  color: selected ? _gold : FenyvoPalette.line,
                                 ),
                                 labelStyle: TextStyle(
                                   color: selected
-                                      ? SpartanPalette.ink
-                                      : SpartanPalette.secondary,
+                                      ? FenyvoPalette.ink
+                                      : FenyvoPalette.secondary,
                                   fontWeight: FontWeight.w700,
                                 ),
                                 showCheckmark: false,
@@ -7240,7 +6953,7 @@ class _ChatScreenState extends State<ChatScreen>
                             ? '\u{1F3AF} ${_chatText('modeUntilGoalDescription')}'
                             : '\u26A1 ${_chatText('modeAutoDescription')}',
                         style: const TextStyle(
-                          color: SpartanPalette.secondary,
+                          color: FenyvoPalette.secondary,
                           fontSize: 12,
                           height: 1.35,
                         ),
@@ -7268,14 +6981,14 @@ class _ChatScreenState extends State<ChatScreen>
                                 });
                               },
                               selectedColor: _gold,
-                              backgroundColor: SpartanPalette.surface,
+                              backgroundColor: FenyvoPalette.surface,
                               side: BorderSide(
-                                color: selected ? _gold : SpartanPalette.line,
+                                color: selected ? _gold : FenyvoPalette.line,
                               ),
                               labelStyle: TextStyle(
                                 color: selected
-                                    ? SpartanPalette.ink
-                                    : SpartanPalette.secondary,
+                                    ? FenyvoPalette.ink
+                                    : FenyvoPalette.secondary,
                                 fontWeight: FontWeight.w700,
                               ),
                               showCheckmark: false,
@@ -7290,7 +7003,7 @@ class _ChatScreenState extends State<ChatScreen>
                         maxLength: 500,
                         minLines: 2,
                         maxLines: 5,
-                        style: const TextStyle(color: SpartanPalette.ink),
+                        style: const TextStyle(color: FenyvoPalette.ink),
                         decoration: inputDecoration(
                           _chatText('conversationGoalHint'),
                         ),
@@ -7302,7 +7015,7 @@ class _ChatScreenState extends State<ChatScreen>
                         maxLength: 600,
                         minLines: 2,
                         maxLines: 5,
-                        style: const TextStyle(color: SpartanPalette.ink),
+                        style: const TextStyle(color: FenyvoPalette.ink),
                         decoration: inputDecoration(
                           _chatText('conversationStyleHint'),
                         ),
@@ -7314,7 +7027,7 @@ class _ChatScreenState extends State<ChatScreen>
                         maxLength: 800,
                         minLines: 2,
                         maxLines: 6,
-                        style: const TextStyle(color: SpartanPalette.ink),
+                        style: const TextStyle(color: FenyvoPalette.ink),
                         decoration: inputDecoration(_chatText('aiContextHint')),
                       ),
                       const SizedBox(height: 6),
@@ -7324,7 +7037,7 @@ class _ChatScreenState extends State<ChatScreen>
                         maxLength: 500,
                         minLines: 2,
                         maxLines: 5,
-                        style: const TextStyle(color: SpartanPalette.ink),
+                        style: const TextStyle(color: FenyvoPalette.ink),
                         decoration: inputDecoration(
                           _chatText('aiBoundariesHint'),
                         ),
@@ -7348,14 +7061,14 @@ class _ChatScreenState extends State<ChatScreen>
                               });
                             },
                             selectedColor: _gold,
-                            backgroundColor: SpartanPalette.surface,
+                            backgroundColor: FenyvoPalette.surface,
                             side: BorderSide(
-                              color: selected ? _gold : SpartanPalette.line,
+                              color: selected ? _gold : FenyvoPalette.line,
                             ),
                             labelStyle: TextStyle(
                               color: selected
-                                  ? SpartanPalette.ink
-                                  : SpartanPalette.secondary,
+                                  ? FenyvoPalette.ink
+                                  : FenyvoPalette.secondary,
                               fontWeight: FontWeight.w700,
                             ),
                             showCheckmark: false,
@@ -7366,7 +7079,7 @@ class _ChatScreenState extends State<ChatScreen>
                       Container(
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: SpartanPalette.blue.withValues(alpha: 0.07),
+                          color: FenyvoPalette.blue.withValues(alpha: 0.07),
                           borderRadius: BorderRadius.circular(13),
                           border: Border.all(
                             color: _gold.withValues(alpha: 0.20),
@@ -7385,7 +7098,7 @@ class _ChatScreenState extends State<ChatScreen>
                               child: Text(
                                 _chatText('autoReplyMemoryInfo'),
                                 style: const TextStyle(
-                                  color: SpartanPalette.secondary,
+                                  color: FenyvoPalette.secondary,
                                   fontSize: 12,
                                   height: 1.35,
                                 ),
@@ -7404,8 +7117,8 @@ class _ChatScreenState extends State<ChatScreen>
                             );
                           },
                           style: OutlinedButton.styleFrom(
-                            foregroundColor: SpartanPalette.secondary,
-                            side: const BorderSide(color: SpartanPalette.line),
+                            foregroundColor: FenyvoPalette.secondary,
+                            side: const BorderSide(color: FenyvoPalette.line),
                             padding: const EdgeInsets.symmetric(vertical: 12),
                           ),
                           icon: const Icon(Icons.restart_alt_rounded),
@@ -7463,8 +7176,8 @@ class _ChatScreenState extends State<ChatScreen>
                             Navigator.of(sheetContext).pop();
                           },
                           style: FilledButton.styleFrom(
-                            backgroundColor: SpartanPalette.blue,
-                            foregroundColor: SpartanPalette.ink,
+                            backgroundColor: FenyvoPalette.blue,
+                            foregroundColor: FenyvoPalette.ink,
                             padding: const EdgeInsets.symmetric(vertical: 14),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(15),
@@ -7556,7 +7269,7 @@ class _ChatScreenState extends State<ChatScreen>
                 top: false,
                 child: Container(
                   decoration: const BoxDecoration(
-                    color: SpartanPalette.surface,
+                    color: FenyvoPalette.surface,
                     borderRadius: BorderRadius.vertical(
                       top: Radius.circular(24),
                     ),
@@ -7571,7 +7284,7 @@ class _ChatScreenState extends State<ChatScreen>
                           width: 42,
                           height: 4,
                           decoration: BoxDecoration(
-                            color: SpartanPalette.line,
+                            color: FenyvoPalette.line,
                             borderRadius: BorderRadius.circular(3),
                           ),
                         ),
@@ -7584,7 +7297,7 @@ class _ChatScreenState extends State<ChatScreen>
                           Text(
                             '\u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435',
                             style: TextStyle(
-                              color: SpartanPalette.ink,
+                              color: FenyvoPalette.ink,
                               fontSize: 18,
                               fontWeight: FontWeight.w700,
                             ),
@@ -7600,7 +7313,7 @@ class _ChatScreenState extends State<ChatScreen>
                         maxLength: 4000,
                         textCapitalization: TextCapitalization.sentences,
                         style: const TextStyle(
-                          color: SpartanPalette.ink,
+                          color: FenyvoPalette.ink,
                           fontSize: 16,
                         ),
                         cursorColor: _gold,
@@ -7617,13 +7330,13 @@ class _ChatScreenState extends State<ChatScreen>
                         decoration: InputDecoration(
                           hintText: '\u0422\u0435\u043A\u0441\u0442 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F',
                           hintStyle: const TextStyle(
-                            color: SpartanPalette.muted,
+                            color: FenyvoPalette.muted,
                           ),
                           counterStyle: const TextStyle(
-                            color: SpartanPalette.muted,
+                            color: FenyvoPalette.muted,
                           ),
                           filled: true,
-                          fillColor: SpartanPalette.surface,
+                          fillColor: FenyvoPalette.surface,
                           prefixIcon: const Icon(
                             Icons.chat_bubble_outline_rounded,
                             color: _gold,
@@ -7655,10 +7368,10 @@ class _ChatScreenState extends State<ChatScreen>
                                 }
                               : null,
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: SpartanPalette.blue,
-                            foregroundColor: SpartanPalette.ink,
-                            disabledBackgroundColor: SpartanPalette.surface,
-                            disabledForegroundColor: SpartanPalette.muted,
+                            backgroundColor: FenyvoPalette.blue,
+                            foregroundColor: FenyvoPalette.ink,
+                            disabledBackgroundColor: FenyvoPalette.surface,
+                            disabledForegroundColor: FenyvoPalette.muted,
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(16),
                             ),
@@ -7714,7 +7427,7 @@ class _ChatScreenState extends State<ChatScreen>
           top: false,
           child: Container(
             decoration: BoxDecoration(
-              color: SpartanPalette.surface,
+              color: FenyvoPalette.surface,
               borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
             ),
             padding: const EdgeInsets.fromLTRB(18, 10, 18, 18),
@@ -7725,7 +7438,7 @@ class _ChatScreenState extends State<ChatScreen>
                   width: 42,
                   height: 4,
                   decoration: BoxDecoration(
-                    color: SpartanPalette.line,
+                    color: FenyvoPalette.line,
                     borderRadius: BorderRadius.circular(3),
                   ),
                 ),
@@ -7742,7 +7455,7 @@ class _ChatScreenState extends State<ChatScreen>
                       child: Text(
                         '\u0423\u0434\u0430\u043B\u0438\u0442\u044C \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435?',
                         style: TextStyle(
-                          color: SpartanPalette.ink,
+                          color: FenyvoPalette.ink,
                           fontSize: 18,
                           fontWeight: FontWeight.w700,
                         ),
@@ -7756,7 +7469,7 @@ class _ChatScreenState extends State<ChatScreen>
                   child: Text(
                     '\u041E\u043D\u043E \u0438\u0441\u0447\u0435\u0437\u043D\u0435\u0442 \u0442\u043E\u043B\u044C\u043A\u043E \u0443 \u0432\u0430\u0441. \u0423 \u0441\u043E\u0431\u0435\u0441\u0435\u0434\u043D\u0438\u043A\u0430 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435 \u043E\u0441\u0442\u0430\u043D\u0435\u0442\u0441\u044F.',
                     style: TextStyle(
-                      color: SpartanPalette.secondary,
+                      color: FenyvoPalette.secondary,
                       fontSize: 13,
                       height: 1.35,
                     ),
@@ -7771,7 +7484,7 @@ class _ChatScreenState extends State<ChatScreen>
                           Navigator.of(sheetContext).pop(false);
                         },
                         style: OutlinedButton.styleFrom(
-                          foregroundColor: SpartanPalette.ink,
+                          foregroundColor: FenyvoPalette.ink,
                           side: BorderSide(
                             color: _gold.withValues(alpha: 0.55),
                           ),
@@ -7797,7 +7510,7 @@ class _ChatScreenState extends State<ChatScreen>
                         ),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: const Color(0xFFFF4D4D),
-                          foregroundColor: SpartanPalette.ink,
+                          foregroundColor: FenyvoPalette.ink,
                           minimumSize: const Size(0, 48),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(14),
@@ -7851,7 +7564,7 @@ class _ChatScreenState extends State<ChatScreen>
         content: Text(
           '\u0421\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435 \u0443\u0434\u0430\u043B\u0435\u043D\u043E \u0443 \u0432\u0430\u0441',
         ),
-        backgroundColor: SpartanPalette.surface,
+        backgroundColor: FenyvoPalette.surface,
         duration: Duration(milliseconds: 1100),
       ),
     );
@@ -7880,7 +7593,7 @@ class _ChatScreenState extends State<ChatScreen>
           top: false,
           child: Container(
             decoration: BoxDecoration(
-              color: SpartanPalette.surface,
+              color: FenyvoPalette.surface,
               borderRadius: const BorderRadius.vertical(
                 top: Radius.circular(24),
               ),
@@ -7897,7 +7610,7 @@ class _ChatScreenState extends State<ChatScreen>
                   width: 42,
                   height: 4,
                   decoration: BoxDecoration(
-                    color: SpartanPalette.line,
+                    color: FenyvoPalette.line,
                     borderRadius: BorderRadius.circular(3),
                   ),
                 ),
@@ -7914,7 +7627,7 @@ class _ChatScreenState extends State<ChatScreen>
                       child: Text(
                         '\u0423\u0434\u0430\u043B\u0438\u0442\u044C \u0431\u0435\u0437 \u0441\u043B\u0435\u0434\u043E\u0432?',
                         style: TextStyle(
-                          color: SpartanPalette.ink,
+                          color: FenyvoPalette.ink,
                           fontSize: 18,
                           fontWeight: FontWeight.w700,
                         ),
@@ -7928,7 +7641,7 @@ class _ChatScreenState extends State<ChatScreen>
                   child: Text(
                     '\u0421\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435 \u0438\u0441\u0447\u0435\u0437\u043D\u0435\u0442 \u0443 \u0432\u0430\u0441 \u0438 \u0443 ${widget.targetUser}. \u0412\u043E\u0441\u0441\u0442\u0430\u043D\u043E\u0432\u0438\u0442\u044C \u0435\u0433\u043E \u0431\u0443\u0434\u0435\u0442 \u043D\u0435\u043B\u044C\u0437\u044F.',
                     style: const TextStyle(
-                      color: SpartanPalette.secondary,
+                      color: FenyvoPalette.secondary,
                       fontSize: 13,
                       height: 1.35,
                     ),
@@ -7943,7 +7656,7 @@ class _ChatScreenState extends State<ChatScreen>
                           Navigator.of(sheetContext).pop(false);
                         },
                         style: OutlinedButton.styleFrom(
-                          foregroundColor: SpartanPalette.ink,
+                          foregroundColor: FenyvoPalette.ink,
                           side: BorderSide(
                             color: _gold.withValues(alpha: 0.55),
                           ),
@@ -7969,7 +7682,7 @@ class _ChatScreenState extends State<ChatScreen>
                         ),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: const Color(0xFFFF4D4D),
-                          foregroundColor: SpartanPalette.ink,
+                          foregroundColor: FenyvoPalette.ink,
                           minimumSize: const Size(0, 48),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(14),
@@ -8117,7 +7830,7 @@ class _ChatScreenState extends State<ChatScreen>
               ? 'Сообщение переслано'
               : 'Отправлено получателям: ${recipients.length}',
         ),
-        backgroundColor: SpartanPalette.surface,
+        backgroundColor: FenyvoPalette.surface,
       ),
     );
   }
@@ -8157,7 +7870,7 @@ class _ChatScreenState extends State<ChatScreen>
           content: Text(
             '\u041D\u0435\u0442 \u0434\u0440\u0443\u0433\u0438\u0445 \u0447\u0430\u0442\u043E\u0432 \u0434\u043B\u044F \u043F\u0435\u0440\u0435\u0441\u044B\u043B\u043A\u0438',
           ),
-          backgroundColor: SpartanPalette.surface,
+          backgroundColor: FenyvoPalette.surface,
         ),
       );
 
@@ -8205,7 +7918,7 @@ class _ChatScreenState extends State<ChatScreen>
                     maxHeight: (screenHeight - keyboardHeight) * 0.92,
                   ),
                   decoration: const BoxDecoration(
-                    color: SpartanPalette.surface,
+                    color: FenyvoPalette.surface,
                     borderRadius: BorderRadius.vertical(
                       top: Radius.circular(24),
                     ),
@@ -8218,7 +7931,7 @@ class _ChatScreenState extends State<ChatScreen>
                         width: 42,
                         height: 4,
                         decoration: BoxDecoration(
-                          color: SpartanPalette.line,
+                          color: FenyvoPalette.line,
                           borderRadius: BorderRadius.circular(3),
                         ),
                       ),
@@ -8231,7 +7944,7 @@ class _ChatScreenState extends State<ChatScreen>
                             Text(
                               '\u041F\u0435\u0440\u0435\u0441\u043B\u0430\u0442\u044C \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435',
                               style: TextStyle(
-                                color: SpartanPalette.ink,
+                                color: FenyvoPalette.ink,
                                 fontSize: 18,
                                 fontWeight: FontWeight.w700,
                               ),
@@ -8249,11 +7962,11 @@ class _ChatScreenState extends State<ChatScreen>
                               searchQuery = value.trim().toLowerCase();
                             });
                           },
-                          style: const TextStyle(color: SpartanPalette.ink),
+                          style: const TextStyle(color: FenyvoPalette.ink),
                           decoration: InputDecoration(
                             hintText: '\u041F\u043E\u0438\u0441\u043A \u043A\u043E\u043D\u0442\u0430\u043A\u0442\u0430',
                             hintStyle: const TextStyle(
-                              color: SpartanPalette.muted,
+                              color: FenyvoPalette.muted,
                             ),
                             prefixIcon: const Icon(
                               Icons.search_rounded,
@@ -8270,11 +7983,11 @@ class _ChatScreenState extends State<ChatScreen>
                                     },
                                     icon: const Icon(
                                       Icons.close,
-                                      color: SpartanPalette.secondary,
+                                      color: FenyvoPalette.secondary,
                                     ),
                                   ),
                             filled: true,
-                            fillColor: SpartanPalette.surface,
+                            fillColor: FenyvoPalette.surface,
                             contentPadding: const EdgeInsets.symmetric(
                               horizontal: 14,
                               vertical: 12,
@@ -8306,10 +8019,10 @@ class _ChatScreenState extends State<ChatScreen>
                                     child: InputChip(
                                       label: Text(user),
                                       labelStyle: const TextStyle(
-                                        color: SpartanPalette.ink,
+                                        color: FenyvoPalette.ink,
                                         fontWeight: FontWeight.w600,
                                       ),
-                                      backgroundColor: SpartanPalette.blue,
+                                      backgroundColor: FenyvoPalette.blue,
                                       deleteIconColor: Colors.black,
                                       side: BorderSide.none,
                                       onDeleted: () {
@@ -8344,7 +8057,7 @@ class _ChatScreenState extends State<ChatScreen>
 
                             return ListTile(
                               leading: CircleAvatar(
-                                backgroundColor: SpartanPalette.surface,
+                                backgroundColor: FenyvoPalette.surface,
                                 backgroundImage: imageProvider,
                                 child: imageProvider == null
                                     ? Text(
@@ -8361,7 +8074,7 @@ class _ChatScreenState extends State<ChatScreen>
                               title: Text(
                                 user,
                                 style: const TextStyle(
-                                  color: SpartanPalette.ink,
+                                  color: FenyvoPalette.ink,
                                   fontWeight: FontWeight.w600,
                                 ),
                               ),
@@ -8371,7 +8084,7 @@ class _ChatScreenState extends State<ChatScreen>
                                 height: 27,
                                 decoration: BoxDecoration(
                                   color: selectedUsers.contains(user)
-                                      ? SpartanPalette.blue
+                                      ? FenyvoPalette.blue
                                       : Colors.transparent,
                                   shape: BoxShape.circle,
                                   border: Border.all(color: _gold, width: 1.3),
@@ -8379,7 +8092,7 @@ class _ChatScreenState extends State<ChatScreen>
                                 child: selectedUsers.contains(user)
                                     ? const Icon(
                                         Icons.check,
-                                        color: SpartanPalette.ink,
+                                        color: FenyvoPalette.ink,
                                         size: 18,
                                       )
                                     : null,
@@ -8401,7 +8114,7 @@ class _ChatScreenState extends State<ChatScreen>
                         margin: const EdgeInsets.fromLTRB(16, 10, 16, 8),
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
-                          color: SpartanPalette.surface,
+                          color: FenyvoPalette.surface,
                           borderRadius: BorderRadius.circular(14),
                           border: Border.all(
                             color: _gold.withValues(alpha: 0.35),
@@ -8426,7 +8139,7 @@ class _ChatScreenState extends State<ChatScreen>
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
-                                color: SpartanPalette.secondary,
+                                color: FenyvoPalette.secondary,
                                 fontSize: 12,
                               ),
                             ),
@@ -8439,18 +8152,18 @@ class _ChatScreenState extends State<ChatScreen>
                           controller: commentController,
                           minLines: 1,
                           maxLines: 3,
-                          style: const TextStyle(color: SpartanPalette.ink),
+                          style: const TextStyle(color: FenyvoPalette.ink),
                           decoration: InputDecoration(
                             hintText: '\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u043A\u043E\u043C\u043C\u0435\u043D\u0442\u0430\u0440\u0438\u0439\u2026',
                             hintStyle: const TextStyle(
-                              color: SpartanPalette.muted,
+                              color: FenyvoPalette.muted,
                             ),
                             prefixIcon: const Icon(
                               Icons.chat_bubble_outline_rounded,
                               color: _gold,
                             ),
                             filled: true,
-                            fillColor: SpartanPalette.surface,
+                            fillColor: FenyvoPalette.surface,
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(16),
                               borderSide: BorderSide.none,
@@ -8498,10 +8211,10 @@ class _ChatScreenState extends State<ChatScreen>
                                   : '\u041E\u0442\u043F\u0440\u0430\u0432\u0438\u0442\u044C (${selectedUsers.length})',
                             ),
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: SpartanPalette.blue,
-                              foregroundColor: SpartanPalette.ink,
-                              disabledBackgroundColor: SpartanPalette.surface,
-                              disabledForegroundColor: SpartanPalette.muted,
+                              backgroundColor: FenyvoPalette.blue,
+                              foregroundColor: FenyvoPalette.ink,
+                              disabledBackgroundColor: FenyvoPalette.surface,
+                              disabledForegroundColor: FenyvoPalette.muted,
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(16),
                               ),
@@ -8545,7 +8258,7 @@ class _ChatScreenState extends State<ChatScreen>
         height: 40,
         alignment: Alignment.center,
         child: icon != null
-            ? Icon(icon, color: iconColor ?? SpartanPalette.ink, size: 26)
+            ? Icon(icon, color: iconColor ?? FenyvoPalette.ink, size: 26)
             : Text(emoji ?? '', style: const TextStyle(fontSize: 24)),
       ),
     );
@@ -8575,7 +8288,7 @@ class _ChatScreenState extends State<ChatScreen>
           child: Container(
             height: sheetHeight,
             decoration: const BoxDecoration(
-              color: SpartanPalette.surface,
+              color: FenyvoPalette.surface,
               borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
               border: Border(top: BorderSide(color: _gold, width: 1.2)),
             ),
@@ -8586,7 +8299,7 @@ class _ChatScreenState extends State<ChatScreen>
                   width: 42,
                   height: 4,
                   decoration: BoxDecoration(
-                    color: SpartanPalette.line,
+                    color: FenyvoPalette.line,
                     borderRadius: BorderRadius.circular(3),
                   ),
                 ),
@@ -8598,7 +8311,7 @@ class _ChatScreenState extends State<ChatScreen>
                     Text(
                       '\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0440\u0435\u0430\u043A\u0446\u0438\u044E',
                       style: TextStyle(
-                        color: SpartanPalette.ink,
+                        color: FenyvoPalette.ink,
                         fontSize: 17,
                         fontWeight: FontWeight.w700,
                       ),
@@ -8634,8 +8347,8 @@ class _ChatScreenState extends State<ChatScreen>
                           alignment: Alignment.center,
                           decoration: BoxDecoration(
                             color: selected
-                                ? SpartanPalette.blue.withValues(alpha: 0.20)
-                                : SpartanPalette.surface.withValues(
+                                ? FenyvoPalette.blue.withValues(alpha: 0.20)
+                                : FenyvoPalette.surface.withValues(
                                     alpha: 0.42,
                                   ),
                             borderRadius: BorderRadius.circular(16),
@@ -8672,7 +8385,7 @@ class _ChatScreenState extends State<ChatScreen>
     required VoidCallback onTap,
     bool danger = false,
   }) {
-    final color = danger ? const Color(0xFFFF4D4D) : SpartanPalette.ink;
+    final color = danger ? const Color(0xFFFF4D4D) : FenyvoPalette.ink;
 
     return InkWell(
       onTap: onTap,
@@ -8729,7 +8442,7 @@ class _ChatScreenState extends State<ChatScreen>
     required String label,
     bool danger = false,
   }) {
-    final itemColor = danger ? const Color(0xFFFF6262) : SpartanPalette.ink;
+    final itemColor = danger ? const Color(0xFFFF6262) : FenyvoPalette.ink;
 
     return PopupMenuItem<String>(
       value: value,
@@ -8787,7 +8500,7 @@ class _ChatScreenState extends State<ChatScreen>
         overlayObject.size.width - localPosition.dx,
         overlayObject.size.height - localPosition.dy,
       ),
-      color: SpartanPalette.surface,
+      color: FenyvoPalette.surface,
       elevation: 14,
       shadowColor: Colors.black.withValues(alpha: 0.72),
       shape: RoundedRectangleBorder(
@@ -8978,7 +8691,7 @@ class _ChatScreenState extends State<ChatScreen>
                         vertical: 3,
                       ),
                       decoration: BoxDecoration(
-                        color: SpartanPalette.surface,
+                        color: FenyvoPalette.surface,
                         borderRadius: BorderRadius.circular(25),
                         border: Border.all(
                           color: _gold.withValues(alpha: 0.95),
@@ -9066,7 +8779,7 @@ class _ChatScreenState extends State<ChatScreen>
                         maxHeight: screenHeight * 0.60,
                       ),
                       decoration: BoxDecoration(
-                        color: SpartanPalette.surface,
+                        color: FenyvoPalette.surface,
                         borderRadius: BorderRadius.circular(20),
                         border: Border.all(
                           color: _gold.withValues(alpha: 0.95),
@@ -9321,7 +9034,7 @@ class _ChatScreenState extends State<ChatScreen>
     required VoidCallback onTap,
   }) {
     final foreground = isMe
-        ? SpartanPalette.secondary
+        ? FenyvoPalette.secondary
         : _gold.withValues(alpha: 0.88);
 
     return Tooltip(
@@ -9339,11 +9052,11 @@ class _ChatScreenState extends State<ChatScreen>
             decoration: BoxDecoration(
               shape: BoxShape.circle,
               color: isMe
-                  ? SpartanPalette.surface.withValues(alpha: 0.075)
-                  : SpartanPalette.blue.withValues(alpha: 0.075),
+                  ? FenyvoPalette.surface.withValues(alpha: 0.075)
+                  : FenyvoPalette.blue.withValues(alpha: 0.075),
               border: Border.all(
                 color: isMe
-                    ? SpartanPalette.ink.withValues(alpha: 0.14)
+                    ? FenyvoPalette.ink.withValues(alpha: 0.14)
                     : _gold.withValues(alpha: 0.16),
                 width: 0.7,
               ),
@@ -9375,18 +9088,18 @@ class _ChatScreenState extends State<ChatScreen>
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: isMe
-            ? SpartanPalette.surface.withValues(alpha: .18)
-            : SpartanPalette.blue.withValues(alpha: .10),
+            ? FenyvoPalette.surface.withValues(alpha: .18)
+            : FenyvoPalette.blue.withValues(alpha: .10),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isMe ? SpartanPalette.line : _gold.withValues(alpha: .42),
+          color: isMe ? FenyvoPalette.line : _gold.withValues(alpha: .42),
         ),
       ),
       child: Row(
         children: [
           CircleAvatar(
             radius: 23,
-            backgroundColor: SpartanPalette.surfaceRaised,
+            backgroundColor: FenyvoPalette.surfaceRaised,
             child: Text(
               initial,
               style: const TextStyle(
@@ -9406,7 +9119,7 @@ class _ChatScreenState extends State<ChatScreen>
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                    color: SpartanPalette.ink,
+                    color: FenyvoPalette.ink,
                     fontSize: 15,
                     fontWeight: FontWeight.w700,
                   ),
@@ -9418,7 +9131,7 @@ class _ChatScreenState extends State<ChatScreen>
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                      color: SpartanPalette.secondary,
+                      color: FenyvoPalette.secondary,
                       fontSize: 12,
                     ),
                   ),
@@ -9500,18 +9213,18 @@ class _ChatScreenState extends State<ChatScreen>
     }
 
     final signalBorder = isPinnedHighlight
-        ? BorderSide(color: isMe ? SpartanPalette.ink : _gold, width: 2)
+        ? BorderSide(color: isMe ? FenyvoPalette.ink : _gold, width: 2)
         : isHovered
         ? BorderSide(
             color: isMe
-                ? SpartanPalette.ink.withValues(alpha: .30)
+                ? FenyvoPalette.ink.withValues(alpha: .30)
                 : _gold.withValues(alpha: .52),
             width: .9,
           )
         : BorderSide(
             color: isMe
                 ? _gold.withValues(alpha: .38)
-                : SpartanPalette.line.withValues(alpha: .88),
+                : FenyvoPalette.line.withValues(alpha: .88),
             width: .75,
           );
     final signalShape = isWindowsDesktop
@@ -9596,16 +9309,16 @@ class _ChatScreenState extends State<ChatScreen>
                     gradient: isMe
                         ? const LinearGradient(
                             colors: [
-                              SpartanPalette.surfaceRaised,
-                              SpartanPalette.blue,
+                              FenyvoPalette.surfaceRaised,
+                              FenyvoPalette.blue,
                             ],
                             begin: Alignment.topLeft,
                             end: Alignment.bottomRight,
                           )
                         : const LinearGradient(
                             colors: [
-                              SpartanPalette.surfaceSoft,
-                              SpartanPalette.surface,
+                              FenyvoPalette.surfaceSoft,
+                              FenyvoPalette.surface,
                             ],
                             begin: Alignment.topLeft,
                             end: Alignment.bottomRight,
@@ -9670,7 +9383,7 @@ class _ChatScreenState extends State<ChatScreen>
                               Icons.forward_rounded,
                               size: 12,
                               color: isMe
-                                  ? SpartanPalette.secondary
+                                  ? FenyvoPalette.secondary
                                   : _gold.withValues(alpha: 0.90),
                             ),
                             const SizedBox(width: 4),
@@ -9681,7 +9394,7 @@ class _ChatScreenState extends State<ChatScreen>
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
                                   color: isMe
-                                      ? SpartanPalette.secondary
+                                      ? FenyvoPalette.secondary
                                       : _gold.withValues(alpha: 0.90),
                                   fontSize: 9.5,
                                   fontWeight: FontWeight.w600,
@@ -9704,8 +9417,8 @@ class _ChatScreenState extends State<ChatScreen>
                           text,
                           style: TextStyle(
                             color: isMe
-                                ? SpartanPalette.ink
-                                : SpartanPalette.ink,
+                                ? FenyvoPalette.ink
+                                : FenyvoPalette.ink,
                             fontSize: 16,
                           ),
                         ),
@@ -9716,8 +9429,8 @@ class _ChatScreenState extends State<ChatScreen>
                           child: Container(
                             height: 0.6,
                             color: isMe
-                                ? SpartanPalette.line
-                                : SpartanPalette.blue.withValues(alpha: 0.22),
+                                ? FenyvoPalette.line
+                                : FenyvoPalette.blue.withValues(alpha: 0.22),
                           ),
                         ),
                         Row(
@@ -9727,7 +9440,7 @@ class _ChatScreenState extends State<ChatScreen>
                               Icons.chat_bubble_outline_rounded,
                               size: 11,
                               color: isMe
-                                  ? SpartanPalette.secondary
+                                  ? FenyvoPalette.secondary
                                   : _gold.withValues(alpha: 0.82),
                             ),
                             const SizedBox(width: 4),
@@ -9738,7 +9451,7 @@ class _ChatScreenState extends State<ChatScreen>
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
                                   color: isMe
-                                      ? SpartanPalette.secondary
+                                      ? FenyvoPalette.secondary
                                       : _gold.withValues(alpha: 0.82),
                                   fontSize: 9.5,
                                   fontWeight: FontWeight.w600,
@@ -9752,8 +9465,8 @@ class _ChatScreenState extends State<ChatScreen>
                           forwardComment,
                           style: TextStyle(
                             color: isMe
-                                ? SpartanPalette.ink
-                                : SpartanPalette.ink,
+                                ? FenyvoPalette.ink
+                                : FenyvoPalette.ink,
                             fontSize: 14,
                             height: 1.18,
                           ),
@@ -9780,16 +9493,16 @@ class _ChatScreenState extends State<ChatScreen>
                                   ),
                                   decoration: BoxDecoration(
                                     color: isMe
-                                        ? SpartanPalette.surface.withValues(
+                                        ? FenyvoPalette.surface.withValues(
                                             alpha: 0.09,
                                           )
-                                        : SpartanPalette.blue.withValues(
+                                        : FenyvoPalette.blue.withValues(
                                             alpha: 0.10,
                                           ),
                                     borderRadius: BorderRadius.circular(12),
                                     border: Border.all(
                                       color: isMe
-                                          ? SpartanPalette.line
+                                          ? FenyvoPalette.line
                                           : _gold.withValues(alpha: 0.42),
                                     ),
                                   ),
@@ -9800,7 +9513,7 @@ class _ChatScreenState extends State<ChatScreen>
                                         Icons.forward_rounded,
                                         size: 16,
                                         color: isMe
-                                            ? SpartanPalette.ink
+                                            ? FenyvoPalette.ink
                                             : _gold,
                                       ),
                                       const SizedBox(width: 5),
@@ -9808,7 +9521,7 @@ class _ChatScreenState extends State<ChatScreen>
                                         'Переслать',
                                         style: TextStyle(
                                           color: isMe
-                                              ? SpartanPalette.ink
+                                              ? FenyvoPalette.ink
                                               : _gold,
                                           fontSize: 11,
                                           fontWeight: FontWeight.w700,
@@ -9844,7 +9557,7 @@ class _ChatScreenState extends State<ChatScreen>
                               Icons.smart_toy_rounded,
                               size: 10,
                               color: isMe
-                                  ? SpartanPalette.secondary
+                                  ? FenyvoPalette.secondary
                                   : _gold.withValues(alpha: 0.88),
                             ),
                             const SizedBox(width: 3),
@@ -9852,7 +9565,7 @@ class _ChatScreenState extends State<ChatScreen>
                               'AI',
                               style: TextStyle(
                                 color: isMe
-                                    ? SpartanPalette.secondary
+                                    ? FenyvoPalette.secondary
                                     : _gold.withValues(alpha: 0.88),
                                 fontSize: 9,
                                 fontWeight: FontWeight.w800,
@@ -9865,8 +9578,8 @@ class _ChatScreenState extends State<ChatScreen>
                               timeStr,
                               style: TextStyle(
                                 color: isMe
-                                    ? SpartanPalette.secondary
-                                    : SpartanPalette.secondary,
+                                    ? FenyvoPalette.secondary
+                                    : FenyvoPalette.secondary,
                                 fontSize: 10,
                               ),
                             ),
@@ -9877,8 +9590,8 @@ class _ChatScreenState extends State<ChatScreen>
                               '\u0438\u0437\u043C\u0435\u043D\u0435\u043D\u043E',
                               style: TextStyle(
                                 color: isMe
-                                    ? SpartanPalette.secondary
-                                    : SpartanPalette.muted,
+                                    ? FenyvoPalette.secondary
+                                    : FenyvoPalette.muted,
                                 fontSize: 9,
                                 fontStyle: FontStyle.italic,
                               ),
@@ -9905,7 +9618,7 @@ class _ChatScreenState extends State<ChatScreen>
                                     Icons.forward_rounded,
                                     size: 17,
                                     color: isMe
-                                        ? SpartanPalette.secondary
+                                        ? FenyvoPalette.secondary
                                         : _gold,
                                   ),
                                 ),
@@ -10000,7 +9713,7 @@ class _ChatScreenState extends State<ChatScreen>
                         color: _gold,
                         shape: BoxShape.circle,
                         border: Border.all(
-                          color: SpartanPalette.canvasDeep,
+                          color: FenyvoPalette.canvasDeep,
                           width: 2,
                         ),
                         boxShadow: [
@@ -10070,7 +9783,7 @@ class _ChatScreenState extends State<ChatScreen>
       child: Padding(
         padding: const EdgeInsets.only(top: 4, bottom: 14),
         child: Material(
-          color: SpartanPalette.surface.withValues(alpha: 0.94),
+          color: FenyvoPalette.surface.withValues(alpha: 0.94),
           borderRadius: BorderRadius.circular(18),
           child: InkWell(
             borderRadius: BorderRadius.circular(18),
@@ -10106,7 +9819,7 @@ class _ChatScreenState extends State<ChatScreen>
                           style: TextStyle(
                             color: missed
                                 ? Colors.redAccent
-                                : SpartanPalette.ink,
+                                : FenyvoPalette.ink,
                             fontWeight: FontWeight.w700,
                           ),
                         ),
@@ -10114,7 +9827,7 @@ class _ChatScreenState extends State<ChatScreen>
                         Text(
                           CallHistoryService.status(call),
                           style: const TextStyle(
-                            color: SpartanPalette.secondary,
+                            color: FenyvoPalette.secondary,
                             fontSize: 12,
                           ),
                         ),
@@ -10228,7 +9941,7 @@ class _ChatScreenState extends State<ChatScreen>
                     alignment: Alignment.center,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: SpartanPalette.surface,
+                      color: FenyvoPalette.surface,
                       border: Border.all(
                         color: _gold.withValues(
                           alpha: _scrollToLatestHovered ? 0.72 : 0.40,
@@ -10276,7 +9989,7 @@ class _ChatScreenState extends State<ChatScreen>
                                 ),
                                 alignment: Alignment.center,
                                 decoration: BoxDecoration(
-                                  color: SpartanPalette.blue,
+                                  color: FenyvoPalette.blue,
                                   borderRadius: BorderRadius.circular(10),
                                   border: Border.all(
                                     color: Colors.black.withValues(alpha: 0.72),
@@ -10294,7 +10007,7 @@ class _ChatScreenState extends State<ChatScreen>
                                       ? '99+'
                                       : '$_newMessagesWhileScrolledUp',
                                   style: const TextStyle(
-                                    color: SpartanPalette.ink,
+                                    color: FenyvoPalette.ink,
                                     fontSize: 10,
                                     fontWeight: FontWeight.w800,
                                     height: 1,
@@ -10324,7 +10037,7 @@ class _ChatScreenState extends State<ChatScreen>
       if (message['isMe'] == true) continue;
       final text = message['text']?.toString() ?? '';
       if (text.trim().isEmpty) continue;
-      final assessment = SpartanShieldService.assess(text);
+      final assessment = FenyvoShieldService.assess(text);
       if (assessment == null) return null;
       final fingerprint = [
         message['id'],
@@ -10339,9 +10052,9 @@ class _ChatScreenState extends State<ChatScreen>
 
   Future<void> _loadTrustState() async {
     final results = await Future.wait<bool>([
-      SpartanTrustService.isTrusted(widget.targetUser),
-      SpartanTrustService.isBlocked(widget.targetUser),
-      SpartanTrustService.isReported(widget.targetUser),
+      FenyvoTrustService.isTrusted(widget.targetUser),
+      FenyvoTrustService.isBlocked(widget.targetUser),
+      FenyvoTrustService.isReported(widget.targetUser),
     ]);
     if (!mounted) return;
     setState(() {
@@ -10349,7 +10062,7 @@ class _ChatScreenState extends State<ChatScreen>
       _contactBlocked = results[1];
       _contactReported = results[2];
     });
-    SpartanTrustService.requestRemote(widget.targetUser);
+    FenyvoTrustService.requestRemote(widget.targetUser);
   }
 
   Future<void> _applyRemoteTrustState(Map<String, dynamic> data) async {
@@ -10362,7 +10075,7 @@ class _ChatScreenState extends State<ChatScreen>
         blocked != _contactBlocked ||
         reported != _contactReported;
 
-    await SpartanTrustService.applyRemote(
+    await FenyvoTrustService.applyRemote(
       widget.targetUser,
       trusted: trusted,
       blocked: blocked,
@@ -10391,7 +10104,7 @@ class _ChatScreenState extends State<ChatScreen>
       builder: (dialogContext) => AlertDialog(
         title: Row(
           children: [
-            const Icon(Icons.shield_rounded, color: SpartanPalette.gold),
+            const Icon(Icons.shield_rounded, color: FenyvoPalette.gold),
             const SizedBox(width: 10),
             Expanded(child: Text(_chatText('whatIsTrust'))),
           ],
@@ -10401,7 +10114,7 @@ class _ChatScreenState extends State<ChatScreen>
           TextButton(
             onPressed: () async {
               if (firstTime) {
-                await SpartanTrustService.markExplanationSeen();
+                await FenyvoTrustService.markExplanationSeen();
               }
               if (dialogContext.mounted) Navigator.pop(dialogContext);
             },
@@ -10415,14 +10128,14 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   Future<void> _openTrustActions(ShieldAssessment assessment) async {
-    if (await SpartanTrustService.shouldShowExplanation()) {
+    if (await FenyvoTrustService.shouldShowExplanation()) {
       if (!mounted) return;
       await _showTrustExplanation(firstTime: true);
       if (!mounted) return;
     }
     final action = await showModalBottomSheet<String>(
       context: context,
-      backgroundColor: SpartanPalette.surface,
+      backgroundColor: FenyvoPalette.surface,
       showDragHandle: true,
       builder: (sheetContext) => SafeArea(
         child: Padding(
@@ -10433,13 +10146,13 @@ class _ChatScreenState extends State<ChatScreen>
             children: [
               Row(
                 children: [
-                  const Icon(Icons.shield_rounded, color: SpartanPalette.gold),
+                  const Icon(Icons.shield_rounded, color: FenyvoPalette.gold),
                   const SizedBox(width: 10),
                   const Expanded(
                     child: Text(
                       'FENYVO TRUST',
                       style: TextStyle(
-                        color: SpartanPalette.ink,
+                        color: FenyvoPalette.ink,
                         fontSize: 20,
                         fontWeight: FontWeight.w900,
                       ),
@@ -10456,7 +10169,7 @@ class _ChatScreenState extends State<ChatScreen>
               Text(
                 widget.targetUser,
                 style: const TextStyle(
-                  color: SpartanPalette.ink,
+                  color: FenyvoPalette.ink,
                   fontSize: 20,
                   fontWeight: FontWeight.w800,
                 ),
@@ -10464,7 +10177,7 @@ class _ChatScreenState extends State<ChatScreen>
               const SizedBox(height: 8),
               Text(
                 assessment.reason,
-                style: const TextStyle(color: SpartanPalette.secondary),
+                style: const TextStyle(color: FenyvoPalette.secondary),
               ),
               const SizedBox(height: 14),
               ListTile(
@@ -10472,7 +10185,7 @@ class _ChatScreenState extends State<ChatScreen>
                   _contactTrusted
                       ? Icons.verified_rounded
                       : Icons.verified_outlined,
-                  color: SpartanPalette.gold,
+                  color: FenyvoPalette.gold,
                 ),
                 title: Text(
                   _contactTrusted
@@ -10487,7 +10200,7 @@ class _ChatScreenState extends State<ChatScreen>
                   _contactBlocked
                       ? Icons.lock_open_rounded
                       : Icons.block_rounded,
-                  color: SpartanPalette.gold,
+                  color: FenyvoPalette.gold,
                 ),
                 title: Text(
                   _contactBlocked
@@ -10500,7 +10213,7 @@ class _ChatScreenState extends State<ChatScreen>
               ListTile(
                 leading: const Icon(
                   Icons.flag_outlined,
-                  color: SpartanPalette.gold,
+                  color: FenyvoPalette.gold,
                 ),
                 title: Text(
                   _contactReported
@@ -10521,13 +10234,13 @@ class _ChatScreenState extends State<ChatScreen>
     if (!mounted || action == null) return;
     if (action == 'trust') {
       final next = !_contactTrusted;
-      await SpartanTrustService.setTrusted(widget.targetUser, next);
-      SpartanTrustService.sync(widget.targetUser);
+      await FenyvoTrustService.setTrusted(widget.targetUser, next);
+      FenyvoTrustService.sync(widget.targetUser);
       if (mounted) setState(() => _contactTrusted = next);
     } else if (action == 'block') {
       final next = !_contactBlocked;
-      await SpartanTrustService.setBlocked(widget.targetUser, next);
-      SpartanTrustService.sync(widget.targetUser);
+      await FenyvoTrustService.setBlocked(widget.targetUser, next);
+      FenyvoTrustService.sync(widget.targetUser);
       if (mounted) {
         setState(() {
           _contactBlocked = next;
@@ -10565,8 +10278,8 @@ class _ChatScreenState extends State<ChatScreen>
         ),
       );
       if (reason == null) return;
-      await SpartanTrustService.report(widget.targetUser, reason: reason);
-      SpartanTrustService.sync(widget.targetUser);
+      await FenyvoTrustService.report(widget.targetUser, reason: reason);
+      FenyvoTrustService.sync(widget.targetUser);
       if (mounted) setState(() => _contactReported = true);
     }
     if (!mounted) return;
@@ -10598,7 +10311,7 @@ class _ChatScreenState extends State<ChatScreen>
       child: Container(
         padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
         decoration: BoxDecoration(
-          color: SpartanPalette.surface,
+          color: FenyvoPalette.surface,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: _gold.withValues(alpha: 0.75)),
         ),
@@ -10624,7 +10337,7 @@ class _ChatScreenState extends State<ChatScreen>
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                      color: SpartanPalette.ink,
+                      color: FenyvoPalette.ink,
                       fontSize: 12,
                     ),
                   ),
@@ -10632,7 +10345,7 @@ class _ChatScreenState extends State<ChatScreen>
                   Text(
                     _chatText('analysisOnDevice'),
                     style: const TextStyle(
-                      color: SpartanPalette.secondary,
+                      color: FenyvoPalette.secondary,
                       fontSize: 11,
                     ),
                   ),
@@ -10668,15 +10381,15 @@ class _ChatScreenState extends State<ChatScreen>
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
         decoration: BoxDecoration(
-          color: SpartanPalette.surface,
+          color: FenyvoPalette.surface,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
-            color: SpartanPalette.secondary.withValues(alpha: .4),
+            color: FenyvoPalette.secondary.withValues(alpha: .4),
           ),
         ),
         child: Row(
           children: [
-            const Icon(Icons.block_rounded, color: SpartanPalette.secondary),
+            const Icon(Icons.block_rounded, color: FenyvoPalette.secondary),
             const SizedBox(width: 10),
             Expanded(child: Text(_chatText('blockedBanner'))),
             TextButton(
@@ -10702,10 +10415,10 @@ class _ChatScreenState extends State<ChatScreen>
         child: Text(
           _chatText('noMessages'),
           style: const TextStyle(
-            color: SpartanPalette.secondary,
+            color: FenyvoPalette.secondary,
             fontSize: 16,
             fontWeight: FontWeight.w500,
-            shadows: [Shadow(blurRadius: 4, color: SpartanPalette.ink)],
+            shadows: [Shadow(blurRadius: 4, color: FenyvoPalette.ink)],
           ),
         ),
       );
@@ -10728,8 +10441,8 @@ class _ChatScreenState extends State<ChatScreen>
                   end: Alignment.bottomCenter,
                   colors: [
                     Colors.transparent,
-                    SpartanPalette.line.withValues(alpha: .82),
-                    SpartanPalette.line.withValues(alpha: .82),
+                    FenyvoPalette.line.withValues(alpha: .82),
+                    FenyvoPalette.line.withValues(alpha: .82),
                     Colors.transparent,
                   ],
                 ),
@@ -10764,7 +10477,7 @@ class _ChatScreenState extends State<ChatScreen>
                       return 5;
                     }),
                     radius: const Radius.circular(10),
-                    trackColor: WidgetStatePropertyAll(SpartanPalette.line),
+                    trackColor: WidgetStatePropertyAll(FenyvoPalette.line),
                     trackBorderColor: WidgetStatePropertyAll(
                       Colors.transparent,
                     ),
@@ -10839,10 +10552,10 @@ class _ChatScreenState extends State<ChatScreen>
             margin: const EdgeInsets.fromLTRB(10, 5, 10, 9),
             decoration: BoxDecoration(
               gradient: const LinearGradient(
-                colors: [SpartanPalette.surfaceSoft, SpartanPalette.rail],
+                colors: [FenyvoPalette.surfaceSoft, FenyvoPalette.rail],
               ),
               borderRadius: BorderRadius.circular(30),
-              border: Border.all(color: SpartanPalette.line),
+              border: Border.all(color: FenyvoPalette.line),
               boxShadow: const [
                 BoxShadow(
                   color: Color(0x4A000000),
@@ -10878,11 +10591,11 @@ class _ChatScreenState extends State<ChatScreen>
                               )
                             : const Icon(
                                 Icons.add_circle_outline_rounded,
-                                color: SpartanPalette.gold,
+                                color: FenyvoPalette.gold,
                               ),
                         style: IconButton.styleFrom(
                           side: BorderSide(
-                            color: SpartanPalette.gold.withValues(alpha: .58),
+                            color: FenyvoPalette.gold.withValues(alpha: .58),
                           ),
                         ),
                       ),
@@ -10907,9 +10620,9 @@ class _ChatScreenState extends State<ChatScreen>
                               if (_emojiVisible)
                                 setState(() => _emojiVisible = false);
                             },
-                            autofocus: Platform.isWindows,
+                            autofocus: false,
                             style: const TextStyle(
-                              color: SpartanPalette.ink,
+                              color: FenyvoPalette.ink,
                               fontSize: 16,
                             ),
                             keyboardType: TextInputType.multiline,
@@ -10919,7 +10632,7 @@ class _ChatScreenState extends State<ChatScreen>
                             onChanged: _handleTextChanged,
                             decoration: InputDecoration(
                               hintText: _chatText('messageHint'),
-                              fillColor: SpartanPalette.canvasDeep.withValues(
+                              fillColor: FenyvoPalette.canvasDeep.withValues(
                                 alpha: .72,
                               ),
                               filled: true,
@@ -10928,25 +10641,25 @@ class _ChatScreenState extends State<ChatScreen>
                                 onPressed: _openComposerEmoji,
                                 icon: const Icon(
                                   Icons.emoji_emotions_outlined,
-                                  color: SpartanPalette.ink,
+                                  color: FenyvoPalette.ink,
                                 ),
                               ),
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(26),
                                 borderSide: const BorderSide(
-                                  color: SpartanPalette.line,
+                                  color: FenyvoPalette.line,
                                 ),
                               ),
                               enabledBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(26),
                                 borderSide: const BorderSide(
-                                  color: SpartanPalette.line,
+                                  color: FenyvoPalette.line,
                                 ),
                               ),
                               focusedBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(26),
                                 borderSide: BorderSide(
-                                  color: SpartanPalette.gold.withValues(
+                                  color: FenyvoPalette.gold.withValues(
                                     alpha: .72,
                                   ),
                                 ),
@@ -10972,8 +10685,8 @@ class _ChatScreenState extends State<ChatScreen>
                                 : _chatText('send'),
                             onPressed: _sendMessage,
                             style: IconButton.styleFrom(
-                              backgroundColor: SpartanPalette.gold,
-                              foregroundColor: SpartanPalette.onGold,
+                              backgroundColor: FenyvoPalette.gold,
+                              foregroundColor: FenyvoPalette.onGold,
                             ),
                             icon: const Icon(Icons.send_rounded),
                           ),
@@ -11001,7 +10714,7 @@ class _ChatScreenState extends State<ChatScreen>
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
-      backgroundColor: SpartanPalette.surface,
+      backgroundColor: FenyvoPalette.surface,
       showDragHandle: true,
       builder: (sheetContext) {
         return StatefulBuilder(
@@ -11012,10 +10725,10 @@ class _ChatScreenState extends State<ChatScreen>
                 final active = service.activeFor(widget.targetUser);
                 final incoming =
                     active != null &&
-                    service.phase == SpartanPulsePhase.incoming;
+                    service.phase == FenyvoPulsePhase.incoming;
                 final matched =
                     active != null &&
-                    service.phase == SpartanPulsePhase.matched;
+                    service.phase == FenyvoPulsePhase.matched;
                 final width = MediaQuery.sizeOf(context).width;
 
                 Widget modeButton({
@@ -11036,13 +10749,13 @@ class _ChatScreenState extends State<ChatScreen>
                         ),
                         decoration: BoxDecoration(
                           color: selected
-                              ? SpartanPalette.blue
-                              : SpartanPalette.canvas,
+                              ? FenyvoPalette.blue
+                              : FenyvoPalette.canvas,
                           borderRadius: BorderRadius.circular(18),
                           border: Border.all(
                             color: selected
-                                ? SpartanPalette.gold
-                                : SpartanPalette.line,
+                                ? FenyvoPalette.gold
+                                : FenyvoPalette.line,
                           ),
                         ),
                         child: Row(
@@ -11051,8 +10764,8 @@ class _ChatScreenState extends State<ChatScreen>
                             Icon(
                               icon,
                               color: selected
-                                  ? SpartanPalette.gold
-                                  : SpartanPalette.secondary,
+                                  ? FenyvoPalette.gold
+                                  : FenyvoPalette.secondary,
                             ),
                             const SizedBox(width: 8),
                             Flexible(
@@ -11061,8 +10774,8 @@ class _ChatScreenState extends State<ChatScreen>
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
                                   color: selected
-                                      ? SpartanPalette.ink
-                                      : SpartanPalette.secondary,
+                                      ? FenyvoPalette.ink
+                                      : FenyvoPalette.secondary,
                                   fontWeight: FontWeight.w700,
                                 ),
                               ),
@@ -11091,14 +10804,14 @@ class _ChatScreenState extends State<ChatScreen>
                                 width: 52,
                                 height: 52,
                                 decoration: BoxDecoration(
-                                  color: SpartanPalette.blue,
+                                  color: FenyvoPalette.blue,
                                   borderRadius: BorderRadius.circular(18),
                                   border: Border.all(
-                                    color: SpartanPalette.gold,
+                                    color: FenyvoPalette.gold,
                                   ),
                                   boxShadow: [
                                     BoxShadow(
-                                      color: SpartanPalette.gold.withValues(
+                                      color: FenyvoPalette.gold.withValues(
                                         alpha: .18,
                                       ),
                                       blurRadius: 18,
@@ -11107,7 +10820,7 @@ class _ChatScreenState extends State<ChatScreen>
                                 ),
                                 child: const Icon(
                                   Icons.bolt_rounded,
-                                  color: SpartanPalette.gold,
+                                  color: FenyvoPalette.gold,
                                   size: 30,
                                 ),
                               ),
@@ -11119,7 +10832,7 @@ class _ChatScreenState extends State<ChatScreen>
                                     const Text(
                                       'FENYVO PULSE',
                                       style: TextStyle(
-                                        color: SpartanPalette.gold,
+                                        color: FenyvoPalette.gold,
                                         fontSize: 19,
                                         fontWeight: FontWeight.w900,
                                         letterSpacing: 1,
@@ -11128,7 +10841,7 @@ class _ChatScreenState extends State<ChatScreen>
                                     Text(
                                       _chatText('pulseTagline'),
                                       style: const TextStyle(
-                                        color: SpartanPalette.secondary,
+                                        color: FenyvoPalette.secondary,
                                       ),
                                     ),
                                   ],
@@ -11141,12 +10854,12 @@ class _ChatScreenState extends State<ChatScreen>
                             Container(
                               padding: const EdgeInsets.all(18),
                               decoration: BoxDecoration(
-                                color: SpartanPalette.canvas,
+                                color: FenyvoPalette.canvas,
                                 borderRadius: BorderRadius.circular(22),
                                 border: Border.all(
                                   color: matched
-                                      ? SpartanPalette.gold
-                                      : SpartanPalette.line,
+                                      ? FenyvoPalette.gold
+                                      : FenyvoPalette.line,
                                 ),
                               ),
                               child: Column(
@@ -11158,7 +10871,7 @@ class _ChatScreenState extends State<ChatScreen>
                                         ? Icons.notifications_active_rounded
                                         : Icons.schedule_rounded,
                                     size: 38,
-                                    color: SpartanPalette.gold,
+                                    color: FenyvoPalette.gold,
                                   ),
                                   const SizedBox(height: 10),
                                   Text(
@@ -11175,7 +10888,7 @@ class _ChatScreenState extends State<ChatScreen>
                                           }),
                                     textAlign: TextAlign.center,
                                     style: const TextStyle(
-                                      color: SpartanPalette.ink,
+                                      color: FenyvoPalette.ink,
                                       fontSize: 17,
                                       fontWeight: FontWeight.w700,
                                     ),
@@ -11186,7 +10899,7 @@ class _ChatScreenState extends State<ChatScreen>
                                         ? _chatText('videoCall')
                                         : _chatText('audioCall'),
                                     style: const TextStyle(
-                                      color: SpartanPalette.secondary,
+                                      color: FenyvoPalette.secondary,
                                     ),
                                   ),
                                 ],
@@ -11233,7 +10946,7 @@ class _ChatScreenState extends State<ChatScreen>
                                 'user': widget.targetUser,
                               }),
                               style: const TextStyle(
-                                color: SpartanPalette.secondary,
+                                color: FenyvoPalette.secondary,
                                 height: 1.4,
                               ),
                             ),
@@ -11261,7 +10974,7 @@ class _ChatScreenState extends State<ChatScreen>
                             Text(
                               _chatText('freeFor'),
                               style: const TextStyle(
-                                color: SpartanPalette.ink,
+                                color: FenyvoPalette.ink,
                                 fontWeight: FontWeight.w700,
                               ),
                             ),
@@ -11278,17 +10991,17 @@ class _ChatScreenState extends State<ChatScreen>
                                   ChoiceChip(
                                     label: Text(option.value),
                                     selected: windowMinutes == option.key,
-                                    selectedColor: SpartanPalette.blue,
-                                    backgroundColor: SpartanPalette.canvas,
+                                    selectedColor: FenyvoPalette.blue,
+                                    backgroundColor: FenyvoPalette.canvas,
                                     side: BorderSide(
                                       color: windowMinutes == option.key
-                                          ? SpartanPalette.gold
-                                          : SpartanPalette.line,
+                                          ? FenyvoPalette.gold
+                                          : FenyvoPalette.line,
                                     ),
                                     labelStyle: TextStyle(
                                       color: windowMinutes == option.key
-                                          ? SpartanPalette.ink
-                                          : SpartanPalette.secondary,
+                                          ? FenyvoPalette.ink
+                                          : FenyvoPalette.secondary,
                                       fontWeight: FontWeight.w600,
                                     ),
                                     onSelected: (_) => setSheetState(
@@ -11318,7 +11031,7 @@ class _ChatScreenState extends State<ChatScreen>
                               _chatText('pulsePrivacy'),
                               textAlign: TextAlign.center,
                               style: const TextStyle(
-                                color: SpartanPalette.muted,
+                                color: FenyvoPalette.muted,
                                 fontSize: 12,
                               ),
                             ),
@@ -11361,12 +11074,17 @@ class _ChatScreenState extends State<ChatScreen>
     final keyboardHeight = MediaQuery.viewInsetsOf(context).bottom;
 
     return PopScope(
-      canPop: !_emojiVisible,
+      canPop: !_emojiVisible && !_searchMode,
       onPopInvokedWithResult: (didPop, result) {
-        if (!didPop && _emojiVisible) setState(() => _emojiVisible = false);
+        if (didPop) return;
+        if (_emojiVisible) {
+          setState(() => _emojiVisible = false);
+        } else if (_searchMode) {
+          _closeMessageSearch();
+        }
       },
       child: Scaffold(
-        backgroundColor: SpartanPalette.canvas,
+        backgroundColor: FenyvoPalette.canvas,
         resizeToAvoidBottomInset: false,
         appBar: AppBar(
           automaticallyImplyLeading: Navigator.canPop(context),
@@ -11388,7 +11106,7 @@ class _ChatScreenState extends State<ChatScreen>
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        color: SpartanPalette.ink,
+                        color: FenyvoPalette.ink,
                         fontSize: Platform.isWindows ? 18 : 17,
                         fontWeight: FontWeight.w600,
                       ),
@@ -11430,10 +11148,10 @@ class _ChatScreenState extends State<ChatScreen>
                                   decoration: BoxDecoration(
                                     shape: BoxShape.circle,
                                     color: _contactIsTyping
-                                        ? SpartanPalette.blue
+                                        ? FenyvoPalette.blue
                                         : _contactOnline
                                         ? Colors.greenAccent
-                                        : SpartanPalette.muted,
+                                        : FenyvoPalette.muted,
                                     boxShadow:
                                         (_contactIsTyping || _contactOnline)
                                         ? [
@@ -11462,7 +11180,7 @@ class _ChatScreenState extends State<ChatScreen>
                                           ? _gold
                                           : _contactOnline
                                           ? Colors.greenAccent
-                                          : SpartanPalette.secondary,
+                                          : FenyvoPalette.secondary,
                                       fontSize: 12,
                                       fontWeight: _contactIsTyping
                                           ? FontWeight.w600
@@ -11480,7 +11198,7 @@ class _ChatScreenState extends State<ChatScreen>
                             style: TextStyle(
                               color: _contactOnline
                                   ? Colors.greenAccent
-                                  : SpartanPalette.secondary,
+                                  : FenyvoPalette.secondary,
                               fontSize: 11,
                               fontWeight: FontWeight.w400,
                             ),
@@ -11504,10 +11222,10 @@ class _ChatScreenState extends State<ChatScreen>
                 return Container(
                   margin: const EdgeInsets.symmetric(vertical: 8),
                   decoration: BoxDecoration(
-                    color: active ? SpartanPalette.blue : Colors.transparent,
+                    color: active ? FenyvoPalette.blue : Colors.transparent,
                     borderRadius: BorderRadius.circular(14),
                     border: active
-                        ? Border.all(color: SpartanPalette.gold)
+                        ? Border.all(color: FenyvoPalette.gold)
                         : null,
                   ),
                   child: IconButton(
@@ -11516,8 +11234,8 @@ class _ChatScreenState extends State<ChatScreen>
                     icon: Icon(
                       Icons.bolt_rounded,
                       color: active
-                          ? SpartanPalette.gold
-                          : SpartanPalette.secondary,
+                          ? FenyvoPalette.gold
+                          : FenyvoPalette.secondary,
                     ),
                   ),
                 );
@@ -11541,8 +11259,13 @@ class _ChatScreenState extends State<ChatScreen>
               tooltip: _chatText('more'),
               icon: const Icon(Icons.more_vert_rounded),
               onSelected: (value) {
-                if (value == 'ai') unawaited(_showSpartanAiSheet());
+                if (value == 'search') _openMessageSearch();
+                if (value == 'ai') unawaited(_showFenyvoAiSheet());
                 if (value == 'auto') unawaited(_showAutoReplySettings());
+                if (value == 'screen_security' &&
+                    (Platform.isAndroid || Platform.isWindows)) {
+                  unawaited(_toggleScreenSecurity());
+                }
                 if (value == 'e2ee') unawaited(_toggleChatE2ee());
                 if (value == 'e2ee_verify') {
                   unawaited(_showE2eeSafetyNumber());
@@ -11559,6 +11282,16 @@ class _ChatScreenState extends State<ChatScreen>
                 }
               },
               itemBuilder: (_) => [
+                PopupMenuItem(
+                  value: 'search',
+                  child: Row(
+                    children: [
+                      const Icon(Icons.search_rounded),
+                      const SizedBox(width: 12),
+                      Expanded(child: Text(_chatText('searchMessages'))),
+                    ],
+                  ),
+                ),
                 PopupMenuItem(
                   value: 'e2ee',
                   enabled: !_changingE2ee,
@@ -11624,6 +11357,26 @@ class _ChatScreenState extends State<ChatScreen>
                     ],
                   ),
                 ),
+                if (Platform.isAndroid || Platform.isWindows)
+                  PopupMenuItem<String>(
+                    value: 'screen_security',
+                    child: Row(
+                      children: [
+                        const Icon(Icons.security_rounded),
+                        const SizedBox(width: 12),
+                        const Expanded(child: Text('Защита экрана')),
+                        Text(
+                          _screenSecurityEnabled ? 'Вкл.' : 'Выкл.',
+                          style: TextStyle(
+                            color: _screenSecurityEnabled
+                                ? Colors.greenAccent
+                                : FenyvoPalette.secondary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 const PopupMenuItem(value: 'ai', child: Text('FENYVO AI')),
                 PopupMenuItem(
                   value: 'auto',
@@ -11638,8 +11391,8 @@ class _ChatScreenState extends State<ChatScreen>
             ),
             const SizedBox(width: 4),
           ],
-          backgroundColor: SpartanPalette.canvasDeep,
-          foregroundColor: SpartanPalette.ink,
+          backgroundColor: FenyvoPalette.canvasDeep,
+          foregroundColor: FenyvoPalette.ink,
           elevation: 0,
           shadowColor: Colors.transparent,
           surfaceTintColor: Colors.transparent,
@@ -11669,6 +11422,7 @@ class _ChatScreenState extends State<ChatScreen>
               ),
               child: Column(
                 children: [
+                  if (_searchMode) _buildMessageSearchBar(),
                   _buildBlockedBanner(),
                   _buildShieldBanner(),
                   _buildPinnedMessageBanner(),

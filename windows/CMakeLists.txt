@@ -148,3 +148,17 @@ install(DIRECTORY "${PROJECT_BUILD_DIR}/${FLUTTER_ASSET_DIR_NAME}"
 install(FILES "${AOT_LIBRARY}" DESTINATION "${INSTALL_BUNDLE_DATA_DIR}"
   CONFIGURATIONS Profile;Release
   COMPONENT Runtime)
+# === FENYVO INSTALLER ===
+# Include the installer scripts in every Windows application bundle.
+install(FILES
+  "${CMAKE_CURRENT_SOURCE_DIR}/installer/Install-Fenyvo.ps1"
+  "${CMAKE_CURRENT_SOURCE_DIR}/installer/Install-Fenyvo.cmd"
+  "${CMAKE_CURRENT_SOURCE_DIR}/installer/Expand-FenyvoUpdate.ps1"
+  "${CMAKE_CURRENT_SOURCE_DIR}/installer/Start-FenyvoUpdate.ps1"
+  "${CMAKE_CURRENT_SOURCE_DIR}/installer/Apply-FenyvoUpdate.ps1"
+  "${CMAKE_CURRENT_SOURCE_DIR}/installer/Recover-FenyvoUpdate.ps1"
+  "${CMAKE_CURRENT_SOURCE_DIR}/installer/Rollback-FenyvoUpdate.ps1"
+  "${CMAKE_CURRENT_SOURCE_DIR}/installer/Test-FenyvoLaunch.ps1"
+  "${CMAKE_CURRENT_SOURCE_DIR}/installer/Complete-FenyvoUpdate.ps1"
+  DESTINATION "${CMAKE_INSTALL_PREFIX}"
+  COMPONENT Runtime)

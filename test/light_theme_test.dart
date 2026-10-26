@@ -5,22 +5,22 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:spartan_chat_final/services/saved_messages_service.dart';
-import 'package:spartan_chat_final/screens/saved_messages_screen.dart';
+import 'package:fenyvo/services/saved_messages_service.dart';
+import 'package:fenyvo/screens/saved_messages_screen.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:spartan_chat_final/screens/auth_screen.dart';
-import 'package:spartan_chat_final/screens/chat_screen.dart';
-import 'package:spartan_chat_final/screens/chat_list_screen.dart';
-import 'package:spartan_chat_final/screens/group_chat_screen.dart';
-import 'package:spartan_chat_final/settings_screen.dart';
-import 'package:spartan_chat_final/services/storage_service.dart';
-import 'package:spartan_chat_final/services/socket_service.dart';
-import 'package:spartan_chat_final/services/app_language_service.dart';
-import 'package:spartan_chat_final/theme/spartan_theme.dart';
+import 'package:fenyvo/screens/auth_screen.dart';
+import 'package:fenyvo/screens/chat_screen.dart';
+import 'package:fenyvo/screens/chat_list_screen.dart';
+import 'package:fenyvo/screens/group_chat_screen.dart';
+import 'package:fenyvo/settings_screen.dart';
+import 'package:fenyvo/services/storage_service.dart';
+import 'package:fenyvo/services/socket_service.dart';
+import 'package:fenyvo/services/app_language_service.dart';
+import 'package:fenyvo/theme/fenyvo_theme.dart';
 
 class _TestPaths extends PathProviderPlatform {
   _TestPaths(this.path);
@@ -97,6 +97,16 @@ void main() {
         i,
       ).toIso8601String();
     }
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          const MethodChannel('fenyvo/screen_security'),
+          (call) async {
+            if (call.method != 'setSecure') {
+              throw MissingPluginException('Unexpected screen security method');
+            }
+            return null;
+          },
+        );
     await StorageService.init();
     final messenger =
         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
@@ -149,7 +159,7 @@ void main() {
                 'groups': [
                   {
                     'id': 'light-group',
-                    'name': 'Spartan 1',
+                    'name': 'Fenyvo 1',
                     'members': ['Acer', 'Sparta', 'Alla'],
                   },
                 ],
@@ -215,15 +225,15 @@ void main() {
   test(
     'blue gold palette meets contrast and preserves wallpaper opt-in',
     () async {
-      expect(SpartanPalette.lightTheme.brightness, Brightness.dark);
+      expect(FenyvoPalette.lightTheme.brightness, Brightness.dark);
       expect(
-        (SpartanPalette.ink.computeLuminance() + .05) /
-            (SpartanPalette.canvas.computeLuminance() + .05),
+        (FenyvoPalette.ink.computeLuminance() + .05) /
+            (FenyvoPalette.canvas.computeLuminance() + .05),
         greaterThan(10),
       );
       expect(
-        (SpartanPalette.ink.computeLuminance() + .05) /
-            (SpartanPalette.blueDeep.computeLuminance() + .05),
+        (FenyvoPalette.ink.computeLuminance() + .05) /
+            (FenyvoPalette.blueDeep.computeLuminance() + .05),
         greaterThan(4.5),
       );
       expect(await StorageService.getLightBackground(), isNull);
@@ -245,14 +255,14 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         debugShowCheckedModeBanner: false,
-        theme: SpartanPalette.lightTheme.copyWith(
-          textTheme: SpartanPalette.lightTheme.textTheme.apply(
+        theme: FenyvoPalette.lightTheme.copyWith(
+          textTheme: FenyvoPalette.lightTheme.textTheme.apply(
             fontFamily: 'PreviewText',
           ),
         ),
         builder: (context, child) => RepaintBoundary(
           key: const ValueKey('light-preview'),
-          child: SpartanLightFrame(child: child!),
+          child: FenyvoLightFrame(child: child!),
         ),
         home: child,
       ),
@@ -373,7 +383,7 @@ void main() {
           'group' => const GroupChatScreen(
             group: {
               'id': 'light-group',
-              'name': 'Spartan 1',
+              'name': 'Fenyvo 1',
               'members': ['Acer', 'Sparta', 'Alla'],
             },
           ),
@@ -491,7 +501,7 @@ void main() {
           await tester.tap(find.text('Сохранить'));
           await tester.pump();
           await tester.pump(const Duration(milliseconds: 500));
-          final origin = variant == 'private' ? 'Sparta' : 'Группа: Spartan 1';
+          final origin = variant == 'private' ? 'Sparta' : 'Группа: Fenyvo 1';
           for (
             var i = 0;
             i < 100 &&
@@ -516,7 +526,10 @@ void main() {
           await tester.pump(const Duration(seconds: 1));
         }
         if (variant == 'list') {
-          expect(find.byType(NavigationBar), findsOneWidget);
+          expect(
+            find.byKey(const ValueKey('fenyvo-mobile-command-dock')),
+            findsOneWidget,
+          );
           await tester.enterText(
             find.byKey(const ValueKey('contact-search')),
             'aLlA',
@@ -529,11 +542,11 @@ void main() {
           await tester.pump();
           expect(find.text('Alla'), findsNothing);
           expect(find.text('Сохранённое'), findsNothing);
-          expect(find.text('Spartan 1'), findsOneWidget);
+          expect(find.text('Fenyvo 1'), findsOneWidget);
           await tester.tap(find.byKey(const ValueKey('chat-filter-1')));
           await tester.pump();
           expect(find.text('Alla'), findsOneWidget);
-          await tester.tap(find.text('Звонки'));
+          await tester.tap(find.byKey(const ValueKey('mobile-command-1')));
           await tester.pump();
           await tester.pump(const Duration(milliseconds: 500));
           expect(find.text('Позвонить контакту'), findsOneWidget);
@@ -542,11 +555,11 @@ void main() {
               find.byKey(const ValueKey('light-preview')),
               matchesGoldenFile('goldens/blue_gold_calls.png'),
             );
-          await tester.tap(find.text('Настройки'));
+          await tester.tap(find.byKey(const ValueKey('mobile-command-2')));
           await tester.pump();
           await tester.pump(const Duration(milliseconds: 500));
           expect(find.byType(SettingsScreen), findsOneWidget);
-          await tester.tap(find.text('Чаты').last);
+          await tester.tap(find.byKey(const ValueKey('mobile-command-0')));
           await tester.pump();
           await tester.pump(const Duration(milliseconds: 500));
           await tester.tap(find.text('Сохранённое'));
@@ -619,7 +632,7 @@ void main() {
       MaterialApp(
         home: ValueListenableBuilder<bool>(
           valueListenable: enabled,
-          builder: (context, value, _) => SpartanLightFrame(
+          builder: (context, value, _) => FenyvoLightFrame(
             enabled: value,
             child: Scaffold(body: TextField(controller: controller)),
           ),

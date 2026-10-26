@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:spartan_chat_final/services/app_update_service.dart';
+import 'package:fenyvo/services/app_update_service.dart';
 
 void main() {
   const manifest = <String, dynamic>{

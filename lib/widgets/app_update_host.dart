@@ -1,4 +1,8 @@
 import 'dart:async';
+import 'dart:io';
+
+import '../services/windows_update_preparation_service.dart';
+import '../services/windows_update_installation_service.dart';
 
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -8,7 +12,7 @@ import '../services/app_language_service.dart';
 import '../services/app_update_service.dart';
 import '../services/call_service.dart';
 import '../services/group_call_service.dart';
-import '../theme/spartan_theme.dart';
+import '../theme/fenyvo_theme.dart';
 
 /// Presents trusted Fenyvo releases without interrupting active calls.
 class AppUpdateHost extends StatefulWidget {
@@ -95,8 +99,7 @@ class _AppUpdateHostState extends State<AppUpdateHost>
       await preferences.setInt(_installedBuildKey, check.installedBuild);
       final notesAlreadySeen =
           preferences.getInt(_notesBuildKey) == check.installedBuild;
-      if (check.describesInstalledBuild &&
-          !notesAlreadySeen) {
+      if (check.describesInstalledBuild && !notesAlreadySeen) {
         await _showWhatsNew(check.installedRelease!, preferences);
       }
     } finally {
@@ -146,10 +149,46 @@ class _AppUpdateHostState extends State<AppUpdateHost>
     _dialogOpen = false;
 
     if (action == _UpdateAction.primary) {
-      await launchUrl(
-        check.release.downloadUrl,
-        mode: LaunchMode.externalApplication,
-      );
+      if (Platform.isWindows) {
+        if (CallService.instance.hasCall || GroupCallService.instance.hasCall) {
+          return;
+        }
+
+        try {
+          final archive = await const WindowsUpdatePreparationService().prepare(
+            check.release,
+          );
+
+          await const WindowsUpdateInstallationService().stageAndStart(archive);
+
+          if (!mounted) return;
+
+          final messenger = ScaffoldMessenger.maybeOf(context);
+          messenger?.showSnackBar(
+            SnackBar(
+              content: Text(copy.restartingForUpdate),
+              duration: const Duration(seconds: 3),
+            ),
+          );
+
+          await Future<void>.delayed(const Duration(milliseconds: 250));
+          exit(0);
+        } catch (error) {
+          if (!mounted) return;
+
+          ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+            SnackBar(
+              content: Text('Не удалось подготовить обновление FENYVO: $error'),
+              duration: const Duration(seconds: 8),
+            ),
+          );
+        }
+      } else {
+        await launchUrl(
+          check.release.downloadUrl,
+          mode: LaunchMode.externalApplication,
+        );
+      }
     } else if (!required) {
       await preferences.setInt(_skippedBuildKey, check.release.build);
       await preferences.setInt(
@@ -220,11 +259,9 @@ class _ReleaseSheet extends StatelessWidget {
         margin: const EdgeInsets.all(12),
         padding: const EdgeInsets.fromLTRB(22, 14, 22, 22),
         decoration: BoxDecoration(
-          color: SpartanPalette.surface,
+          color: FenyvoPalette.surface,
           borderRadius: BorderRadius.circular(28),
-          border: Border.all(
-            color: SpartanPalette.gold.withValues(alpha: .7),
-          ),
+          border: Border.all(color: FenyvoPalette.gold.withValues(alpha: .7)),
           boxShadow: const [
             BoxShadow(
               color: Color(0x66000000),
@@ -243,7 +280,7 @@ class _ReleaseSheet extends StatelessWidget {
                   width: 42,
                   height: 4,
                   decoration: BoxDecoration(
-                    color: SpartanPalette.secondary.withValues(alpha: .55),
+                    color: FenyvoPalette.secondary.withValues(alpha: .55),
                     borderRadius: BorderRadius.circular(10),
                   ),
                 ),
@@ -256,12 +293,12 @@ class _ReleaseSheet extends StatelessWidget {
                     height: 58,
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: SpartanPalette.gold.withValues(alpha: .14),
-                      border: Border.all(color: SpartanPalette.gold),
+                      color: FenyvoPalette.gold.withValues(alpha: .14),
+                      border: Border.all(color: FenyvoPalette.gold),
                     ),
                     child: const Icon(
                       Icons.bolt_rounded,
-                      color: SpartanPalette.gold,
+                      color: FenyvoPalette.gold,
                       size: 34,
                     ),
                   ),
@@ -281,7 +318,7 @@ class _ReleaseSheet extends StatelessWidget {
                         Text(
                           subtitle,
                           style: const TextStyle(
-                            color: SpartanPalette.secondary,
+                            color: FenyvoPalette.secondary,
                           ),
                         ),
                       ],
@@ -293,7 +330,7 @@ class _ReleaseSheet extends StatelessWidget {
               Text(
                 notesTitle.toUpperCase(),
                 style: const TextStyle(
-                  color: SpartanPalette.gold,
+                  color: FenyvoPalette.gold,
                   fontSize: 12,
                   fontWeight: FontWeight.w800,
                   letterSpacing: 1.6,
@@ -313,7 +350,7 @@ class _ReleaseSheet extends StatelessWidget {
                           padding: EdgeInsets.only(top: 3),
                           child: Icon(
                             Icons.check_circle_rounded,
-                            color: SpartanPalette.online,
+                            color: FenyvoPalette.online,
                             size: 19,
                           ),
                         ),
@@ -334,12 +371,12 @@ class _ReleaseSheet extends StatelessWidget {
                   width: double.infinity,
                   padding: const EdgeInsets.all(13),
                   decoration: BoxDecoration(
-                    color: SpartanPalette.gold.withValues(alpha: .1),
+                    color: FenyvoPalette.gold.withValues(alpha: .1),
                     borderRadius: BorderRadius.circular(14),
                   ),
                   child: Text(
                     requiredNotice!,
-                    style: const TextStyle(color: SpartanPalette.secondary),
+                    style: const TextStyle(color: FenyvoPalette.secondary),
                   ),
                 ),
               ],
@@ -388,6 +425,7 @@ class _UpdateCopy {
     required this.later,
     required this.continueLabel,
     required this.requiredNotice,
+    required this.restartingForUpdate,
     required this.versionWord,
     required this.buildWord,
   });
@@ -401,6 +439,7 @@ class _UpdateCopy {
   final String later;
   final String continueLabel;
   final String requiredNotice;
+  final String restartingForUpdate;
   final String versionWord;
   final String buildWord;
 
@@ -419,8 +458,9 @@ class _UpdateCopy {
           updateNow: 'Оновити зараз',
           later: 'Нагадати пізніше',
           continueLabel: 'Продовжити',
-          requiredNotice:
-              'Ця версія більше не сумісна із сервісом. Оновіть Fenyvo, щоб продовжити.',
+          requiredNotice: 'Ця версія більше не сумісна із сервісом. Оновіть Fenyvo, щоб продовжити.',
+          restartingForUpdate:
+              'FENYVO перезапускається для встановлення оновлення…',
           versionWord: 'Версія',
           buildWord: 'збірка',
         );
@@ -434,8 +474,9 @@ class _UpdateCopy {
           updateNow: 'Обновить сейчас',
           later: 'Напомнить позже',
           continueLabel: 'Продолжить',
-          requiredNotice:
-              'Эта версия больше не совместима с сервисом. Обновите Fenyvo, чтобы продолжить.',
+          requiredNotice: 'Эта версия больше не совместима с сервисом. Обновите Fenyvo, чтобы продолжить.',
+          restartingForUpdate:
+              'FENYVO перезапускается для установки обновления…',
           versionWord: 'Версия',
           buildWord: 'сборка',
         );
@@ -449,8 +490,8 @@ class _UpdateCopy {
           updateNow: 'Update now',
           later: 'Remind me later',
           continueLabel: 'Continue',
-          requiredNotice:
-              'This version is no longer compatible with the service. Update Fenyvo to continue.',
+          requiredNotice: 'This version is no longer compatible with the service. Update Fenyvo to continue.',
+          restartingForUpdate: 'FENYVO is restarting to install the update…',
           versionWord: 'Version',
           buildWord: 'build',
         );

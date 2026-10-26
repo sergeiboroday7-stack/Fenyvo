@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:spartan_chat_final/main.dart';
-import 'package:spartan_chat_final/screens/call_screen.dart';
-import 'package:spartan_chat_final/services/call_service.dart';
-import 'package:spartan_chat_final/services/call_result.dart';
-import 'package:spartan_chat_final/services/system_call_service.dart';
+import 'package:fenyvo/main.dart';
+import 'package:fenyvo/screens/call_screen.dart';
+import 'package:fenyvo/services/call_service.dart';
+import 'package:fenyvo/services/call_result.dart';
+import 'package:fenyvo/services/system_call_service.dart';
 
 void main() {
   final service = CallService.instance;

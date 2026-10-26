@@ -52,6 +52,65 @@ bool FlutterWindow::OnCreate() {
     } else result->NotImplemented();
   });
 
+  // FENYVO screen capture protection for the application window.
+  screen_security_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          flutter_controller_->engine()->messenger(),
+          "fenyvo/screen_security",
+          &flutter::StandardMethodCodec::GetInstance());
+
+  screen_security_channel_->SetMethodCallHandler(
+      [this](const auto& call, auto result) {
+        if (call.method_name() != "setSecure") {
+          result->NotImplemented();
+          return;
+        }
+
+        const auto* arguments =
+            std::get_if<flutter::EncodableMap>(call.arguments());
+
+        if (!arguments) {
+          result->Error("INVALID_ARGUMENTS", "Expected argument map");
+          return;
+        }
+
+        const auto it = arguments->find(flutter::EncodableValue("enabled"));
+
+        if (it == arguments->end()) {
+          result->Error("INVALID_ARGUMENTS", "Missing enabled argument");
+          return;
+        }
+
+        const auto* enabled = std::get_if<bool>(&it->second);
+
+        if (!enabled) {
+          result->Error("INVALID_ARGUMENTS", "Enabled must be boolean");
+          return;
+        }
+
+        HWND hwnd = GetHandle();
+
+        if (!hwnd || !IsWindow(hwnd)) {
+          result->Error("INVALID_WINDOW", "Window is not available");
+          return;
+        }
+
+        // WDA_EXCLUDEFROMCAPTURE requires Windows 10 version 2004+.
+        constexpr DWORD kExcludeFromCapture = 0x00000011;
+        const DWORD affinity =
+            *enabled ? kExcludeFromCapture : WDA_NONE;
+
+        if (!SetWindowDisplayAffinity(hwnd, affinity)) {
+          const DWORD error = GetLastError();
+          result->Error(
+              "CAPTURE_PROTECTION_FAILED",
+              "Windows could not change screen capture protection",
+              std::to_string(error));
+          return;
+        }
+
+        result->Success();
+      });
   taskbar_created_message_ = RegisterWindowMessageW(L"TaskbarCreated");
   restore_message_ = RegisterWindowMessageW(L"SPARTAN_CHAT_RESTORE_WINDOW");
   AddTrayIcon();
@@ -70,6 +129,7 @@ bool FlutterWindow::OnCreate() {
 
 void FlutterWindow::OnDestroy() {
   RemoveTrayIcon();
+  screen_security_channel_ = nullptr;
   window_channel_ = nullptr;
   if (flutter_controller_) {
     flutter_controller_ = nullptr;

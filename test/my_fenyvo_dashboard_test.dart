@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:spartan_chat_final/theme/spartan_theme.dart';
-import 'package:spartan_chat_final/widgets/my_fenyvo_dashboard.dart';
+import 'package:fenyvo/theme/fenyvo_theme.dart';
+import 'package:fenyvo/widgets/my_fenyvo_dashboard.dart';
 
 void main() {
   testWidgets('My Fenyvo keeps its identity and opens every quick action', (
@@ -11,7 +11,7 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        theme: SpartanPalette.blueGoldTheme,
+        theme: FenyvoPalette.blueGoldTheme,
         home: Scaffold(
           body: SingleChildScrollView(
             child: MyFenyvoDashboard(
@@ -88,7 +88,7 @@ void main() {
 
     await tester.pumpWidget(
       MaterialApp(
-        theme: SpartanPalette.blueGoldTheme,
+        theme: FenyvoPalette.blueGoldTheme,
         home: Scaffold(
           body: SingleChildScrollView(
             child: MyFenyvoDashboard(

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../theme/spartan_theme.dart';
+import '../theme/fenyvo_theme.dart';
 
 /// Replaces the current selection, preserving surrounding text and UTF-16 offsets.
 void insertComposerEmoji(TextEditingController controller, String emoji) {
@@ -234,7 +234,7 @@ class _EmojiSheetState extends State<ComposerEmojiPanel> {
                           'Noto Color Emoji',
                           'Apple Color Emoji',
                         ],
-                        color: SpartanPalette.ink,
+                        color: FenyvoPalette.ink,
                       ),
                     ),
                   ),

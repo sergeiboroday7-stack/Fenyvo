@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../services/socket_service.dart';
-import '../theme/spartan_theme.dart';
+import '../theme/fenyvo_theme.dart';
 
 class SupportAiScreen extends StatefulWidget {
   const SupportAiScreen({super.key});
@@ -365,15 +365,15 @@ class _SupportAiScreenState extends State<SupportAiScreen> {
               margin: const EdgeInsets.fromLTRB(14, 12, 14, 4),
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: SpartanPalette.surface.withValues(alpha: 0.72),
+                color: FenyvoPalette.surface.withValues(alpha: 0.72),
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(
-                  color: SpartanPalette.ink.withValues(alpha: 0.22),
+                  color: FenyvoPalette.ink.withValues(alpha: 0.22),
                 ),
               ),
               child: const Text(
                 'Отвечает ИИ, а не человек. Вопрос отправляется только после нажатия кнопки. Личные чаты автоматически не читаются.',
-                style: TextStyle(color: SpartanPalette.secondary, fontSize: 12),
+                style: TextStyle(color: FenyvoPalette.secondary, fontSize: 12),
               ),
             ),
             Padding(
@@ -411,16 +411,16 @@ class _SupportAiScreenState extends State<SupportAiScreen> {
                       ),
                       decoration: BoxDecoration(
                         color: message.fromUser
-                            ? SpartanPalette.blue
-                            : SpartanPalette.surface,
+                            ? FenyvoPalette.blue
+                            : FenyvoPalette.surface,
                         borderRadius: BorderRadius.circular(16),
                         border: Border.all(
-                          color: SpartanPalette.ink.withValues(alpha: 0.2),
+                          color: FenyvoPalette.ink.withValues(alpha: 0.2),
                         ),
                       ),
                       child: Text(
                         message.text,
-                        style: const TextStyle(color: SpartanPalette.ink),
+                        style: const TextStyle(color: FenyvoPalette.ink),
                       ),
                     ),
                   );
@@ -430,7 +430,7 @@ class _SupportAiScreenState extends State<SupportAiScreen> {
             if (_waiting)
               const LinearProgressIndicator(
                 minHeight: 2,
-                color: SpartanPalette.ink,
+                color: FenyvoPalette.ink,
               ),
             Padding(
               padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),

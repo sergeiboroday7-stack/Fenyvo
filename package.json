@@ -1,9 +1,12 @@
 {
+  "name": "fenyvo-server",
+  "version": "1.8.2",
+  "private": true,
   "scripts": {
-    "check": "node --check server.js && node --check server_security.js && node --test test/server_config_test.js test/server_security_test.js"
+    "check": "node --check server.js && node --check server_security.js && node --test --test-concurrency=1 test/*.js"
   },
   "dependencies": {
-    "firebase-admin": "^14.3.0",
-    "ws": "^8.21.3"
+    "firebase-admin": "14.5.0",
+    "ws": "8.22.0"
   }
 }

@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:spartan_chat_final/services/turn_credential_service.dart';
+import 'package:fenyvo/services/turn_credential_service.dart';
 
 void main() {
   tearDown(() => TurnCredentialService.configure(null));

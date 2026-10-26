@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:spartan_chat_final/widgets/call_controls.dart';
+import 'package:fenyvo/widgets/call_controls.dart';
 
 void main() {
   Widget controls({

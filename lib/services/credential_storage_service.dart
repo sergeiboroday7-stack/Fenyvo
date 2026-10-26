@@ -3,7 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 /// Stores the saved login password in the platform-protected credential store.
 ///
-/// Older SPARTAN builds used SharedPreferences. Migration is deliberately
+/// Older FENYVO builds used SharedPreferences. Migration is deliberately
 /// ordered as secure write -> legacy delete so an interrupted upgrade cannot
 /// silently lose the user's saved login.
 class CredentialStorageService {

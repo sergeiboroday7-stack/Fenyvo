@@ -1,60 +1,63 @@
 {
   "schemaVersion": 1,
-  "publishedAt": "2026-10-19T08:23:37Z",
+  "publishedAt": "2026-10-26T17:45:04Z",
   "platforms": {
     "android": {
       "version": "1.8.2",
-      "build": 4242,
+      "build": 4251,
       "minimumSupportedBuild": 0,
       "downloadUrl": "https://fenyvo.com/download/Fenyvo-1.8.2-arm64.apk",
-      "sha256": "c051081ba799f9d2447a653ce6a71e5b3a1171d1963e997b6b3e41df387dc734",
-      "sizeBytes": 77226801,
-      "publishedAt": "2026-10-19T08:23:37Z",
+      "sha256": "85ce58c922cc56e14637bd8349702b0403fa4c4608536f79dff3b1b8a7ee2a8f",
+      "sizeBytes": 77489537,
+      "publishedAt": "2026-10-26T17:45:04Z",
       "notes": {
         "ru": [
-          "Улучшена стабильность подключения участников группового видеозвонка.",
-          "Добавлено восстановление удалённого видео после краткого обрыва связи.",
-          "Исправлены регистрация, порядок сообщений и повторное подключение к звонку.",
+          "Возвращены поиск сообщений и защита экрана в личном чате.",
+          "Усилены доставка сообщений, защита от повторов и приватность статуса.",
+          "Добавлено безопасное восстановление доступа через 12 секретных слов.",
           "Это тестовый релиз: о проблемах можно сообщить через поддержку Fenyvo."
         ],
         "uk": [
-          "Покращено стабільність підключення учасників групового відеодзвінка.",
-          "Додано відновлення віддаленого відео після короткого розриву зв’язку.",
-          "Виправлено реєстрацію, порядок повідомлень і повторне підключення до дзвінка.",
+          "Повернено пошук повідомлень і захист екрана в особистому чаті.",
+          "Посилено доставку повідомлень, захист від повторів і приватність статусу.",
+          "Додано безпечне відновлення доступу за 12 секретними словами.",
           "Це тестовий реліз: про проблеми можна повідомити через підтримку Fenyvo."
         ],
         "en": [
-          "Improved participant connection stability in group video calls.",
-          "Added remote video recovery after a brief network interruption.",
-          "Fixed registration, message ordering, and call reconnection.",
+          "Restored message search and screen protection in private chats.",
+          "Hardened message delivery, deduplication, and presence privacy.",
+          "Added secure 12-word account recovery.",
           "This is a test release; report issues through Fenyvo Support."
         ]
       }
     },
     "windows": {
       "version": "1.8.2",
-      "build": 4242,
+      "build": 4251,
       "minimumSupportedBuild": 0,
       "downloadUrl": "https://fenyvo.com/download/Fenyvo-1.8.2-windows-x64.zip",
-      "sha256": "388458875c21864ca1a44aafb187b2dbba25e7a75af1a555aaeda6287007b467",
-      "sizeBytes": 30657714,
-      "publishedAt": "2026-10-19T08:23:37Z",
+      "sha256": "5c8e0d97e2a6cdb5bf3415f404335cfc9390c974eb943a6570fb37b675204d73",
+      "sizeBytes": 31335170,
+      "publishedAt": "2026-10-26T17:45:04Z",
       "notes": {
         "ru": [
-          "Улучшена стабильность групповых видеозвонков между Windows и Android.",
-          "Добавлено восстановление удалённого видео после краткого обрыва связи.",
+          "Исправлено автоматическое возвращение ведущего в групповой эфир.",
+          "После возвращения восстанавливаются камера ведущего и звук для участников.",
+          "Добавлено безопасное автоматическое обновление Windows с проверкой SHA-256 и аварийным откатом.",
           "Установщик обновляет приложение и ярлыки рабочего стола и меню Пуск.",
           "Это тестовый релиз: о проблемах можно сообщить через поддержку Fenyvo."
         ],
         "uk": [
-          "Покращено стабільність групових відеодзвінків між Windows та Android.",
-          "Додано відновлення віддаленого відео після короткого розриву зв’язку.",
+          "Виправлено автоматичне повернення ведучого до групового ефіру.",
+          "Після повернення відновлюються камера ведучого та звук для учасників.",
+          "Додано безпечне автоматичне оновлення Windows із перевіркою SHA-256 та аварійним відкатом.",
           "Інсталятор оновлює застосунок і ярлики робочого столу та меню Пуск.",
           "Це тестовий реліз: про проблеми можна повідомити через підтримку Fenyvo."
         ],
         "en": [
-          "Improved group video call stability between Windows and Android.",
-          "Added remote video recovery after a brief network interruption.",
+          "Fixed automatic host return to a group live session.",
+          "The host camera and participant audio recover after returning.",
+          "Added safe automatic Windows updates with SHA-256 verification and emergency rollback.",
           "The installer refreshes the app, Desktop, and Start Menu shortcuts.",
           "This is a test release; report issues through Fenyvo Support."
         ]

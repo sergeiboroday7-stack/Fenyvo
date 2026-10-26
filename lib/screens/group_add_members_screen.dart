@@ -1,4 +1,4 @@
-import '../theme/spartan_theme.dart';
+import '../theme/fenyvo_theme.dart';
 
 import 'package:flutter/material.dart';
 
@@ -14,7 +14,7 @@ class GroupAddMembersScreen extends StatefulWidget {
 }
 
 class _GroupAddMembersScreenState extends State<GroupAddMembersScreen> {
-  static const Color _gold = SpartanPalette.ink;
+  static const Color _gold = FenyvoPalette.ink;
 
   final Set<String> _selectedUsers = <String>{};
   List<String> _users = <String>[];
@@ -121,7 +121,7 @@ class _GroupAddMembersScreenState extends State<GroupAddMembersScreen> {
                 ? 'Не удалось добавить участников'
                 : reason,
           ),
-          backgroundColor: SpartanPalette.surface,
+          backgroundColor: FenyvoPalette.surface,
         ),
       );
     }
@@ -144,10 +144,10 @@ class _GroupAddMembersScreenState extends State<GroupAddMembersScreen> {
     final groupName = widget.group['name']?.toString().trim() ?? 'Группа';
 
     return Scaffold(
-      backgroundColor: SpartanPalette.canvas,
+      backgroundColor: FenyvoPalette.canvas,
       appBar: AppBar(
-        backgroundColor: SpartanPalette.canvas,
-        foregroundColor: SpartanPalette.ink,
+        backgroundColor: FenyvoPalette.canvas,
+        foregroundColor: FenyvoPalette.ink,
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -164,7 +164,7 @@ class _GroupAddMembersScreenState extends State<GroupAddMembersScreen> {
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
-                color: SpartanPalette.secondary,
+                color: FenyvoPalette.secondary,
                 fontSize: 12,
               ),
             ),
@@ -181,7 +181,7 @@ class _GroupAddMembersScreenState extends State<GroupAddMembersScreen> {
                   const Text(
                     'Новые участники',
                     style: TextStyle(
-                      color: SpartanPalette.ink,
+                      color: FenyvoPalette.ink,
                       fontWeight: FontWeight.w700,
                       fontSize: 16,
                     ),
@@ -205,7 +205,7 @@ class _GroupAddMembersScreenState extends State<GroupAddMembersScreen> {
                           'Все зарегистрированные пользователи уже в группе',
                           textAlign: TextAlign.center,
                           style: TextStyle(
-                            color: SpartanPalette.secondary,
+                            color: FenyvoPalette.secondary,
                             fontSize: 15,
                           ),
                         ),
@@ -219,14 +219,14 @@ class _GroupAddMembersScreenState extends State<GroupAddMembersScreen> {
 
                         return CheckboxListTile(
                           value: selected,
-                          activeColor: SpartanPalette.blue,
-                          checkColor: SpartanPalette.ink,
+                          activeColor: FenyvoPalette.blue,
+                          checkColor: FenyvoPalette.ink,
                           title: Text(
                             user,
-                            style: const TextStyle(color: SpartanPalette.ink),
+                            style: const TextStyle(color: FenyvoPalette.ink),
                           ),
                           secondary: CircleAvatar(
-                            backgroundColor: SpartanPalette.surface,
+                            backgroundColor: FenyvoPalette.surface,
                             child: Text(
                               user.isEmpty ? '?' : user[0].toUpperCase(),
                               style: const TextStyle(
@@ -265,7 +265,7 @@ class _GroupAddMembersScreenState extends State<GroupAddMembersScreen> {
                           height: 20,
                           child: CircularProgressIndicator(
                             strokeWidth: 2,
-                            color: SpartanPalette.ink,
+                            color: FenyvoPalette.ink,
                           ),
                         )
                       : const Icon(Icons.person_add_alt_1_rounded),
@@ -277,10 +277,10 @@ class _GroupAddMembersScreenState extends State<GroupAddMembersScreen> {
                         : 'Добавить (${_selectedUsers.length})',
                   ),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: SpartanPalette.blue,
-                    foregroundColor: SpartanPalette.ink,
-                    disabledBackgroundColor: SpartanPalette.surface,
-                    disabledForegroundColor: SpartanPalette.muted,
+                    backgroundColor: FenyvoPalette.blue,
+                    foregroundColor: FenyvoPalette.ink,
+                    disabledBackgroundColor: FenyvoPalette.surface,
+                    disabledForegroundColor: FenyvoPalette.muted,
                     textStyle: const TextStyle(
                       fontWeight: FontWeight.w800,
                       fontSize: 16,

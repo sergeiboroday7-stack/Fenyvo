@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import '../theme/spartan_theme.dart';
+import '../theme/fenyvo_theme.dart';
 
 class MyFenyvoDashboard extends StatelessWidget {
   const MyFenyvoDashboard({
@@ -57,8 +57,8 @@ class MyFenyvoDashboard extends StatelessWidget {
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
                 colors: [
-                  SpartanPalette.surfaceRaised,
-                  SpartanPalette.canvasDeep,
+                  FenyvoPalette.surfaceRaised,
+                  FenyvoPalette.canvasDeep,
                 ],
               ),
               boxShadow: const [
@@ -77,13 +77,13 @@ class MyFenyvoDashboard extends StatelessWidget {
                       width: 42,
                       height: 42,
                       decoration: BoxDecoration(
-                        color: SpartanPalette.gold.withValues(alpha: 0.14),
+                        color: FenyvoPalette.gold.withValues(alpha: 0.14),
                         shape: BoxShape.circle,
-                        border: Border.all(color: SpartanPalette.gold),
+                        border: Border.all(color: FenyvoPalette.gold),
                       ),
                       child: const Icon(
                         Icons.bolt_rounded,
-                        color: SpartanPalette.gold,
+                        color: FenyvoPalette.gold,
                         size: 26,
                       ),
                     ),
@@ -95,7 +95,7 @@ class MyFenyvoDashboard extends StatelessWidget {
                           Text(
                             'МОЙ FENYVO',
                             style: TextStyle(
-                              color: SpartanPalette.ink,
+                              color: FenyvoPalette.ink,
                               fontSize: 20,
                               fontWeight: FontWeight.w800,
                               letterSpacing: 1.2,
@@ -104,7 +104,7 @@ class MyFenyvoDashboard extends StatelessWidget {
                           Text(
                             'Личный кабинет',
                             style: TextStyle(
-                              color: SpartanPalette.gold,
+                              color: FenyvoPalette.gold,
                               fontSize: 12,
                               letterSpacing: 1.4,
                             ),
@@ -129,7 +129,7 @@ class MyFenyvoDashboard extends StatelessWidget {
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
                               border: Border.all(
-                                color: SpartanPalette.gold,
+                                color: FenyvoPalette.gold,
                                 width: 2,
                               ),
                             ),
@@ -142,16 +142,16 @@ class MyFenyvoDashboard extends StatelessWidget {
                               width: 34,
                               height: 34,
                               decoration: BoxDecoration(
-                                color: SpartanPalette.gold,
+                                color: FenyvoPalette.gold,
                                 shape: BoxShape.circle,
                                 border: Border.all(
-                                  color: SpartanPalette.canvasDeep,
+                                  color: FenyvoPalette.canvasDeep,
                                   width: 3,
                                 ),
                               ),
                               child: const Icon(
                                 Icons.camera_alt_rounded,
-                                color: SpartanPalette.onGold,
+                                color: FenyvoPalette.onGold,
                                 size: 17,
                               ),
                             ),
@@ -177,7 +177,7 @@ class MyFenyvoDashboard extends StatelessWidget {
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
-                              color: SpartanPalette.ink,
+                              color: FenyvoPalette.ink,
                               fontSize: 23,
                               fontWeight: FontWeight.w800,
                             ),
@@ -189,12 +189,12 @@ class MyFenyvoDashboard extends StatelessWidget {
                               vertical: 6,
                             ),
                             decoration: BoxDecoration(
-                              color: SpartanPalette.online.withValues(
+                              color: FenyvoPalette.online.withValues(
                                 alpha: 0.10,
                               ),
                               borderRadius: BorderRadius.circular(20),
                               border: Border.all(
-                                color: SpartanPalette.online.withValues(
+                                color: FenyvoPalette.online.withValues(
                                   alpha: 0.45,
                                 ),
                               ),
@@ -205,7 +205,7 @@ class MyFenyvoDashboard extends StatelessWidget {
                                 const Icon(
                                   Icons.circle,
                                   size: 8,
-                                  color: SpartanPalette.online,
+                                  color: FenyvoPalette.online,
                                 ),
                                 const SizedBox(width: 7),
                                 Flexible(
@@ -214,7 +214,7 @@ class MyFenyvoDashboard extends StatelessWidget {
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                     style: const TextStyle(
-                                      color: SpartanPalette.online,
+                                      color: FenyvoPalette.online,
                                       fontSize: 13,
                                       fontWeight: FontWeight.w600,
                                     ),
@@ -230,7 +230,7 @@ class MyFenyvoDashboard extends StatelessWidget {
                             overflow: TextOverflow.ellipsis,
                             textAlign: TextAlign.start,
                             style: const TextStyle(
-                              color: SpartanPalette.secondary,
+                              color: FenyvoPalette.secondary,
                               height: 1.35,
                             ),
                           ),
@@ -241,7 +241,7 @@ class MyFenyvoDashboard extends StatelessWidget {
                               children: [
                                 const Icon(
                                   Icons.location_on_outlined,
-                                  color: SpartanPalette.gold,
+                                  color: FenyvoPalette.gold,
                                   size: 17,
                                 ),
                                 const SizedBox(width: 5),
@@ -251,7 +251,7 @@ class MyFenyvoDashboard extends StatelessWidget {
                                     maxLines: 1,
                                     overflow: TextOverflow.ellipsis,
                                     style: const TextStyle(
-                                      color: SpartanPalette.secondary,
+                                      color: FenyvoPalette.secondary,
                                       fontSize: 13,
                                     ),
                                   ),
@@ -266,7 +266,7 @@ class MyFenyvoDashboard extends StatelessWidget {
                 ),
                 if (phone.trim().isNotEmpty || birthDate.trim().isNotEmpty) ...[
                   const SizedBox(height: 14),
-                  const Divider(color: SpartanPalette.line),
+                  const Divider(color: FenyvoPalette.line),
                   const SizedBox(height: 5),
                   Wrap(
                     alignment: WrapAlignment.center,
@@ -295,7 +295,7 @@ class MyFenyvoDashboard extends StatelessWidget {
             child: Text(
               'БЫСТРЫЕ ДЕЙСТВИЯ',
               style: TextStyle(
-                color: SpartanPalette.gold,
+                color: FenyvoPalette.gold,
                 fontSize: 12,
                 fontWeight: FontWeight.w800,
                 letterSpacing: 1.2,
@@ -370,14 +370,14 @@ class MyFenyvoDashboard extends StatelessWidget {
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(22),
               border: Border.all(
-                color: SpartanPalette.gold.withValues(alpha: 0.55),
+                color: FenyvoPalette.gold.withValues(alpha: 0.55),
               ),
               gradient: const LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
                 colors: [
-                  SpartanPalette.surfaceRaised,
-                  SpartanPalette.canvasDeep,
+                  FenyvoPalette.surfaceRaised,
+                  FenyvoPalette.canvasDeep,
                 ],
               ),
             ),
@@ -387,12 +387,12 @@ class MyFenyvoDashboard extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: SpartanPalette.gold.withValues(alpha: 0.14),
+                    color: FenyvoPalette.gold.withValues(alpha: 0.14),
                     borderRadius: BorderRadius.circular(14),
                   ),
                   child: const Icon(
                     Icons.bolt_rounded,
-                    color: SpartanPalette.gold,
+                    color: FenyvoPalette.gold,
                     size: 28,
                   ),
                 ),
@@ -404,7 +404,7 @@ class MyFenyvoDashboard extends StatelessWidget {
                       Text(
                         'РАЗВИТИЕ FENYVO',
                         style: TextStyle(
-                          color: SpartanPalette.gold,
+                          color: FenyvoPalette.gold,
                           fontSize: 16,
                           fontWeight: FontWeight.w800,
                           letterSpacing: 0.7,
@@ -414,7 +414,7 @@ class MyFenyvoDashboard extends StatelessWidget {
                       Text(
                         'Вместе делаем Fenyvo лучше',
                         style: TextStyle(
-                          color: SpartanPalette.ink,
+                          color: FenyvoPalette.ink,
                           fontSize: 14,
                           fontWeight: FontWeight.w600,
                         ),
@@ -425,7 +425,7 @@ class MyFenyvoDashboard extends StatelessWidget {
                         'и фирменные значки. Основное общение '
                         'останется бесплатным.',
                         style: TextStyle(
-                          color: SpartanPalette.secondary,
+                          color: FenyvoPalette.secondary,
                           fontSize: 12,
                           height: 1.45,
                         ),
@@ -434,7 +434,7 @@ class MyFenyvoDashboard extends StatelessWidget {
                       Text(
                         'НОВЫЕ ВОЗМОЖНОСТИ — ВПЕРЕДИ',
                         style: TextStyle(
-                          color: SpartanPalette.gold,
+                          color: FenyvoPalette.gold,
                           fontSize: 11,
                           fontWeight: FontWeight.w700,
                           letterSpacing: 1,
@@ -471,11 +471,11 @@ class _ProfileFact extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, color: SpartanPalette.gold, size: 17),
+        Icon(icon, color: FenyvoPalette.gold, size: 17),
         const SizedBox(width: 6),
         Text(
           value,
-          style: const TextStyle(color: SpartanPalette.secondary, fontSize: 13),
+          style: const TextStyle(color: FenyvoPalette.secondary, fontSize: 13),
         ),
       ],
     );
@@ -503,7 +503,7 @@ class _DashboardAction extends StatelessWidget {
       width: width,
       height: 100,
       child: Material(
-        color: SpartanPalette.surfaceRaised,
+        color: FenyvoPalette.surfaceRaised,
         borderRadius: BorderRadius.circular(18),
         child: InkWell(
           onTap: onTap,
@@ -512,12 +512,12 @@ class _DashboardAction extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 12),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: SpartanPalette.line),
+              border: Border.all(color: FenyvoPalette.line),
             ),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(icon, color: SpartanPalette.gold, size: 27),
+                Icon(icon, color: FenyvoPalette.gold, size: 27),
                 const SizedBox(height: 10),
                 Text(
                   title,
@@ -525,7 +525,7 @@ class _DashboardAction extends StatelessWidget {
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                    color: SpartanPalette.ink,
+                    color: FenyvoPalette.ink,
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
                     height: 1.15,

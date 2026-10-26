@@ -5,8 +5,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:path_provider_platform_interface/path_provider_platform_interface.dart';
-import 'package:spartan_chat_final/services/saved_messages_service.dart';
-import 'package:spartan_chat_final/widgets/emoji_picker.dart';
+import 'package:fenyvo/services/saved_messages_service.dart';
+import 'package:fenyvo/widgets/emoji_picker.dart';
 
 class _Paths extends PathProviderPlatform {
   _Paths(this.root);

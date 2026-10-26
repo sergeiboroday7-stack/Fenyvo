@@ -80,7 +80,7 @@ internal class IncomingCallAlertController(context: Context) {
         val next = try {
             readPolicy()
         } catch (error: Exception) {
-            Log.w("SpartanCall", "Could not read ringing policy", error)
+            Log.w("FenyvoCall", "Could not read ringing policy", error)
             IncomingAlertPolicy(false, false)
         }
         val previous = policy
@@ -129,7 +129,7 @@ internal class IncomingCallAlertController(context: Context) {
                     try {
                         if (readPolicy().sound) prepared.start() else stopSound()
                     } catch (error: Exception) {
-                        Log.w("SpartanCall", "Ringtone playback unavailable", error)
+                        Log.w("FenyvoCall", "Ringtone playback unavailable", error)
                         stopSound()
                     }
                 }
@@ -140,7 +140,7 @@ internal class IncomingCallAlertController(context: Context) {
             }
             candidate.prepareAsync()
         } catch (error: Exception) {
-            Log.w("SpartanCall", "Ringtone preparation unavailable", error)
+            Log.w("FenyvoCall", "Ringtone preparation unavailable", error)
             stopSound()
         }
     }
@@ -183,7 +183,7 @@ internal class IncomingCallAlertController(context: Context) {
                 vibrator.vibrate(timings, 0, attributes)
             }
         } catch (error: Exception) {
-            Log.w("SpartanCall", "Call vibration unavailable", error)
+            Log.w("FenyvoCall", "Call vibration unavailable", error)
         }
     }
 

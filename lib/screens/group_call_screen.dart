@@ -17,7 +17,7 @@ import '../services/group_call_state.dart';
 import '../services/media_transfer_service.dart';
 import '../services/socket_service.dart';
 import '../services/storage_service.dart';
-import '../theme/spartan_theme.dart';
+import '../theme/fenyvo_theme.dart';
 import 'chat_screen.dart';
 import 'group_chat_screen.dart';
 
@@ -294,13 +294,13 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
                   children: [
                     CircleAvatar(
                       radius: 50,
-                      backgroundColor: SpartanPalette.surface,
+                      backgroundColor: FenyvoPalette.surface,
                       backgroundImage: avatar,
                       child: avatar == null
                           ? Text(
                               user[0].toUpperCase(),
                               style: const TextStyle(
-                                color: SpartanPalette.gold,
+                                color: FenyvoPalette.gold,
                                 fontSize: 34,
                                 fontWeight: FontWeight.w700,
                               ),
@@ -1812,7 +1812,7 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
                             children: [
                               const Icon(
                                 Icons.push_pin_rounded,
-                                color: SpartanPalette.gold,
+                                color: FenyvoPalette.gold,
                                 size: 17,
                               ),
                               const SizedBox(width: 7),
@@ -1977,7 +1977,7 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
                                                   child: CircleAvatar(
                                                     radius: 16,
                                                     backgroundColor:
-                                                        SpartanPalette.surface,
+                                                        FenyvoPalette.surface,
                                                     backgroundImage: image,
                                                     child: image == null
                                                         ? Text(
@@ -1987,7 +1987,7 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
                                                                       .toUpperCase(),
                                                             style: const TextStyle(
                                                               color:
-                                                                  SpartanPalette
+                                                                  FenyvoPalette
                                                                       .gold,
                                                               fontWeight:
                                                                   FontWeight
@@ -2017,7 +2017,7 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
                                                         style: const TextStyle(
                                                           fontWeight:
                                                               FontWeight.w700,
-                                                          color: SpartanPalette
+                                                          color: FenyvoPalette
                                                               .gold,
                                                         ),
                                                       ),
@@ -2282,13 +2282,13 @@ class _HostGraceStageState extends State<_HostGraceStage> {
                     color: Colors.black.withValues(alpha: 0.42),
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(
-                      color: SpartanPalette.gold.withValues(alpha: 0.45),
+                      color: FenyvoPalette.gold.withValues(alpha: 0.45),
                     ),
                   ),
                   child: Text(
                     _countdown,
                     style: const TextStyle(
-                      color: SpartanPalette.gold,
+                      color: FenyvoPalette.gold,
                       fontSize: 34,
                       fontWeight: FontWeight.w700,
                       letterSpacing: 2,
@@ -2362,7 +2362,7 @@ class _HostGraceStageState extends State<_HostGraceStage> {
                         const Text(
                           'Ведущий',
                           style: TextStyle(
-                            color: SpartanPalette.gold,
+                            color: FenyvoPalette.gold,
                             fontSize: 11,
                           ),
                         ),
@@ -2414,7 +2414,7 @@ class _FeaturedUserChip extends StatelessWidget {
             children: [
               CircleAvatar(
                 radius: 21,
-                backgroundColor: SpartanPalette.surface,
+                backgroundColor: FenyvoPalette.surface,
                 backgroundImage: avatar,
                 child: avatar == null
                     ? Text(
@@ -2422,7 +2422,7 @@ class _FeaturedUserChip extends StatelessWidget {
                             ? '?'
                             : member.user[0].toUpperCase(),
                         style: const TextStyle(
-                          color: SpartanPalette.gold,
+                          color: FenyvoPalette.gold,
                           fontWeight: FontWeight.w800,
                         ),
                       )
@@ -2550,13 +2550,13 @@ class _VideoTile extends StatelessWidget {
           decoration: BoxDecoration(
             color: const Color(0xFF171717),
             border: Border.all(
-              color: speaking ? SpartanPalette.gold : Colors.white12,
+              color: speaking ? FenyvoPalette.gold : Colors.white12,
               width: speaking ? 2.8 : 1,
             ),
             boxShadow: speaking
                 ? [
                     BoxShadow(
-                      color: SpartanPalette.gold.withValues(alpha: 0.50),
+                      color: FenyvoPalette.gold.withValues(alpha: 0.50),
                       blurRadius: 14,
                       spreadRadius: 1,
                     ),
@@ -2675,14 +2675,14 @@ class _VideoTile extends StatelessWidget {
                       color: Colors.black.withValues(alpha: 0.58),
                       shape: BoxShape.circle,
                       border: Border.all(
-                        color: SpartanPalette.gold.withValues(alpha: 0.55),
+                        color: FenyvoPalette.gold.withValues(alpha: 0.55),
                       ),
                     ),
                     child: Icon(
                       host
                           ? Icons.workspace_premium_rounded
                           : Icons.shield_rounded,
-                      color: SpartanPalette.gold,
+                      color: FenyvoPalette.gold,
                       size: 17,
                     ),
                   ),
@@ -3072,7 +3072,7 @@ class _InviteOverlay extends StatelessWidget {
           margin: const EdgeInsets.all(24),
           padding: const EdgeInsets.all(22),
           decoration: BoxDecoration(
-            color: SpartanPalette.surface,
+            color: FenyvoPalette.surface,
             borderRadius: BorderRadius.circular(26),
           ),
           child: Column(
@@ -3081,7 +3081,7 @@ class _InviteOverlay extends StatelessWidget {
               const Icon(
                 Icons.groups_rounded,
                 size: 54,
-                color: SpartanPalette.blue,
+                color: FenyvoPalette.blue,
               ),
               const SizedBox(height: 14),
               Text(
@@ -3208,7 +3208,7 @@ class _CallUserAction extends StatelessWidget {
     required this.label,
     required this.onTap,
     this.subtitle,
-    this.accent = SpartanPalette.gold,
+    this.accent = FenyvoPalette.gold,
   });
 
   final IconData icon;
@@ -3282,7 +3282,7 @@ class _AvatarView extends StatelessWidget {
       child: CircleAvatar(
         radius: featured ? 58 : 34,
         backgroundImage: avatar,
-        backgroundColor: SpartanPalette.blue,
+        backgroundColor: FenyvoPalette.blue,
         child: avatar == null
             ? Icon(
                 Icons.person_rounded,

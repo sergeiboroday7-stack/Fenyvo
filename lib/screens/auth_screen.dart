@@ -1,5 +1,7 @@
+import '../widgets/fenyvo_brand_mark.dart';
+import 'account_recovery_screen.dart';
+
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -633,6 +635,56 @@ class _AuthScreenState extends State<AuthScreen> {
           style: const TextStyle(color: _muted, fontSize: 13),
         ),
         const SizedBox(height: 19),
+        if (!registration) ...[
+          const SizedBox(height: 6),
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              onPressed: _isLoading
+                  ? null
+                  : () async {
+                      final recoveredUser = await Navigator.of(context)
+                          .push<String>(
+                            MaterialPageRoute<String>(
+                              builder: (_) => const AccountRecoveryScreen(),
+                            ),
+                          );
+                      if (!context.mounted || recoveredUser == null) return;
+                      setState(() {
+                        _usernameController.text = recoveredUser;
+                        _passwordController.clear();
+                      });
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          backgroundColor: const Color(0xFF166534),
+                          behavior: SnackBarBehavior.floating,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                          duration: const Duration(seconds: 5),
+                          content: const Row(
+                            children: [
+                              Icon(
+                                Icons.check_circle_outline,
+                                color: Colors.white,
+                              ),
+                              SizedBox(width: 12),
+                              Expanded(
+                                child: Text(
+                                  'Пароль восстановлен! Теперь войдите с новым паролем.',
+                                  style: TextStyle(color: Colors.white),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+              child: const Text('Забыли пароль?'),
+            ),
+          ),
+        ],
+
         if (registration) ...[
           DropdownButtonFormField<String>(
             initialValue: language.code.value,
@@ -970,7 +1022,7 @@ class _AuthScreenState extends State<AuthScreen> {
                               ? Duration.zero
                               : const Duration(milliseconds: 250),
                           curve: Curves.easeOutCubic,
-                          child: _PremiumOrbitMark(size: logoSize),
+                          child: FenyvoBrandMark(size: logoSize),
                         ),
                         SizedBox(height: veryCompact ? 5 : 9),
                         Text(
@@ -1034,7 +1086,7 @@ class _AuthScreenState extends State<AuthScreen> {
                         ),
                         SizedBox(height: veryCompact ? 12 : 19),
                         const Text(
-                          'Без обязательного телефона и почты. Восстановление доступа по секретным словам пока не подключено.',
+                          'Без обязательного телефона и почты. Восстановите доступ с помощью 12 секретных слов.',
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             color: _muted,
@@ -1062,112 +1114,4 @@ class _AuthScreenState extends State<AuthScreen> {
       ),
     );
   }
-}
-
-class _PremiumOrbitMark extends StatefulWidget {
-  const _PremiumOrbitMark({required this.size});
-  final double size;
-
-  @override
-  State<_PremiumOrbitMark> createState() => _PremiumOrbitMarkState();
-}
-
-class _PremiumOrbitMarkState extends State<_PremiumOrbitMark>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _rotation;
-  @override
-  void initState() {
-    super.initState();
-    _rotation = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 10),
-    )..repeat();
-  }
-
-  @override
-  void dispose() {
-    _rotation.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final media = MediaQuery.of(context);
-    final reducedMotion = media.disableAnimations || media.accessibleNavigation;
-    if (reducedMotion) {
-      _rotation.stop();
-    } else if (!_rotation.isAnimating) {
-      _rotation.repeat();
-    }
-    return SizedBox(
-      width: widget.size,
-      height: widget.size,
-      child: Stack(
-        alignment: Alignment.center,
-        children: [
-          Positioned.fill(
-            child: AnimatedBuilder(
-              animation: _rotation,
-              builder: (context, child) => CustomPaint(
-                painter: _PremiumOrbitPainter(
-                  reducedMotion ? 0 : _rotation.value,
-                ),
-              ),
-            ),
-          ),
-          Container(
-            width: widget.size * .70,
-            height: widget.size * .70,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              boxShadow: [
-                BoxShadow(
-                  color: const Color(0xFFE6BE69).withValues(alpha: .13),
-                  blurRadius: 32,
-                  spreadRadius: 2,
-                ),
-              ],
-            ),
-            child: Image.asset(
-              'assets/images/spartan_brand.png',
-              fit: BoxFit.contain,
-              semanticLabel: 'FENYVO',
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _PremiumOrbitPainter extends CustomPainter {
-  const _PremiumOrbitPainter(this.phase);
-  final double phase;
-  @override
-  void paint(Canvas canvas, Size size) {
-    final center = Offset(size.width / 2, size.height / 2);
-    final radius = size.shortestSide * .455;
-    final rect = Rect.fromCircle(center: center, radius: radius);
-    final track = Paint()
-      ..color = const Color(0xFF7194B5).withValues(alpha: .28)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 1.2;
-    canvas.drawCircle(center, radius, track);
-    final arcPaint = Paint()
-      ..color = const Color(0xFFE6BE69)
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.3
-      ..strokeCap = StrokeCap.round;
-    final a = phase * 2 * math.pi;
-    canvas.drawArc(rect, a, math.pi * .55, false, arcPaint);
-    final dot = Offset(
-      center.dx + radius * math.cos(a),
-      center.dy + radius * math.sin(a),
-    );
-    canvas.drawCircle(dot, 4, Paint()..color = const Color(0xFFF4DA9E));
-  }
-
-  @override
-  bool shouldRepaint(covariant _PremiumOrbitPainter oldDelegate) =>
-      oldDelegate.phase != phase;
 }

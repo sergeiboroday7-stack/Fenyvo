@@ -18,7 +18,7 @@
 
     <application
         android:label="Fenyvo"
-        android:name=".SpartanApplication"
+        android:name=".FenyvoApplication"
         android:allowBackup="false"
         android:fullBackupContent="false"
         android:usesCleartextTraffic="true"

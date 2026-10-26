@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:spartan_chat_final/services/app_visibility.dart';
-import 'package:spartan_chat_final/services/call_clock.dart';
-import 'package:spartan_chat_final/services/system_call_service.dart';
+import 'package:fenyvo/services/app_visibility.dart';
+import 'package:fenyvo/services/call_clock.dart';
+import 'package:fenyvo/services/system_call_service.dart';
 
 void main() {
   test('selected chat only suppresses alerts while visible', () {

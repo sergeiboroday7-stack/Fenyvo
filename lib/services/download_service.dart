@@ -4,7 +4,7 @@ import 'dart:typed_data';
 import 'package:path_provider/path_provider.dart';
 import 'package:public_file_saver/public_file_saver.dart';
 
-class SpartanDownloadService {
+class FenyvoDownloadService {
   static const String folderName = 'Fenyvo';
 
   static String _safeFileName(String value) {

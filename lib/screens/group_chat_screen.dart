@@ -1,5 +1,5 @@
 import '../main.dart';
-import '../theme/spartan_theme.dart';
+import '../theme/fenyvo_theme.dart';
 
 import 'dart:async';
 import 'dart:io';
@@ -197,13 +197,13 @@ class _InlineGroupVideoState extends State<_InlineGroupVideo> {
 
   @override
   Widget build(BuildContext context) {
-    const foreground = SpartanPalette.ink;
+    const foreground = FenyvoPalette.ink;
     if (_loading) {
       return SizedBox(
         width: 270,
         height: 152,
         child: Center(
-          child: CircularProgressIndicator(color: SpartanPalette.ink),
+          child: CircularProgressIndicator(color: FenyvoPalette.ink),
         ),
       );
     }
@@ -219,7 +219,7 @@ class _InlineGroupVideoState extends State<_InlineGroupVideo> {
           children: [
             Icon(
               Icons.videocam_off_outlined,
-              color: SpartanPalette.ink,
+              color: FenyvoPalette.ink,
               size: 30,
             ),
             const SizedBox(width: 10),
@@ -363,7 +363,7 @@ class _InlineGroupVideoState extends State<_InlineGroupVideo> {
 }
 
 class _GroupChatScreenState extends State<GroupChatScreen> {
-  static const Color _gold = SpartanPalette.gold;
+  static const Color _gold = FenyvoPalette.gold;
 
   static const List<String> _supportedReactions = <String>[
     '❤️',
@@ -620,7 +620,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
     final canReturnAsHost = call.owner == service.user && !alreadyInside;
     final pending = service.isJoinPending(_groupId);
     return Material(
-      color: SpartanPalette.blue,
+      color: FenyvoPalette.blue,
       child: InkWell(
         onTap: pending ? null : () => _startGroupCall(withVideo: true),
         child: Padding(
@@ -633,11 +633,11 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                 decoration: BoxDecoration(
                   color: Colors.black54,
                   borderRadius: BorderRadius.circular(11),
-                  border: Border.all(color: SpartanPalette.gold),
+                  border: Border.all(color: FenyvoPalette.gold),
                 ),
                 child: const Icon(
                   Icons.videocam_rounded,
-                  color: SpartanPalette.gold,
+                  color: FenyvoPalette.gold,
                 ),
               ),
               const SizedBox(width: 10),
@@ -792,7 +792,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('В группе можно закрепить до 10 сообщений'),
-          backgroundColor: SpartanPalette.surface,
+          backgroundColor: FenyvoPalette.surface,
         ),
       );
       return;
@@ -815,7 +815,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         duration: const Duration(milliseconds: 1100),
-        backgroundColor: SpartanPalette.surface,
+        backgroundColor: FenyvoPalette.surface,
         content: Text(
           alreadyPinned ? 'Сообщение откреплено' : 'Сообщение закреплено',
         ),
@@ -1110,7 +1110,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
               ? 'Сообщение переслано'
               : 'Отправлено получателям: ${recipients.length}',
         ),
-        backgroundColor: SpartanPalette.surface,
+        backgroundColor: FenyvoPalette.surface,
       ),
     );
   }
@@ -1151,7 +1151,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Нет доступных чатов для пересылки'),
-          backgroundColor: SpartanPalette.surface,
+          backgroundColor: FenyvoPalette.surface,
         ),
       );
       return;
@@ -1173,7 +1173,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
 
     await showModalBottomSheet<void>(
       context: context,
-      backgroundColor: SpartanPalette.surface,
+      backgroundColor: FenyvoPalette.surface,
       isScrollControlled: true,
       showDragHandle: true,
       builder: (sheetContext) {
@@ -1197,7 +1197,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                           Text(
                             '��������� ���������',
                             style: TextStyle(
-                              color: SpartanPalette.ink,
+                              color: FenyvoPalette.ink,
                               fontSize: 18,
                               fontWeight: FontWeight.w800,
                             ),
@@ -1213,18 +1213,18 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                             filter = value.trim().toLowerCase();
                           });
                         },
-                        style: const TextStyle(color: SpartanPalette.ink),
+                        style: const TextStyle(color: FenyvoPalette.ink),
                         decoration: InputDecoration(
                           hintText: '����� ����������',
                           hintStyle: const TextStyle(
-                            color: SpartanPalette.muted,
+                            color: FenyvoPalette.muted,
                           ),
                           prefixIcon: const Icon(
                             Icons.search_rounded,
                             color: _gold,
                           ),
                           filled: true,
-                          fillColor: SpartanPalette.surface,
+                          fillColor: FenyvoPalette.surface,
                           border: OutlineInputBorder(
                             borderRadius: BorderRadius.circular(16),
                             borderSide: BorderSide.none,
@@ -1237,7 +1237,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                       margin: const EdgeInsets.fromLTRB(14, 4, 14, 8),
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: SpartanPalette.surface,
+                        color: FenyvoPalette.surface,
                         borderRadius: BorderRadius.circular(14),
                         border: Border.all(
                           color: _gold.withValues(alpha: 0.30),
@@ -1262,7 +1262,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                             maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
-                              color: SpartanPalette.secondary,
+                              color: FenyvoPalette.secondary,
                               fontSize: 12,
                             ),
                           ),
@@ -1278,7 +1278,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
 
                           return ListTile(
                             leading: CircleAvatar(
-                              backgroundColor: SpartanPalette.surface,
+                              backgroundColor: FenyvoPalette.surface,
                               child: Text(
                                 user.isEmpty ? '?' : user[0].toUpperCase(),
                                 style: const TextStyle(
@@ -1290,7 +1290,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                             title: Text(
                               user,
                               style: const TextStyle(
-                                color: SpartanPalette.ink,
+                                color: FenyvoPalette.ink,
                                 fontWeight: FontWeight.w600,
                               ),
                             ),
@@ -1298,7 +1298,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                               selected
                                   ? Icons.check_circle_rounded
                                   : Icons.circle_outlined,
-                              color: selected ? _gold : SpartanPalette.muted,
+                              color: selected ? _gold : FenyvoPalette.muted,
                             ),
                             onTap: () {
                               setSheetState(() {
@@ -1341,10 +1341,10 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                                 : 'Отправить (${selectedUsers.length})',
                           ),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: SpartanPalette.blue,
-                            foregroundColor: SpartanPalette.ink,
-                            disabledBackgroundColor: SpartanPalette.surface,
-                            disabledForegroundColor: SpartanPalette.muted,
+                            backgroundColor: FenyvoPalette.blue,
+                            foregroundColor: FenyvoPalette.ink,
+                            disabledBackgroundColor: FenyvoPalette.surface,
+                            disabledForegroundColor: FenyvoPalette.muted,
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(16),
                             ),
@@ -1371,7 +1371,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
 
     return Container(
       width: double.infinity,
-      color: SpartanPalette.surface,
+      color: FenyvoPalette.surface,
       padding: const EdgeInsets.fromLTRB(10, 7, 10, 7),
       child: Row(
         children: [
@@ -1395,7 +1395,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                   final text = message['text']?.toString().trim() ?? '';
 
                   return Material(
-                    color: SpartanPalette.surface,
+                    color: FenyvoPalette.surface,
                     borderRadius: BorderRadius.circular(12),
                     clipBehavior: Clip.antiAlias,
                     child: InkWell(
@@ -1434,7 +1434,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(
-                                  color: SpartanPalette.secondary,
+                                  color: FenyvoPalette.secondary,
                                   fontSize: 12,
                                 ),
                               ),
@@ -1452,7 +1452,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                                 },
                                 icon: const Icon(
                                   Icons.close_rounded,
-                                  color: SpartanPalette.secondary,
+                                  color: FenyvoPalette.secondary,
                                   size: 18,
                                 ),
                               ),
@@ -1476,7 +1476,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
     final current = _searchMatchIndex >= 0 ? _searchMatchIndex + 1 : 0;
 
     return Container(
-      color: SpartanPalette.surface,
+      color: FenyvoPalette.surface,
       padding: EdgeInsets.fromLTRB(
         Platform.isWindows ? 16 : 10,
         7,
@@ -1490,10 +1490,10 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
               controller: _searchController,
               focusNode: _searchFocusNode,
               onChanged: _onSearchChanged,
-              style: const TextStyle(color: SpartanPalette.ink),
+              style: const TextStyle(color: FenyvoPalette.ink),
               decoration: InputDecoration(
                 hintText: '����� �� ������',
-                hintStyle: const TextStyle(color: SpartanPalette.muted),
+                hintStyle: const TextStyle(color: FenyvoPalette.muted),
                 prefixIcon: const Icon(Icons.search_rounded, color: _gold),
                 suffixText: _searchQuery.isEmpty
                     ? null
@@ -1503,7 +1503,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                   fontWeight: FontWeight.w700,
                 ),
                 filled: true,
-                fillColor: SpartanPalette.surface,
+                fillColor: FenyvoPalette.surface,
                 isDense: true,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(20),
@@ -1535,7 +1535,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
             onPressed: _closeSearch,
             icon: const Icon(
               Icons.close_rounded,
-              color: SpartanPalette.secondary,
+              color: FenyvoPalette.secondary,
             ),
           ),
         ],
@@ -1901,7 +1901,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(reason),
-          backgroundColor: SpartanPalette.surface,
+          backgroundColor: FenyvoPalette.surface,
         ),
       );
     }
@@ -2096,7 +2096,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
   void _mediaSnack(String text) {
     if (!mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(text), backgroundColor: SpartanPalette.surface),
+      SnackBar(content: Text(text), backgroundColor: FenyvoPalette.surface),
     );
   }
 
@@ -2105,7 +2105,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
 
     await showModalBottomSheet<void>(
       context: context,
-      backgroundColor: SpartanPalette.surface,
+      backgroundColor: FenyvoPalette.surface,
       showDragHandle: true,
       builder: (sheetContext) {
         Widget item(
@@ -2118,7 +2118,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
             title: Text(
               title,
               style: const TextStyle(
-                color: SpartanPalette.ink,
+                color: FenyvoPalette.ink,
                 fontWeight: FontWeight.w600,
               ),
             ),
@@ -2412,7 +2412,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
         _mimeFromName(original, 'application/octet-stream');
 
     try {
-      final savedPath = await SpartanDownloadService.saveBytes(
+      final savedPath = await FenyvoDownloadService.saveBytes(
         bytes: bytes,
         fileName: original,
         mimeType: mime,
@@ -2509,7 +2509,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
         return Text(
           '?? ���� ����������',
           style: TextStyle(
-            color: isMe ? SpartanPalette.ink : SpartanPalette.ink,
+            color: isMe ? FenyvoPalette.ink : FenyvoPalette.ink,
           ),
         );
       }
@@ -2584,7 +2584,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                 playing
                     ? Icons.stop_circle_rounded
                     : Icons.play_circle_fill_rounded,
-                color: isMe ? SpartanPalette.ink : _gold,
+                color: isMe ? FenyvoPalette.ink : _gold,
                 size: 34,
               ),
             ),
@@ -2597,7 +2597,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                   Text(
                     'Голосовое сообщение',
                     style: TextStyle(
-                      color: isMe ? SpartanPalette.ink : SpartanPalette.ink,
+                      color: isMe ? FenyvoPalette.ink : FenyvoPalette.ink,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -2606,8 +2606,8 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                     _durationText(message['voiceDurationMs']),
                     style: TextStyle(
                       color: isMe
-                          ? SpartanPalette.secondary
-                          : SpartanPalette.secondary,
+                          ? FenyvoPalette.secondary
+                          : FenyvoPalette.secondary,
                       fontSize: 12,
                     ),
                   ),
@@ -2630,7 +2630,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
         return Text(
           '?? ����� ����������',
           style: TextStyle(
-            color: isMe ? SpartanPalette.ink : SpartanPalette.ink,
+            color: isMe ? FenyvoPalette.ink : FenyvoPalette.ink,
           ),
         );
       }
@@ -2645,7 +2645,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
         httpHeaders: MediaCacheService.remoteHeaders,
         mediaMessage: Map<String, dynamic>.from(message),
         isMe: isMe,
-        gold: SpartanPalette.mediaAccent,
+        gold: FenyvoPalette.mediaAccent,
         onSave: () => _saveMediaAttachment(message),
       );
     }
@@ -2659,15 +2659,15 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
         padding: const EdgeInsets.all(9),
         decoration: BoxDecoration(
           color: isMe
-              ? SpartanPalette.surface.withValues(alpha: 0.08)
-              : SpartanPalette.surface.withValues(alpha: 0.22),
+              ? FenyvoPalette.surface.withValues(alpha: 0.08)
+              : FenyvoPalette.surface.withValues(alpha: 0.22),
           borderRadius: BorderRadius.circular(12),
         ),
         child: Row(
           children: [
             Icon(
               Icons.insert_drive_file_outlined,
-              color: isMe ? SpartanPalette.ink : _gold,
+              color: isMe ? FenyvoPalette.ink : _gold,
               size: 34,
             ),
             const SizedBox(width: 10),
@@ -2680,7 +2680,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      color: isMe ? SpartanPalette.ink : SpartanPalette.ink,
+                      color: isMe ? FenyvoPalette.ink : FenyvoPalette.ink,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
@@ -2690,8 +2690,8 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                       size,
                       style: TextStyle(
                         color: isMe
-                            ? SpartanPalette.secondary
-                            : SpartanPalette.secondary,
+                            ? FenyvoPalette.secondary
+                            : FenyvoPalette.secondary,
                         fontSize: 11.5,
                       ),
                     ),
@@ -2704,7 +2704,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
               onPressed: () => unawaited(_saveMediaAttachment(message)),
               icon: Icon(
                 Icons.download_rounded,
-                color: isMe ? SpartanPalette.ink : _gold,
+                color: isMe ? FenyvoPalette.ink : _gold,
               ),
             ),
           ],
@@ -2716,7 +2716,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
     return Text(
       text,
       style: TextStyle(
-        color: isMe ? SpartanPalette.ink : SpartanPalette.ink,
+        color: isMe ? FenyvoPalette.ink : FenyvoPalette.ink,
         fontSize: 15.5,
         height: 1.28,
         fontWeight: FontWeight.w500,
@@ -2795,21 +2795,21 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
-          backgroundColor: SpartanPalette.surface,
+          backgroundColor: FenyvoPalette.surface,
           title: const Text(
             'Редактировать сообщение',
-            style: TextStyle(color: SpartanPalette.ink),
+            style: TextStyle(color: FenyvoPalette.ink),
           ),
           content: TextField(
             controller: controller,
             autofocus: true,
             maxLines: 6,
-            style: const TextStyle(color: SpartanPalette.ink),
+            style: const TextStyle(color: FenyvoPalette.ink),
             decoration: InputDecoration(
               filled: true,
-              fillColor: SpartanPalette.surface,
+              fillColor: FenyvoPalette.surface,
               hintText: 'Сообщение...',
-              hintStyle: const TextStyle(color: SpartanPalette.secondary),
+              hintStyle: const TextStyle(color: FenyvoPalette.secondary),
               enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(14),
                 borderSide: BorderSide(color: _gold.withValues(alpha: 0.28)),
@@ -2825,13 +2825,13 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
               onPressed: () => Navigator.of(dialogContext).pop(),
               child: const Text(
                 'Отмена',
-                style: TextStyle(color: SpartanPalette.secondary),
+                style: TextStyle(color: FenyvoPalette.secondary),
               ),
             ),
             FilledButton(
               style: FilledButton.styleFrom(
-                backgroundColor: SpartanPalette.blue,
-                foregroundColor: SpartanPalette.ink,
+                backgroundColor: FenyvoPalette.blue,
+                foregroundColor: FenyvoPalette.ink,
               ),
               onPressed: () {
                 final value = controller.text.trim();
@@ -2878,21 +2878,21 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
           context: context,
           builder: (dialogContext) {
             return AlertDialog(
-              backgroundColor: SpartanPalette.surface,
+              backgroundColor: FenyvoPalette.surface,
               title: const Text(
                 'Удалить сообщение?',
-                style: TextStyle(color: SpartanPalette.ink),
+                style: TextStyle(color: FenyvoPalette.ink),
               ),
               content: const Text(
                 'Сообщение исчезнет у всех участников группы.',
-                style: TextStyle(color: SpartanPalette.secondary),
+                style: TextStyle(color: FenyvoPalette.secondary),
               ),
               actions: [
                 TextButton(
                   onPressed: () => Navigator.of(dialogContext).pop(false),
                   child: const Text(
                     'Отмена',
-                    style: TextStyle(color: SpartanPalette.secondary),
+                    style: TextStyle(color: FenyvoPalette.secondary),
                   ),
                 ),
                 TextButton(
@@ -2977,7 +2977,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
           child: Container(
             constraints: const BoxConstraints(maxHeight: 470),
             decoration: const BoxDecoration(
-              color: SpartanPalette.surface,
+              color: FenyvoPalette.surface,
               borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
               border: Border(top: BorderSide(color: _gold, width: 1.2)),
             ),
@@ -2989,7 +2989,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                   width: 42,
                   height: 4,
                   decoration: BoxDecoration(
-                    color: SpartanPalette.line,
+                    color: FenyvoPalette.line,
                     borderRadius: BorderRadius.circular(3),
                   ),
                 ),
@@ -3001,7 +3001,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                     Text(
                       'Выберите реакцию',
                       style: TextStyle(
-                        color: SpartanPalette.ink,
+                        color: FenyvoPalette.ink,
                         fontSize: 17,
                         fontWeight: FontWeight.w700,
                       ),
@@ -3040,8 +3040,8 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                           alignment: Alignment.center,
                           decoration: BoxDecoration(
                             color: selected
-                                ? SpartanPalette.blue.withValues(alpha: 0.20)
-                                : SpartanPalette.surface.withValues(
+                                ? FenyvoPalette.blue.withValues(alpha: 0.20)
+                                : FenyvoPalette.surface.withValues(
                                     alpha: 0.42,
                                   ),
                             borderRadius: BorderRadius.circular(16),
@@ -3098,7 +3098,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
 
     await showModalBottomSheet<void>(
       context: context,
-      backgroundColor: SpartanPalette.surface,
+      backgroundColor: FenyvoPalette.surface,
       showDragHandle: true,
       builder: (sheetContext) {
         Widget action({
@@ -3115,7 +3115,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
             title: Text(
               title,
               style: TextStyle(
-                color: danger ? const Color(0xFFFF5A5A) : SpartanPalette.ink,
+                color: danger ? const Color(0xFFFF5A5A) : FenyvoPalette.ink,
                 fontWeight: FontWeight.w600,
               ),
             ),
@@ -3255,7 +3255,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
 
     showModalBottomSheet<void>(
       context: context,
-      backgroundColor: SpartanPalette.canvas,
+      backgroundColor: FenyvoPalette.canvas,
       showDragHandle: true,
       builder: (context) {
         return SafeArea(
@@ -3274,7 +3274,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                         child: Text(
                           '$_groupName • ${members.length}',
                           style: const TextStyle(
-                            color: SpartanPalette.ink,
+                            color: FenyvoPalette.ink,
                             fontSize: 18,
                             fontWeight: FontWeight.w800,
                           ),
@@ -3283,7 +3283,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                     ],
                   ),
                 ),
-                const Divider(color: SpartanPalette.line, height: 1),
+                const Divider(color: FenyvoPalette.line, height: 1),
                 Flexible(
                   child: ListView.builder(
                     shrinkWrap: true,
@@ -3293,7 +3293,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
 
                       return ListTile(
                         leading: CircleAvatar(
-                          backgroundColor: SpartanPalette.surface,
+                          backgroundColor: FenyvoPalette.surface,
                           child: Text(
                             member.isEmpty ? '?' : member[0].toUpperCase(),
                             style: const TextStyle(
@@ -3304,7 +3304,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                         ),
                         title: Text(
                           member,
-                          style: const TextStyle(color: SpartanPalette.ink),
+                          style: const TextStyle(color: FenyvoPalette.ink),
                         ),
                         trailing: member == creator
                             ? const Text(
@@ -3333,14 +3333,14 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
           decoration: BoxDecoration(
-            color: SpartanPalette.surface,
+            color: FenyvoPalette.surface,
             borderRadius: BorderRadius.circular(18),
             border: Border.all(color: _gold.withValues(alpha: 0.18)),
           ),
           child: Text(
             _formatDate(date),
             style: const TextStyle(
-              color: SpartanPalette.secondary,
+              color: FenyvoPalette.secondary,
               fontSize: 12,
               fontWeight: FontWeight.w600,
             ),
@@ -3363,12 +3363,12 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
       padding: const EdgeInsets.fromLTRB(10, 7, 10, 7),
       decoration: BoxDecoration(
         color: isMe
-            ? SpartanPalette.surface.withValues(alpha: 0.10)
-            : SpartanPalette.surface.withValues(alpha: 0.25),
+            ? FenyvoPalette.surface.withValues(alpha: 0.10)
+            : FenyvoPalette.surface.withValues(alpha: 0.25),
         borderRadius: BorderRadius.circular(10),
         border: Border(
           left: BorderSide(
-            color: isMe ? SpartanPalette.secondary : _gold,
+            color: isMe ? FenyvoPalette.secondary : _gold,
             width: 3,
           ),
         ),
@@ -3381,7 +3381,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              color: isMe ? SpartanPalette.ink : _gold,
+              color: isMe ? FenyvoPalette.ink : _gold,
               fontSize: 11,
               fontWeight: FontWeight.w800,
             ),
@@ -3392,7 +3392,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
-              color: isMe ? SpartanPalette.secondary : SpartanPalette.secondary,
+              color: isMe ? FenyvoPalette.secondary : FenyvoPalette.secondary,
               fontSize: 11.5,
             ),
           ),
@@ -3426,22 +3426,22 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
               decoration: BoxDecoration(
                 color: mine
                     ? (isMe
-                          ? SpartanPalette.surface.withValues(alpha: 0.16)
-                          : SpartanPalette.blue.withValues(alpha: 0.20))
+                          ? FenyvoPalette.surface.withValues(alpha: 0.16)
+                          : FenyvoPalette.blue.withValues(alpha: 0.20))
                     : (isMe
-                          ? SpartanPalette.surface.withValues(alpha: 0.08)
-                          : SpartanPalette.surface.withValues(alpha: 0.24)),
+                          ? FenyvoPalette.surface.withValues(alpha: 0.08)
+                          : FenyvoPalette.surface.withValues(alpha: 0.24)),
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(
                   color: mine
-                      ? (isMe ? SpartanPalette.secondary : _gold)
-                      : (isMe ? SpartanPalette.line : SpartanPalette.line),
+                      ? (isMe ? FenyvoPalette.secondary : _gold)
+                      : (isMe ? FenyvoPalette.line : FenyvoPalette.line),
                 ),
               ),
               child: Text(
                 '${entry.key} ${entry.value}',
                 style: TextStyle(
-                  color: isMe ? SpartanPalette.ink : SpartanPalette.ink,
+                  color: isMe ? FenyvoPalette.ink : FenyvoPalette.ink,
                   fontSize: 12,
                   fontWeight: FontWeight.w700,
                 ),
@@ -3499,10 +3499,10 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                 : null,
             gradient: isMe
                 ? const LinearGradient(
-                    colors: [SpartanPalette.blue, SpartanPalette.blueDeep],
+                    colors: [FenyvoPalette.blue, FenyvoPalette.blueDeep],
                   )
                 : const LinearGradient(
-                    colors: [SpartanPalette.surface, SpartanPalette.surface],
+                    colors: [FenyvoPalette.surface, FenyvoPalette.surface],
                   ),
             borderRadius: BorderRadius.circular(16),
             boxShadow: [
@@ -3538,8 +3538,8 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                   '${editedAt.isNotEmpty ? 'изменено • ' : ''}${_formatTime(message['time'])}',
                   style: TextStyle(
                     color: isMe
-                        ? SpartanPalette.secondary
-                        : SpartanPalette.secondary,
+                        ? FenyvoPalette.secondary
+                        : FenyvoPalette.secondary,
                     fontSize: 10.5,
                     fontWeight: FontWeight.w600,
                   ),
@@ -3571,7 +3571,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
             const Text(
               'Сообщений пока нет',
               style: TextStyle(
-                color: SpartanPalette.ink,
+                color: FenyvoPalette.ink,
                 fontSize: 17,
                 fontWeight: FontWeight.w800,
               ),
@@ -3579,7 +3579,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
             const SizedBox(height: 6),
             const Text(
               'Напишите первое сообщение в группу',
-              style: TextStyle(color: SpartanPalette.secondary),
+              style: TextStyle(color: FenyvoPalette.secondary),
             ),
           ],
         ),
@@ -3627,7 +3627,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.fromLTRB(12, 8, 6, 8),
       decoration: BoxDecoration(
-        color: SpartanPalette.surface,
+        color: FenyvoPalette.surface,
         borderRadius: BorderRadius.circular(14),
         border: Border(left: const BorderSide(color: _gold, width: 3)),
       ),
@@ -3655,7 +3655,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
-                    color: SpartanPalette.secondary,
+                    color: FenyvoPalette.secondary,
                     fontSize: 12,
                   ),
                 ),
@@ -3668,7 +3668,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
             onPressed: _cancelReply,
             icon: const Icon(
               Icons.close_rounded,
-              color: SpartanPalette.secondary,
+              color: FenyvoPalette.secondary,
               size: 20,
             ),
           ),
@@ -3685,10 +3685,10 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
       padding: const EdgeInsets.fromLTRB(6, 5, 6, 5),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
-          colors: [SpartanPalette.surfaceSoft, SpartanPalette.rail],
+          colors: [FenyvoPalette.surfaceSoft, FenyvoPalette.rail],
         ),
         borderRadius: BorderRadius.circular(30),
-        border: Border.all(color: SpartanPalette.line),
+        border: Border.all(color: FenyvoPalette.line),
         boxShadow: const [
           BoxShadow(
             color: Color(0x4A000000),
@@ -3744,12 +3744,12 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                           keyboardType: TextInputType.multiline,
                           textInputAction: TextInputAction.newline,
                           style: const TextStyle(
-                            color: SpartanPalette.ink,
+                            color: FenyvoPalette.ink,
                             fontSize: 16,
                           ),
                           decoration: InputDecoration(
                             hintText: 'Сообщение...',
-                            fillColor: SpartanPalette.canvasDeep.withValues(
+                            fillColor: FenyvoPalette.canvasDeep.withValues(
                               alpha: .72,
                             ),
                             filled: true,
@@ -3757,9 +3757,9 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                               tooltip: 'Эмодзи',
                               icon: const Icon(
                                 Icons.emoji_emotions_outlined,
-                                color: SpartanPalette.ink,
+                                color: FenyvoPalette.ink,
                               ),
-                              color: SpartanPalette.surfaceSoft,
+                              color: FenyvoPalette.surfaceSoft,
                               onSelected: (emoji) {
                                 final selection = _messageController.selection;
                                 final offset = selection.isValid
@@ -3795,13 +3795,13 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                             border: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(26),
                               borderSide: const BorderSide(
-                                color: SpartanPalette.line,
+                                color: FenyvoPalette.line,
                               ),
                             ),
                             enabledBorder: OutlineInputBorder(
                               borderRadius: BorderRadius.circular(26),
                               borderSide: const BorderSide(
-                                color: SpartanPalette.line,
+                                color: FenyvoPalette.line,
                               ),
                             ),
                             focusedBorder: OutlineInputBorder(
@@ -3842,8 +3842,8 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                                 unawaited(_toggleVoiceRecording());
                               },
                         style: IconButton.styleFrom(
-                          backgroundColor: SpartanPalette.gold,
-                          foregroundColor: SpartanPalette.onGold,
+                          backgroundColor: FenyvoPalette.gold,
+                          foregroundColor: FenyvoPalette.onGold,
                         ),
                         icon: _sending
                             ? const SizedBox(
@@ -3851,7 +3851,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                                 height: 18,
                                 child: CircularProgressIndicator(
                                   strokeWidth: 2,
-                                  color: SpartanPalette.onGold,
+                                  color: FenyvoPalette.onGold,
                                 ),
                               )
                             : Icon(
@@ -3862,7 +3862,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                                     : Icons.mic_rounded,
                                 color: _recordingVoice
                                     ? const Color(0xFFFF3D3D)
-                                    : SpartanPalette.onGold,
+                                    : FenyvoPalette.onGold,
                               ),
                       ),
                     ),
@@ -3934,7 +3934,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                 decoration: BoxDecoration(
                   color: Colors.black,
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: SpartanPalette.gold, width: 2),
+                  border: Border.all(color: FenyvoPalette.gold, width: 2),
                   boxShadow: const [
                     BoxShadow(blurRadius: 12, color: Colors.black38),
                   ],
@@ -3943,7 +3943,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                     ? const Center(
                         child: Icon(
                           Icons.call_rounded,
-                          color: SpartanPalette.gold,
+                          color: FenyvoPalette.gold,
                           size: 36,
                         ),
                       )
@@ -3968,10 +3968,10 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
     final canManageMembers = creator.isNotEmpty && _currentUser == creator;
 
     return Scaffold(
-      backgroundColor: SpartanPalette.canvas,
+      backgroundColor: FenyvoPalette.canvas,
       appBar: AppBar(
-        backgroundColor: SpartanPalette.canvas,
-        foregroundColor: SpartanPalette.ink,
+        backgroundColor: FenyvoPalette.canvas,
+        foregroundColor: FenyvoPalette.ink,
         titleSpacing: 8,
         title: InkWell(
           borderRadius: BorderRadius.circular(12),
@@ -3981,7 +3981,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
             child: Row(
               children: [
                 const CircleAvatar(
-                  backgroundColor: SpartanPalette.surface,
+                  backgroundColor: FenyvoPalette.surface,
                   child: Icon(Icons.groups_rounded, color: _gold),
                 ),
                 const SizedBox(width: 10),
@@ -3994,7 +3994,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                          color: SpartanPalette.ink,
+                          color: FenyvoPalette.ink,
                           fontWeight: FontWeight.w800,
                           fontSize: 17,
                         ),
@@ -4005,7 +4005,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           color: _typingUsers.isEmpty
-                              ? SpartanPalette.secondary
+                              ? FenyvoPalette.secondary
                               : _gold,
                           fontSize: 12,
                           fontWeight: _typingUsers.isEmpty

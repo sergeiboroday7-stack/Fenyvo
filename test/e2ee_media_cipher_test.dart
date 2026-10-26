@@ -2,7 +2,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:spartan_chat_final/services/crypto/e2ee_media_cipher.dart';
+import 'package:fenyvo/services/crypto/e2ee_media_cipher.dart';
 
 void main() {
   test('E2EE media round-trip preserves a multi-chunk file', () async {

@@ -6,10 +6,10 @@ import 'call_service.dart';
 import 'group_call_service.dart';
 import 'socket_service.dart';
 
-enum SpartanPulsePhase { idle, outgoing, incoming, matched }
+enum FenyvoPulsePhase { idle, outgoing, incoming, matched }
 
-class SpartanPulse {
-  const SpartanPulse({
+class FenyvoPulse {
+  const FenyvoPulse({
     required this.id,
     required this.from,
     required this.to,
@@ -31,8 +31,8 @@ class SpartanPulse {
   final int? acceptedAt;
   final int? startsAt;
 
-  SpartanPulse copyWith({String? state, int? acceptedAt, int? startsAt}) =>
-      SpartanPulse(
+  FenyvoPulse copyWith({String? state, int? acceptedAt, int? startsAt}) =>
+      FenyvoPulse(
         id: id,
         from: from,
         to: to,
@@ -57,7 +57,7 @@ class SpartanPulse {
     return int.tryParse(value?.toString() ?? '');
   }
 
-  static SpartanPulse? parse(Object? value) {
+  static FenyvoPulse? parse(Object? value) {
     if (value is! Map) return null;
     final data = Map<String, dynamic>.from(value);
     final id = data['id']?.toString().trim() ?? '';
@@ -72,7 +72,7 @@ class SpartanPulse {
         expiresAt == null) {
       return null;
     }
-    return SpartanPulse(
+    return FenyvoPulse(
       id: id,
       from: from,
       to: to,
@@ -136,15 +136,15 @@ class PulseService extends ChangeNotifier {
   Timer? _startTimer;
   Timer? _tickTimer;
 
-  SpartanPulsePhase phase = SpartanPulsePhase.idle;
-  SpartanPulse? current;
-  final List<SpartanPulse> _pulses = <SpartanPulse>[];
+  FenyvoPulsePhase phase = FenyvoPulsePhase.idle;
+  FenyvoPulse? current;
+  final List<FenyvoPulse> _pulses = <FenyvoPulse>[];
   final Set<String> _seenIncomingIds = <String>{};
   String? notice;
   int noticeSerial = 0;
 
-  bool get hasPulse => phase != SpartanPulsePhase.idle && current != null;
-  List<SpartanPulse> get pulses => List<SpartanPulse>.unmodifiable(_pulses);
+  bool get hasPulse => phase != FenyvoPulsePhase.idle && current != null;
+  List<FenyvoPulse> get pulses => List<FenyvoPulse>.unmodifiable(_pulses);
   int get requestCount => _pulses.length;
   int get unreadCount {
     final user = _currentUser();
@@ -160,19 +160,19 @@ class PulseService extends ChangeNotifier {
 
   int get countdownSeconds {
     final startsAt = current?.startsAt;
-    if (phase != SpartanPulsePhase.matched || startsAt == null) return 0;
+    if (phase != FenyvoPulsePhase.matched || startsAt == null) return 0;
     final remaining = startsAt - _now();
     if (remaining <= 0) return 0;
     return (remaining / 1000).ceil();
   }
 
-  int remainingMinutes(SpartanPulse pulse) {
+  int remainingMinutes(FenyvoPulse pulse) {
     final remaining = pulse.expiresAt - _now();
     if (remaining <= 0) return 0;
     return (remaining / Duration.millisecondsPerMinute).ceil();
   }
 
-  SpartanPulse? activeFor(String peer) {
+  FenyvoPulse? activeFor(String peer) {
     final value = current;
     if (value == null || value.peerFor(_currentUser()) != peer) return null;
     return value;
@@ -213,7 +213,7 @@ class PulseService extends ChangeNotifier {
 
   void accept() {
     final pulse = current;
-    if (pulse == null || phase != SpartanPulsePhase.incoming) return;
+    if (pulse == null || phase != FenyvoPulsePhase.incoming) return;
     acceptPulse(pulse.id);
   }
 
@@ -231,7 +231,7 @@ class PulseService extends ChangeNotifier {
     _seenIncomingIds.add(pulse.id);
     _upsertPulse(pulse.copyWith(state: 'accepted', acceptedAt: _now()));
     current = _pulseById(pulse.id);
-    phase = SpartanPulsePhase.outgoing;
+    phase = FenyvoPulsePhase.outgoing;
     _showNotice('Готовность подтверждена. Ищем общий момент…');
     notifyListeners();
   }
@@ -301,19 +301,19 @@ class PulseService extends ChangeNotifier {
         _handleSync(data);
         break;
       case 'pulse_invite':
-        final pulse = SpartanPulse.parse(data['pulse']);
+        final pulse = FenyvoPulse.parse(data['pulse']);
         if (pulse != null) _applyPulse(pulse, incoming: true);
         break;
       case 'pulse_state':
-        final pulse = SpartanPulse.parse(data['pulse']);
+        final pulse = FenyvoPulse.parse(data['pulse']);
         if (pulse != null) _applyPulse(pulse);
         break;
       case 'pulse_match':
-        final pulse = SpartanPulse.parse(data['pulse']);
+        final pulse = FenyvoPulse.parse(data['pulse']);
         if (pulse != null) _applyMatch(pulse);
         break;
       case 'pulse_waiting':
-        final pulse = SpartanPulse.parse(data['pulse']);
+        final pulse = FenyvoPulse.parse(data['pulse']);
         if (pulse != null) _applyPulse(pulse);
         _showNotice(data['reason']?.toString() ?? 'Ждём подходящий момент…');
         break;
@@ -330,14 +330,14 @@ class PulseService extends ChangeNotifier {
     final raw = data['pulses'];
     if (raw is! List || raw.isEmpty) {
       _pulses.clear();
-      if (phase != SpartanPulsePhase.matched) _clear();
+      if (phase != FenyvoPulsePhase.matched) _clear();
       return;
     }
     final user = _currentUser();
     final pulses =
-        raw.map(SpartanPulse.parse).whereType<SpartanPulse>().toList()
+        raw.map(FenyvoPulse.parse).whereType<FenyvoPulse>().toList()
           ..sort((left, right) {
-            int priority(SpartanPulse pulse) {
+            int priority(FenyvoPulse pulse) {
               if (pulse.state == 'matched') return 0;
               if (pulse.to == user && pulse.state == 'pending') return 1;
               return 2;
@@ -363,37 +363,37 @@ class PulseService extends ChangeNotifier {
     }
   }
 
-  void _applyPulse(SpartanPulse pulse, {bool incoming = false}) {
+  void _applyPulse(FenyvoPulse pulse, {bool incoming = false}) {
     _cancelTimers();
     _upsertPulse(pulse);
     current = pulse;
     final user = _currentUser();
     phase = incoming || (pulse.to == user && pulse.state == 'pending')
-        ? SpartanPulsePhase.incoming
-        : SpartanPulsePhase.outgoing;
+        ? FenyvoPulsePhase.incoming
+        : FenyvoPulsePhase.outgoing;
     _tickTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       if (_pulses.isNotEmpty) notifyListeners();
     });
     notifyListeners();
   }
 
-  void _applyMatch(SpartanPulse pulse) {
-    if (current?.id == pulse.id && phase == SpartanPulsePhase.matched) return;
+  void _applyMatch(FenyvoPulse pulse) {
+    if (current?.id == pulse.id && phase == FenyvoPulsePhase.matched) return;
     _cancelTimers();
     _upsertPulse(pulse);
     _seenIncomingIds.add(pulse.id);
     current = pulse;
-    phase = SpartanPulsePhase.matched;
+    phase = FenyvoPulsePhase.matched;
     final startsAt = pulse.startsAt ?? _now() + 4000;
     final delay = Duration(
       milliseconds: (startsAt - _now()).clamp(0, 10000).toInt(),
     );
     _tickTimer = Timer.periodic(const Duration(milliseconds: 250), (_) {
-      if (phase == SpartanPulsePhase.matched) notifyListeners();
+      if (phase == FenyvoPulsePhase.matched) notifyListeners();
     });
     if (pulse.from == _currentUser()) {
       _startTimer = Timer(delay, () async {
-        if (current?.id != pulse.id || phase != SpartanPulsePhase.matched)
+        if (current?.id != pulse.id || phase != FenyvoPulsePhase.matched)
           return;
         if (_callBusy()) {
           cancel();
@@ -443,18 +443,18 @@ class PulseService extends ChangeNotifier {
 
   void _clear() {
     current = null;
-    phase = SpartanPulsePhase.idle;
+    phase = FenyvoPulsePhase.idle;
     notifyListeners();
   }
 
-  SpartanPulse? _pulseById(String id) {
+  FenyvoPulse? _pulseById(String id) {
     for (final pulse in _pulses) {
       if (pulse.id == id) return pulse;
     }
     return null;
   }
 
-  void _upsertPulse(SpartanPulse pulse) {
+  void _upsertPulse(FenyvoPulse pulse) {
     final index = _pulses.indexWhere((item) => item.id == pulse.id);
     if (index == -1) {
       _pulses.add(pulse);
@@ -476,7 +476,7 @@ class PulseService extends ChangeNotifier {
         final next = _pulses.first;
         current = next;
         phase = _phaseFor(next);
-        if (phase != SpartanPulsePhase.matched) {
+        if (phase != FenyvoPulsePhase.matched) {
           _tickTimer = Timer.periodic(const Duration(seconds: 30), (_) {
             if (_pulses.isNotEmpty) notifyListeners();
           });
@@ -488,16 +488,16 @@ class PulseService extends ChangeNotifier {
     }
   }
 
-  SpartanPulsePhase _phaseFor(SpartanPulse pulse) {
-    if (pulse.state == 'matched') return SpartanPulsePhase.matched;
+  FenyvoPulsePhase _phaseFor(FenyvoPulse pulse) {
+    if (pulse.state == 'matched') return FenyvoPulsePhase.matched;
     return pulse.to == _currentUser() && pulse.state == 'pending'
-        ? SpartanPulsePhase.incoming
-        : SpartanPulsePhase.outgoing;
+        ? FenyvoPulsePhase.incoming
+        : FenyvoPulsePhase.outgoing;
   }
 
   void _sortPulses() {
     final user = _currentUser();
-    int priority(SpartanPulse pulse) {
+    int priority(FenyvoPulse pulse) {
       if (pulse.state == 'matched') return 0;
       if (pulse.to == user && pulse.state == 'pending') return 1;
       return 2;

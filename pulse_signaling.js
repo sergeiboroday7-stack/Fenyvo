@@ -2,7 +2,7 @@
 
 const crypto = require('node:crypto');
 
-// SPARTAN PULSE is an ephemeral rendezvous layer. It never transports WebRTC
+// FENYVO PULSE is an ephemeral rendezvous layer. It never transports WebRTC
 // credentials: after two people are ready, the existing private-call protocol
 // performs the actual encrypted audio/video connection.
 function createPulseSignaling({
@@ -109,7 +109,7 @@ function createPulseSignaling({
       return true;
     }
     if (JSON.stringify(data).length > 4096) {
-      fail(ws, requestId, 'Слишком большой пакет SPARTAN PULSE');
+      fail(ws, requestId, 'Слишком большой пакет FENYVO PULSE');
       return true;
     }
 
@@ -129,7 +129,7 @@ function createPulseSignaling({
     if (type === 'pulse_request') {
       const to = String(data.to || '').trim();
       if (!to || to === user || !Object.prototype.hasOwnProperty.call(registeredUsers, to)) {
-        fail(ws, requestId, 'Некорректный получатель SPARTAN PULSE');
+        fail(ws, requestId, 'Некорректный получатель FENYVO PULSE');
         return true;
       }
       if (isBusy(user) || isBusy(to)) {
@@ -146,7 +146,7 @@ function createPulseSignaling({
 
       if (existing) {
         if (existing.state === 'matched') {
-          fail(ws, requestId, 'SPARTAN PULSE уже соединил вас');
+          fail(ws, requestId, 'FENYVO PULSE уже соединил вас');
           return true;
         }
         if (existing.from === to && existing.to === user) {
@@ -174,7 +174,7 @@ function createPulseSignaling({
         pulse => pulse.from === user || pulse.to === user,
       ).length;
       if (pulseCount >= 5) {
-        fail(ws, requestId, 'Слишком много активных приглашений SPARTAN PULSE');
+        fail(ws, requestId, 'Слишком много активных приглашений FENYVO PULSE');
         return true;
       }
 
@@ -204,7 +204,7 @@ function createPulseSignaling({
     const id = String(data.pulseId || '').trim();
     const pulse = pulses.get(id);
     if (!pulse || (pulse.from !== user && pulse.to !== user)) {
-      fail(ws, requestId, 'SPARTAN PULSE уже завершён');
+      fail(ws, requestId, 'FENYVO PULSE уже завершён');
       return true;
     }
 

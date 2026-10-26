@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:spartan_chat_final/services/call_result.dart';
-import 'package:spartan_chat_final/services/call_history_service.dart';
+import 'package:fenyvo/services/call_result.dart';
+import 'package:fenyvo/services/call_history_service.dart';
 
 void main() {
   test('caller cancelling an unanswered incoming call means missed', () {

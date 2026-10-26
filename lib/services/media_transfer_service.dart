@@ -5,14 +5,14 @@ import 'package:path_provider/path_provider.dart';
 
 import 'crypto/e2ee_media_cipher.dart';
 
-class SpartanMediaUpload {
+class FenyvoMediaUpload {
   final String mediaId;
   final String fileName;
   final int fileSize;
   final String mimeType;
   final Map<String, dynamic>? e2eeMedia;
 
-  const SpartanMediaUpload({
+  const FenyvoMediaUpload({
     required this.mediaId,
     required this.fileName,
     required this.fileSize,
@@ -67,7 +67,7 @@ class MediaTransferService {
 
   static String? mediaUrl(String mediaId) => mediaUri(mediaId)?.toString();
 
-  static Future<SpartanMediaUpload> uploadFile({
+  static Future<FenyvoMediaUpload> uploadFile({
     required String path,
     required String fileName,
     required String mimeType,
@@ -165,7 +165,7 @@ class MediaTransferService {
         throw const FormatException('Медиа-сервер не вернул mediaId');
       }
 
-      return SpartanMediaUpload(
+      return FenyvoMediaUpload(
         mediaId: mediaId,
         fileName: fileName,
         fileSize: size,

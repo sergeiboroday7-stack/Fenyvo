@@ -8,7 +8,7 @@ import 'package:video_player/video_player.dart';
 
 import '../services/download_service.dart';
 import '../services/saved_messages_service.dart';
-import '../theme/spartan_theme.dart';
+import '../theme/fenyvo_theme.dart';
 import '../widgets/emoji_picker.dart';
 
 class SavedMessagesScreen extends StatefulWidget {
@@ -89,7 +89,7 @@ class _SavedMessagesScreenState extends State<SavedMessagesScreen> {
           Text('Сохранённое', style: TextStyle(fontSize: 18)),
           Text(
             'Только на этом устройстве',
-            style: TextStyle(fontSize: 12, color: SpartanPalette.secondary),
+            style: TextStyle(fontSize: 12, color: FenyvoPalette.secondary),
           ),
         ],
       ),
@@ -111,7 +111,7 @@ class _SavedMessagesScreenState extends State<SavedMessagesScreen> {
                         Icon(
                           Icons.bookmark_outline_rounded,
                           size: 56,
-                          color: SpartanPalette.gold,
+                          color: FenyvoPalette.gold,
                         ),
                         SizedBox(height: 16),
                         Text(
@@ -122,7 +122,7 @@ class _SavedMessagesScreenState extends State<SavedMessagesScreen> {
                         Text(
                           'Напишите заметку или выберите «Сохранить»\nв меню сообщения в чате.',
                           textAlign: TextAlign.center,
-                          style: TextStyle(color: SpartanPalette.secondary),
+                          style: TextStyle(color: FenyvoPalette.secondary),
                         ),
                       ],
                     ),
@@ -143,7 +143,7 @@ class _SavedMessagesScreenState extends State<SavedMessagesScreen> {
                       margin: const EdgeInsets.only(bottom: 12),
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: SpartanPalette.blue,
+                        color: FenyvoPalette.blue,
                         borderRadius: BorderRadius.circular(16),
                       ),
                       child: Column(
@@ -161,7 +161,7 @@ class _SavedMessagesScreenState extends State<SavedMessagesScreen> {
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(
-                                    color: SpartanPalette.secondary,
+                                    color: FenyvoPalette.secondary,
                                     fontSize: 12,
                                   ),
                                 ),
@@ -358,7 +358,7 @@ class _SavedAttachmentState extends State<SavedAttachment> {
 
   Future<void> _download() async {
     try {
-      final result = await SpartanDownloadService.saveBytes(
+      final result = await FenyvoDownloadService.saveBytes(
         bytes: await File(_path).readAsBytes(),
         fileName: _name,
         mimeType: widget.item['mimeType']?.toString() ?? '',

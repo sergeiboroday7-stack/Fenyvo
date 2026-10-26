@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/socket_service.dart';
-import '../theme/spartan_theme.dart';
+import '../theme/fenyvo_theme.dart';
 import 'contact_link_screen.dart';
 
 class ContactsScreen extends StatefulWidget {
@@ -178,7 +178,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                             : FontWeight.normal,
                         color: _activeLetter == letter
                             ? const Color(0xFFFFD54F)
-                            : SpartanPalette.secondary,
+                            : FenyvoPalette.secondary,
                       ),
                     ),
                   ),
@@ -283,11 +283,11 @@ class _ContactsScreenState extends State<ContactsScreen> {
       children: [
         CircleAvatar(
           radius: 25,
-          backgroundColor: SpartanPalette.surfaceSoft,
+          backgroundColor: FenyvoPalette.surfaceSoft,
           child: Text(
             username.isEmpty ? '?' : username[0].toUpperCase(),
             style: const TextStyle(
-              color: SpartanPalette.gold,
+              color: FenyvoPalette.gold,
               fontWeight: FontWeight.bold,
               fontSize: 21,
             ),
@@ -300,9 +300,9 @@ class _ContactsScreenState extends State<ContactsScreen> {
             width: 13,
             height: 13,
             decoration: BoxDecoration(
-              color: online ? SpartanPalette.online : SpartanPalette.secondary,
+              color: online ? FenyvoPalette.online : FenyvoPalette.secondary,
               shape: BoxShape.circle,
-              border: Border.all(color: SpartanPalette.canvasDeep, width: 2),
+              border: Border.all(color: FenyvoPalette.canvasDeep, width: 2),
             ),
           ),
         ),
@@ -316,9 +316,9 @@ class _ContactsScreenState extends State<ContactsScreen> {
       margin: const EdgeInsets.only(right: 12),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: SpartanPalette.surface,
+        color: FenyvoPalette.surface,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: SpartanPalette.gold.withValues(alpha: 0.5)),
+        border: Border.all(color: FenyvoPalette.gold.withValues(alpha: 0.5)),
       ),
       child: InkWell(
         onTap: () => widget.onOpenChat(username),
@@ -339,8 +339,8 @@ class _ContactsScreenState extends State<ContactsScreen> {
               style: TextStyle(
                 fontSize: 10,
                 color: _isOnline(username)
-                    ? SpartanPalette.online
-                    : SpartanPalette.secondary,
+                    ? FenyvoPalette.online
+                    : FenyvoPalette.secondary,
               ),
             ),
           ],
@@ -375,7 +375,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
         .where((user) => _favorites.contains(user.toLowerCase()))
         .toList();
     return Scaffold(
-      backgroundColor: SpartanPalette.canvasDeep,
+      backgroundColor: FenyvoPalette.canvasDeep,
       appBar: AppBar(
         title: const Text('Контакты'),
         actions: [
@@ -436,7 +436,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                   child: Text(
                     'ИЗБРАННЫЕ',
                     style: TextStyle(
-                      color: SpartanPalette.gold,
+                      color: FenyvoPalette.gold,
                       fontWeight: FontWeight.w800,
                       letterSpacing: 1.5,
                     ),
@@ -467,7 +467,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                           const Icon(
                             Icons.wifi_off_rounded,
                             size: 54,
-                            color: SpartanPalette.gold,
+                            color: FenyvoPalette.gold,
                           ),
                           const SizedBox(height: 16),
                           const Text(
@@ -499,7 +499,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                 ? Center(
                     child: Text(
                       'Контактов пока нет',
-                      style: TextStyle(color: SpartanPalette.secondary),
+                      style: TextStyle(color: FenyvoPalette.secondary),
                     ),
                   )
                 : Stack(
@@ -528,7 +528,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                                         _favorites.contains(user.toLowerCase())
                                             ? Icons.star_rounded
                                             : Icons.star_border_rounded,
-                                        color: SpartanPalette.gold,
+                                        color: FenyvoPalette.gold,
                                       ),
                                       onPressed: () => _toggleFavorite(user),
                                     ),

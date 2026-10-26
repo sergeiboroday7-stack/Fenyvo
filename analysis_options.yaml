@@ -1,0 +1,7 @@
+analyzer:
+  exclude:
+    - backup_before_*/**
+    - recovery_backup_before_*/**
+    - third_party/**
+    - "**/*.bak"
+    - "**/*.backup"

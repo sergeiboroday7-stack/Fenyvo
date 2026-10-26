@@ -44,7 +44,7 @@ class NotificationService {
 
     final windowsSettings = WindowsInitializationSettings(
       appName: 'FENYVO',
-      appUserModelId: 'Sparta.SpartanChat.Desktop',
+      appUserModelId: 'Fenyvo.Messenger.Desktop',
       guid: '4d7db11e-4595-47d1-907d-5b70f384d9c7',
     );
 
@@ -123,8 +123,8 @@ class NotificationService {
         id: _messageNotificationId('call:$id'),
         title: from,
         body: video
-            ? 'Входящий видеозвонок — открыть SPARTAN'
-            : 'Входящий аудиозвонок — открыть SPARTAN',
+            ? 'Входящий видеозвонок — открыть FENYVO'
+            : 'Входящий аудиозвонок — открыть FENYVO',
         notificationDetails: NotificationDetails(
           windows: WindowsNotificationDetails(
             duration: WindowsNotificationDuration.short,

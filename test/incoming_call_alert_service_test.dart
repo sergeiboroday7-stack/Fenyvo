@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:spartan_chat_final/services/incoming_call_alert_service.dart';
+import 'package:fenyvo/services/incoming_call_alert_service.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
