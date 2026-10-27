@@ -45,9 +45,18 @@ test('online lists are personalized', () => {
   assert.deepEqual(events.map(e => ({
     recipient: e.recipient,
     users: e.data.users,
+    authoritative: e.data.presence_authoritative,
   })), [
-    { recipient: 'alice', users: ['bob'] },
-    { recipient: 'mallory', users: [] },
+    {
+      recipient: 'alice',
+      users: ['bob'],
+      authoritative: true,
+    },
+    {
+      recipient: 'mallory',
+      users: [],
+      authoritative: true,
+    },
   ]);
 });
 

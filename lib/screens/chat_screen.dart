@@ -33,6 +33,7 @@ import '../services/download_service.dart';
 import '../services/media_transfer_service.dart';
 import '../services/app_language_service.dart';
 import '../services/message_search_service.dart';
+import '../services/presence_tracker.dart';
 import '../services/e2ee_settings_service.dart';
 import '../services/crypto/signal_e2ee_service.dart';
 part '../widgets/private_video_widgets.dart';
@@ -77,7 +78,8 @@ class _ChatScreenState extends State<ChatScreen>
   String? _backgroundPath;
   double _backgroundOpacity = 0.35;
   String? _contactAvatarBase64;
-  bool _contactOnline = false;
+  late final PresenceTracker _presence;
+  bool get _contactOnline => _presence.isOnline(widget.targetUser);
   DateTime? _contactLastSeen;
   bool _contactIsTyping = false;
   bool _typingSent = false;
@@ -256,6 +258,7 @@ class _ChatScreenState extends State<ChatScreen>
   @override
   void initState() {
     super.initState();
+    _presence = PresenceTracker()..addListener(_handlePresenceChanged);
     if (Platform.isWindows) {
       HardwareKeyboard.instance.addHandler(_handleWindowsTypeToPrivateChat);
     }
@@ -388,6 +391,9 @@ class _ChatScreenState extends State<ChatScreen>
     _typingAnimationController.dispose();
 
     SocketService.instance.removeMessageHandler(_handleMessage);
+    _presence
+      ..removeListener(_handlePresenceChanged)
+      ..dispose();
 
     _messageScrollController.removeListener(_handleMessageScroll);
     _messageScrollController.dispose();
@@ -410,6 +416,10 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   void _refreshLanguage() {
+    if (mounted) setState(() {});
+  }
+
+  void _handlePresenceChanged() {
     if (mounted) setState(() {});
   }
 
@@ -1416,9 +1426,9 @@ class _ChatScreenState extends State<ChatScreen>
 
     // PRESENCE_STEP13: a disconnected socket cannot confirm peer presence.
     if (type == 'disconnected') {
+      _presence.clearImmediately();
       if (mounted) {
         setState(() {
-          _contactOnline = false;
           _contactLastSeen = null;
         });
       }
@@ -1427,9 +1437,9 @@ class _ChatScreenState extends State<ChatScreen>
 
     // Re-query the peer status after successful authentication.
     if (type == 'login_success') {
+      _presence.clearImmediately();
       if (mounted) {
         setState(() {
-          _contactOnline = false;
           _contactLastSeen = null;
         });
         SocketService.instance.getUserStatus(widget.targetUser);
@@ -1751,7 +1761,7 @@ class _ChatScreenState extends State<ChatScreen>
     if (type == 'user_status') {
       final username = data['username']?.toString().trim() ?? '';
 
-      if (username != widget.targetUser) {
+      if (username.toLowerCase() != widget.targetUser.trim().toLowerCase()) {
         return;
       }
 
@@ -1769,10 +1779,8 @@ class _ChatScreenState extends State<ChatScreen>
         return;
       }
 
-      setState(() {
-        _contactOnline = online;
-        _contactLastSeen = lastSeen;
-      });
+      _presence.updateUser(widget.targetUser, online: online);
+      setState(() => _contactLastSeen = lastSeen);
 
       return;
     }

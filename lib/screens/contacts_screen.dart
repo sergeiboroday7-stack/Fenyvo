@@ -510,7 +510,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                         itemCount: contacts.length,
                         itemBuilder: (context, index) {
                           final user = contacts[index];
-                          final online = widget.onlineUsers.contains(user);
+                          final online = _isOnline(user);
 
                           return SizedBox(
                             height: 80,

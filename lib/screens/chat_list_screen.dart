@@ -22,6 +22,7 @@ import '../services/notification_service.dart';
 import '../services/firebase_messaging_service.dart';
 import '../services/storage_service.dart';
 import '../services/app_language_service.dart';
+import '../services/presence_tracker.dart';
 import '../settings_screen.dart';
 import 'auth_screen.dart';
 import 'chat_screen.dart';
@@ -81,7 +82,9 @@ class _ChatListScreenState extends State<ChatListScreen> {
   }
 
   List<String> _chats = [];
-  List<String> _onlineUsers = [];
+  late final PresenceTracker _presence;
+  List<String> get _onlineUsers =>
+      _presence.onlineUsers.toList(growable: false);
   // SPARTAN_STAGE24_GROUPS
   List<Map<String, dynamic>> _groups = <Map<String, dynamic>>[];
 
@@ -157,6 +160,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
   @override
   void initState() {
     super.initState();
+    _presence = PresenceTracker()..addListener(_handlePresenceChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _offerRecoverySetup();
     });
@@ -208,6 +212,9 @@ class _ChatListScreenState extends State<ChatListScreen> {
   void dispose() {
     ContactLinkService.instance.removeListener(_handlePendingContactLink);
     SocketService.instance.removeMessageHandler(_handleMessage);
+    _presence
+      ..removeListener(_handlePresenceChanged)
+      ..dispose();
 
     _notificationTapSubscription?.cancel();
     _notificationTapSubscription = null;
@@ -328,6 +335,10 @@ class _ChatListScreenState extends State<ChatListScreen> {
 
   void _loadOnlineUsers() {
     SocketService.instance.getUsers();
+  }
+
+  void _handlePresenceChanged() {
+    if (mounted) _loadChats();
   }
 
   // ========================================
@@ -474,20 +485,14 @@ class _ChatListScreenState extends State<ChatListScreen> {
 
     // PRESENCE_STEP13: discard stale online state after connection loss.
     if (type == 'disconnected') {
-      if (mounted) {
-        setState(() {
-          _onlineUsers = <String>[];
-        });
-      }
+      _presence.clearImmediately();
       return;
     }
 
     // Refresh the visible online list after authentication.
     if (type == 'login_success') {
+      _presence.clearImmediately();
       if (mounted) {
-        setState(() {
-          _onlineUsers = <String>[];
-        });
         _loadOnlineUsers();
       }
       return;
@@ -600,12 +605,26 @@ class _ChatListScreenState extends State<ChatListScreen> {
           .where((user) => user.isNotEmpty && user != currentUser)
           .toList();
 
-      _onlineUsers = users;
+      // Legacy servers used `users` for connected WebSocket sessions rather
+      // than foreground presence. Trust a full snapshot only when the server
+      // explicitly advertises the current presence contract. Point
+      // `user_status` events below remain compatible with both protocols.
+      if (data['presence_authoritative'] == true) {
+        _presence.replaceOnline(users);
+      }
 
       _loadChats();
 
       _requestMissingAvatars(users);
 
+      return;
+    }
+
+    if (type == 'user_status') {
+      final username = data['username']?.toString().trim() ?? '';
+      if (username.isNotEmpty) {
+        _presence.updateUser(username, online: data['online'] == true);
+      }
       return;
     }
 
@@ -1167,7 +1186,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
   // ========================================
 
   bool _isUserOnline(String user) {
-    return _onlineUsers.contains(user);
+    return _presence.isOnline(user);
   }
 
   // ========================================

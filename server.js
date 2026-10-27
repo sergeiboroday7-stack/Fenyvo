@@ -8631,7 +8631,10 @@ wss.on(
             const onlineList = presenceProtocol.getVisibleOnlineList(currentUser);
 
             send(ws, 'contact_list', contactList);
-            send(ws, 'users', onlineList);
+            send(ws, 'users', {
+              ...onlineList,
+              presence_authoritative: true,
+            });
 
             return;
           }

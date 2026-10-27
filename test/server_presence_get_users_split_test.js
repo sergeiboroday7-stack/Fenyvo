@@ -13,10 +13,12 @@ const source = fs.readFileSync(
 const start = source.indexOf(
   'const contactList = presenceProtocol.getContactList(currentUser);'
 );
-const endMarker = "send(ws, 'users', onlineList);";
-const end = source.indexOf(endMarker, start);
+const authoritativeMarker = 'presence_authoritative: true,';
+const marker = source.indexOf(authoritativeMarker, start);
+const endMarker = '            });';
+const end = source.indexOf(endMarker, marker);
 
-assert.ok(start >= 0 && end > start);
+assert.ok(start >= 0 && marker > start && end > marker);
 
 const statements = source.slice(start, end + endMarker.length);
 
@@ -56,7 +58,10 @@ test('contacts and online are separate events', () => {
     },
     {
       type: 'users',
-      data: { users: ['bob'] },
+      data: {
+        users: ['bob'],
+        presence_authoritative: true,
+      },
     },
   ]);
 });
@@ -92,5 +97,10 @@ test('handler uses authenticated presence protocol', () => {
   assert.doesNotMatch(
     statements,
     /getAcceptedCommunicationContacts/
+  );
+
+  assert.match(
+    statements,
+    /presence_authoritative:\s*true/
   );
 });

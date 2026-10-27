@@ -57,6 +57,6 @@ test('get_users validates session before returning contacts', () => {
   );
   assert.match(
     route,
-    /send\(ws,\s*'users',\s*onlineList\)/
+    /send\(ws,\s*'users',\s*\{[\s\S]*\.\.\.onlineList,[\s\S]*presence_authoritative:\s*true,[\s\S]*\}\)/
   );
 });

@@ -79,6 +79,7 @@ function createHarness(aliceActive) {
         recipient: socket.user,
         type,
         users: [...data.users],
+        authoritative: data.presence_authoritative === true,
       });
     },
   });
@@ -128,6 +129,10 @@ test('background socket is not shown as online', () => {
   assert.deepEqual(bob.users, ['alice']);
   assert.deepEqual(alice.users, []);
   assert.deepEqual(mallory.users, []);
+
+  assert.equal(bob.authoritative, true);
+  assert.equal(alice.authoritative, true);
+  assert.equal(mallory.authoritative, true);
 
   assert.equal(
     h.events.some(e => e.recipient === null),

@@ -42,7 +42,10 @@ function createPresenceDelivery({
 
       if (!payload || !Array.isArray(payload.users)) continue;
 
-      send(client, 'users', payload);
+      send(client, 'users', {
+        ...payload,
+        presence_authoritative: true,
+      });
     }
   }
 
