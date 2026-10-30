@@ -1,15 +1,15 @@
 {
   "schemaVersion": 1,
-  "publishedAt": "2026-10-26T17:45:04Z",
+  "publishedAt": "2026-10-29T18:08:30Z",
   "platforms": {
     "android": {
       "version": "1.8.2",
-      "build": 4251,
+      "build": 4254,
       "minimumSupportedBuild": 0,
       "downloadUrl": "https://fenyvo.com/download/Fenyvo-1.8.2-arm64.apk",
-      "sha256": "85ce58c922cc56e14637bd8349702b0403fa4c4608536f79dff3b1b8a7ee2a8f",
-      "sizeBytes": 77489537,
-      "publishedAt": "2026-10-26T17:45:04Z",
+      "sha256": "f0b8965a7f792952253940a1b2dc4335ad8fadf4cd4301c779257b1b6e4f72ab",
+      "sizeBytes": 77686145,
+      "publishedAt": "2026-10-29T18:08:29Z",
       "notes": {
         "ru": [
           "Возвращены поиск сообщений и защита экрана в личном чате.",
@@ -33,12 +33,12 @@
     },
     "windows": {
       "version": "1.8.2",
-      "build": 4251,
+      "build": 4254,
       "minimumSupportedBuild": 0,
       "downloadUrl": "https://fenyvo.com/download/Fenyvo-1.8.2-windows-x64.zip",
-      "sha256": "5c8e0d97e2a6cdb5bf3415f404335cfc9390c974eb943a6570fb37b675204d73",
-      "sizeBytes": 31335170,
-      "publishedAt": "2026-10-26T17:45:04Z",
+      "sha256": "1b7d012c8d8f25db8dc48eacb130b4c3c883d5b3a5273aea5dff772a92d4048f",
+      "sizeBytes": 31490214,
+      "publishedAt": "2026-10-29T18:08:30Z",
       "notes": {
         "ru": [
           "Исправлено автоматическое возвращение ведущего в групповой эфир.",

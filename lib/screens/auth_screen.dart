@@ -47,6 +47,7 @@ class _AuthScreenState extends State<AuthScreen> {
     super.initState();
 
     SocketService.instance.addMessageHandler(_handleMessage);
+    AppLanguageService.instance.code.addListener(_onLanguageChanged);
 
     _loadSavedUser();
   }
@@ -56,6 +57,7 @@ class _AuthScreenState extends State<AuthScreen> {
     _loginTimeout?.cancel();
 
     SocketService.instance.removeMessageHandler(_handleMessage);
+    AppLanguageService.instance.code.removeListener(_onLanguageChanged);
 
     _usernameController.dispose();
     _passwordController.dispose();
@@ -182,16 +184,16 @@ class _AuthScreenState extends State<AuthScreen> {
   String _getErrorText(String type) {
     switch (type) {
       case 'login_error':
-        return 'Не удалось выполнить вход';
+        return AppLanguageService.instance.text('authLoginFailed');
 
       case 'register_error':
-        return 'Ошибка регистрации';
+        return AppLanguageService.instance.text('authRegistrationFailed');
 
       case 'disconnected':
-        return 'Соединение с сервером потеряно';
+        return AppLanguageService.instance.text('authDisconnected');
 
       default:
-        return 'Произошла ошибка';
+        return AppLanguageService.instance.text('authGeneralError');
     }
   }
 
@@ -210,7 +212,7 @@ class _AuthScreenState extends State<AuthScreen> {
       setState(() {
         _isLoading = false;
         _isAutoLogin = false;
-        _error = 'Сервер не ответил. Проверьте подключение.';
+        _error = AppLanguageService.instance.text('authServerTimeout');
       });
     });
   }
@@ -262,7 +264,9 @@ class _AuthScreenState extends State<AuthScreen> {
     final password = _passwordController.text;
 
     if (username.isEmpty || password.isEmpty) {
-      _stopLoadingWithError('Введите логин и пароль');
+      _stopLoadingWithError(
+        AppLanguageService.instance.text('authEnterCredentials'),
+      );
 
       return;
     }
@@ -279,7 +283,9 @@ class _AuthScreenState extends State<AuthScreen> {
       }
 
       if (!connected) {
-        _stopLoadingWithError('Не удалось подключиться к серверу');
+        _stopLoadingWithError(
+          AppLanguageService.instance.text('authConnectionFailed'),
+        );
 
         return;
       }
@@ -298,7 +304,9 @@ class _AuthScreenState extends State<AuthScreen> {
         return;
       }
 
-      _stopLoadingWithError('Не удалось подключиться к серверу');
+      _stopLoadingWithError(
+        AppLanguageService.instance.text('authConnectionFailed'),
+      );
     }
   }
 
@@ -343,7 +351,7 @@ class _AuthScreenState extends State<AuthScreen> {
 
     if (username.length < 3) {
       setState(() {
-        _error = 'Логин должен содержать минимум 3 символа';
+        _error = AppLanguageService.instance.text('authUsernameTooShort');
       });
 
       return;
@@ -351,7 +359,7 @@ class _AuthScreenState extends State<AuthScreen> {
 
     if (password.length < 8) {
       setState(() {
-        _error = 'Пароль должен содержать минимум 8 символов';
+        _error = AppLanguageService.instance.text('authPasswordTooShort');
       });
 
       return;
@@ -359,7 +367,7 @@ class _AuthScreenState extends State<AuthScreen> {
 
     if (password.length > 128) {
       setState(() {
-        _error = 'Пароль не должен быть длиннее 128 символов';
+        _error = AppLanguageService.instance.text('authPasswordTooLong');
       });
 
       return;
@@ -367,20 +375,22 @@ class _AuthScreenState extends State<AuthScreen> {
 
     if (password != _confirmPasswordController.text) {
       setState(() {
-        _error = 'Пароли не совпадают';
+        _error = AppLanguageService.instance.text('authPasswordMismatch');
       });
       return;
     }
 
     if (!_termsAccepted) {
       setState(
-        () => _error = 'Примите Условия использования и подтвердите ознакомление с Политикой конфиденциальности',
+        () => _error = AppLanguageService.instance.text('authAcceptTermsError'),
       );
       return;
     }
 
     if (!_ageConfirmed) {
-      setState(() => _error = 'Подтвердите, что вам исполнилось 16 лет');
+      setState(
+        () => _error = AppLanguageService.instance.text('authConfirmAgeError'),
+      );
       return;
     }
 
@@ -402,7 +412,9 @@ class _AuthScreenState extends State<AuthScreen> {
       }
 
       if (!connected) {
-        _stopLoadingWithError('Не удалось подключиться к серверу');
+        _stopLoadingWithError(
+          AppLanguageService.instance.text('authConnectionFailed'),
+        );
 
         return;
       }
@@ -420,7 +432,9 @@ class _AuthScreenState extends State<AuthScreen> {
 
       _loginTimeout?.cancel();
 
-      _stopLoadingWithError('Не удалось подключиться к серверу');
+      _stopLoadingWithError(
+        AppLanguageService.instance.text('authConnectionFailed'),
+      );
     }
   }
 
@@ -468,7 +482,7 @@ class _AuthScreenState extends State<AuthScreen> {
         BoxShadow(color: _gold.withValues(alpha: .035), blurRadius: 27),
       ],
     ),
-    child: child,
+    child: Material(type: MaterialType.transparency, child: child),
   );
 
   InputDecoration _premiumInput(String hint, IconData icon, {Widget? suffix}) =>
@@ -537,8 +551,8 @@ class _AuthScreenState extends State<AuthScreen> {
   Widget _welcomeBody() => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
-      const Text(
-        'ОБЩЕНИЕ БЕЗ ЛИШНЕГО ШУМА',
+      Text(
+        AppLanguageService.instance.text('authTagline'),
         textAlign: TextAlign.center,
         style: TextStyle(
           color: _gold,
@@ -548,8 +562,8 @@ class _AuthScreenState extends State<AuthScreen> {
         ),
       ),
       const SizedBox(height: 15),
-      const Text(
-        'Люди ближе.\nЛишнее — дальше.',
+      Text(
+        AppLanguageService.instance.text('authHero'),
         textAlign: TextAlign.center,
         style: TextStyle(
           color: Colors.white,
@@ -559,21 +573,24 @@ class _AuthScreenState extends State<AuthScreen> {
         ),
       ),
       const SizedBox(height: 14),
-      const Text(
-        'Чаты, звонки и файлы — в одном пространстве. Без обязательного номера телефона.',
+      Text(
+        AppLanguageService.instance.text('authDescription'),
         textAlign: TextAlign.center,
         style: TextStyle(color: _muted, fontSize: 13, height: 1.5),
       ),
       const SizedBox(height: 32),
-      _primaryAction('СОЗДАТЬ АККАУНТ', () => _openMode(true)),
+      _primaryAction(
+        AppLanguageService.instance.text('authCreateAccount'),
+        () => _openMode(true),
+      ),
       const SizedBox(height: 12),
       SizedBox(
         height: 54,
         child: OutlinedButton.icon(
           onPressed: () => _openMode(false),
           icon: const Icon(Icons.login_rounded, size: 20),
-          label: const Text(
-            'У МЕНЯ ЕСТЬ АККАУНТ',
+          label: Text(
+            AppLanguageService.instance.text('authHaveAccount'),
             style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
           ),
           style: OutlinedButton.styleFrom(
@@ -588,6 +605,12 @@ class _AuthScreenState extends State<AuthScreen> {
     ],
   );
 
+  void _onLanguageChanged() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
   Widget _formBody() {
     final language = AppLanguageService.instance;
     final registration = _isRegisterMode;
@@ -598,12 +621,14 @@ class _AuthScreenState extends State<AuthScreen> {
           children: [
             IconButton(
               onPressed: _isLoading ? null : _goWelcome,
-              tooltip: 'Назад',
+              tooltip: language.text('authBack'),
               icon: const Icon(Icons.arrow_back_rounded, color: _gold),
             ),
             Expanded(
               child: Text(
-                registration ? 'СОЗДАНИЕ АККАУНТА' : 'ВХОД В FENYVO',
+                registration
+                    ? language.text('create')
+                    : language.text('login').toUpperCase(),
                 textAlign: TextAlign.center,
                 style: const TextStyle(
                   color: _gold,
@@ -618,7 +643,9 @@ class _AuthScreenState extends State<AuthScreen> {
         ),
         const SizedBox(height: 10),
         Text(
-          registration ? 'Начните общение' : 'С возвращением!',
+          registration
+              ? AppLanguageService.instance.text('authStartConversation')
+              : AppLanguageService.instance.text('authWelcomeBack'),
           textAlign: TextAlign.center,
           style: const TextStyle(
             color: Colors.white,
@@ -629,8 +656,8 @@ class _AuthScreenState extends State<AuthScreen> {
         const SizedBox(height: 8),
         Text(
           registration
-              ? 'Выберите ник и надёжный пароль'
-              : 'Войдите под своим ником',
+              ? AppLanguageService.instance.text('authRegisterHint')
+              : AppLanguageService.instance.text('authLoginHint'),
           textAlign: TextAlign.center,
           style: const TextStyle(color: _muted, fontSize: 13),
         ),
@@ -662,7 +689,7 @@ class _AuthScreenState extends State<AuthScreen> {
                             borderRadius: BorderRadius.circular(16),
                           ),
                           duration: const Duration(seconds: 5),
-                          content: const Row(
+                          content: Row(
                             children: [
                               Icon(
                                 Icons.check_circle_outline,
@@ -671,7 +698,9 @@ class _AuthScreenState extends State<AuthScreen> {
                               SizedBox(width: 12),
                               Expanded(
                                 child: Text(
-                                  'Пароль восстановлен! Теперь войдите с новым паролем.',
+                                  AppLanguageService.instance.text(
+                                    'authRecoverySuccess',
+                                  ),
                                   style: TextStyle(color: Colors.white),
                                 ),
                               ),
@@ -680,7 +709,9 @@ class _AuthScreenState extends State<AuthScreen> {
                         ),
                       );
                     },
-              child: const Text('Забыли пароль?'),
+              child: Text(
+                AppLanguageService.instance.text('authForgotPassword'),
+              ),
             ),
           ),
         ],
@@ -690,7 +721,7 @@ class _AuthScreenState extends State<AuthScreen> {
             initialValue: language.code.value,
             isExpanded: true,
             decoration: _premiumInput(
-              'Язык приложения',
+              language.text('language'),
               Icons.language_rounded,
             ),
             dropdownColor: const Color(0xFF14263A),
@@ -721,7 +752,7 @@ class _AuthScreenState extends State<AuthScreen> {
           style: const TextStyle(color: Colors.white),
           textInputAction: TextInputAction.next,
           decoration: _premiumInput(
-            'Ник пользователя',
+            language.text('authUsername'),
             Icons.alternate_email_rounded,
           ),
         ),
@@ -739,10 +770,12 @@ class _AuthScreenState extends State<AuthScreen> {
             if (!registration && !_isLoading) _login();
           },
           decoration: _premiumInput(
-            'Пароль',
+            language.text('authPassword'),
             Icons.lock_outline_rounded,
             suffix: IconButton(
-              tooltip: _passwordVisible ? 'Скрыть пароль' : 'Показать пароль',
+              tooltip: _passwordVisible
+                  ? language.text('authHidePassword')
+                  : language.text('authShowPassword'),
               onPressed: () =>
                   setState(() => _passwordVisible = !_passwordVisible),
               icon: Icon(
@@ -756,8 +789,8 @@ class _AuthScreenState extends State<AuthScreen> {
         ),
         if (registration) ...[
           const SizedBox(height: 12),
-          const Text(
-            'Пароль: от 8 до 128 символов. Сохраните его в надёжном месте.',
+          Text(
+            language.text('authPasswordHint'),
             style: TextStyle(color: _muted, fontSize: 12, height: 1.4),
           ),
           AnimatedSize(
@@ -782,12 +815,12 @@ class _AuthScreenState extends State<AuthScreen> {
                           if (!_isLoading) _register();
                         },
                         decoration: _premiumInput(
-                          'Повторите пароль',
+                          language.text('authConfirmPassword'),
                           Icons.verified_user_outlined,
                           suffix: IconButton(
                             tooltip: _confirmPasswordVisible
-                                ? 'Скрыть пароль'
-                                : 'Показать пароль',
+                                ? language.text('authHidePassword')
+                                : language.text('authShowPassword'),
                             onPressed: () => setState(
                               () => _confirmPasswordVisible =
                                   !_confirmPasswordVisible,
@@ -822,8 +855,8 @@ class _AuthScreenState extends State<AuthScreen> {
                               child: Text(
                                 _confirmPasswordController.text ==
                                         _passwordController.text
-                                    ? 'Пароли совпадают'
-                                    : 'Пароли пока не совпадают',
+                                    ? language.text('authPasswordsMatch')
+                                    : language.text('authPasswordsDiffer'),
                                 style: TextStyle(
                                   color:
                                       _confirmPasswordController.text ==
@@ -849,8 +882,8 @@ class _AuthScreenState extends State<AuthScreen> {
             onChanged: _isLoading
                 ? null
                 : (v) => setState(() => _termsAccepted = v ?? false),
-            title: const Text(
-              'Я принимаю Условия использования и подтверждаю ознакомление с Политикой конфиденциальности.',
+            title: Text(
+              AppLanguageService.instance.text('authTermsConsent'),
               style: TextStyle(color: Colors.white, fontSize: 12),
             ),
             controlAffinity: ListTileControlAffinity.leading,
@@ -863,8 +896,8 @@ class _AuthScreenState extends State<AuthScreen> {
             onChanged: _isLoading
                 ? null
                 : (v) => setState(() => _ageConfirmed = v ?? false),
-            title: const Text(
-              'Я подтверждаю, что мне исполнилось 16 лет.',
+            title: Text(
+              AppLanguageService.instance.text('authAgeConsent'),
               style: TextStyle(color: Colors.white, fontSize: 12),
             ),
             controlAffinity: ListTileControlAffinity.leading,
@@ -886,7 +919,7 @@ class _AuthScreenState extends State<AuthScreen> {
                           mode: LaunchMode.externalApplication,
                         );
                       },
-                child: const Text('Условия использования'),
+                child: Text(AppLanguageService.instance.text('authTermsLink')),
               ),
               TextButton(
                 onPressed: _isLoading
@@ -897,7 +930,9 @@ class _AuthScreenState extends State<AuthScreen> {
                           mode: LaunchMode.externalApplication,
                         );
                       },
-                child: const Text('Политика конфиденциальности'),
+                child: Text(
+                  AppLanguageService.instance.text('authPrivacyLink'),
+                ),
               ),
             ],
           ),
@@ -924,17 +959,19 @@ class _AuthScreenState extends State<AuthScreen> {
               const SizedBox(height: 12),
               Text(
                 _isAutoLogin
-                    ? 'Автоматический вход...'
+                    ? AppLanguageService.instance.text('authAutoLogin')
                     : registration
-                    ? 'Регистрация...'
-                    : 'Подключение...',
+                    ? AppLanguageService.instance.text('authRegistering')
+                    : AppLanguageService.instance.text('authConnecting'),
                 style: const TextStyle(color: _muted),
               ),
             ],
           )
         else
           _primaryAction(
-            registration ? 'ЗАРЕГИСТРИРОВАТЬСЯ' : 'ВОЙТИ',
+            registration
+                ? language.text('registerButton')
+                : language.text('loginButton'),
             registration ? _register : _login,
             icon: registration
                 ? Icons.person_add_alt_1_rounded
@@ -1085,8 +1122,10 @@ class _AuthScreenState extends State<AuthScreen> {
                           ),
                         ),
                         SizedBox(height: veryCompact ? 12 : 19),
-                        const Text(
-                          'Без обязательного телефона и почты. Восстановите доступ с помощью 12 секретных слов.',
+                        Text(
+                          AppLanguageService.instance.text(
+                            'authRecoveryFooter',
+                          ),
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             color: _muted,

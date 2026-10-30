@@ -13,7 +13,7 @@ test('current product metadata uses the Fenyvo brand', () => {
   const pubspec = read('pubspec.yaml');
   assert.match(pubspec, /^name: fenyvo$/m);
   assert.match(pubspec, /^description: Fenyvo messenger for Android and Windows$/m);
-  assert.match(pubspec, /^version: 1\.8\.2\+4252$/m);
+  assert.match(pubspec, /^version: 1\.8\.2\+4254$/m);
 });
 
 test('current user-facing source contains no retired product name', () => {

@@ -13,6 +13,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'app_visibility.dart';
 import 'socket_service.dart';
 import 'notification_service.dart';
+import 'native_call_notification_language.dart';
 
 @pragma('vm:entry-point')
 Future<void> spartanBackgroundMessage(RemoteMessage message) async {
@@ -136,24 +137,31 @@ class SystemCallService {
     try {
       if (Platform.isAndroid) {
         // The same call ID is used for push and socket delivery: no duplicate cards.
+        final languageCode = await NativeCallNotificationLanguage.savedCode();
         await FlutterCallkitIncoming.showMissCallNotification(
           CallKitParams(
             id: id,
             nameCaller: from,
             appName: 'FENYVO',
             type: video ? 1 : 0,
-            handle: video
-                ? '\u041f\u0440\u043e\u043f\u0443\u0449\u0435\u043d\u043d\u044b\u0439 \u0432\u0438\u0434\u0435\u043e\u0437\u0432\u043e\u043d\u043e\u043a'
-                : '\u041f\u0440\u043e\u043f\u0443\u0449\u0435\u043d\u043d\u044b\u0439 \u0437\u0432\u043e\u043d\u043e\u043a',
+            handle: NativeCallNotificationLanguage.forCode(
+              video ? 'missedVideo' : 'missedAudio',
+              languageCode,
+            ),
             missedCallNotification: NotificationParams(
               showNotification: true,
               isShowCallback: false,
-              subtitle: video
-                  ? '\u041f\u0440\u043e\u043f\u0443\u0449\u0435\u043d\u043d\u044b\u0439 \u0432\u0438\u0434\u0435\u043e\u0437\u0432\u043e\u043d\u043e\u043a'
-                  : '\u041f\u0440\u043e\u043f\u0443\u0449\u0435\u043d\u043d\u044b\u0439 \u0437\u0432\u043e\u043d\u043e\u043a',
+              subtitle: NativeCallNotificationLanguage.forCode(
+                video ? 'missedVideo' : 'missedAudio',
+                languageCode,
+              ),
             ),
-            android: const AndroidParams(
-              missedCallNotificationChannelName: 'Пропущенные звонки',
+            android: AndroidParams(
+              missedCallNotificationChannelName:
+                  NativeCallNotificationLanguage.forCode(
+                    'missedCallsChannel',
+                    languageCode,
+                  ),
             ),
           ),
         );
@@ -215,14 +223,19 @@ class SystemCallService {
     final avatar = endpoint
         .replace(path: '${endpoint.path}/avatar', queryParameters: {'t': token})
         .toString();
+    final languageCode = await NativeCallNotificationLanguage.savedCode();
+
     await FlutterCallkitIncoming.showCallkitIncoming(
       CallKitParams(
         id: id,
         nameCaller: data['sender'].toString(),
         appName: 'FENYVO',
-        handle: data['video'].toString() == 'true'
-            ? '\u0412\u0438\u0434\u0435\u043e\u0437\u0432\u043e\u043d\u043e\u043a'
-            : '\u0410\u0443\u0434\u0438\u043e\u0437\u0432\u043e\u043d\u043e\u043a',
+        handle: NativeCallNotificationLanguage.forCode(
+          data['video'].toString() == 'true'
+              ? 'incomingVideo'
+              : 'incomingAudio',
+          languageCode,
+        ),
         avatar: avatar,
         type: data['video'].toString() == 'true' ? 1 : 0,
         duration: remaining,
@@ -232,16 +245,25 @@ class SystemCallService {
           'expiresAt': expires,
           'to': user,
         },
-        missedCallNotification: const NotificationParams(
+        missedCallNotification: NotificationParams(
           showNotification: true,
           isShowCallback: false,
-          subtitle: 'Пропущенный звонок',
+          subtitle: NativeCallNotificationLanguage.forCode(
+            data['video'].toString() == 'true' ? 'missedVideo' : 'missedAudio',
+            languageCode,
+          ),
         ),
-        callingNotification: const NotificationParams(
+        callingNotification: NotificationParams(
           showNotification: true,
           isShowCallback: true,
-          callbackText: 'Завершить',
-          subtitle: 'Звонок FENYVO',
+          callbackText: NativeCallNotificationLanguage.forCode(
+            'endCall',
+            languageCode,
+          ),
+          subtitle: NativeCallNotificationLanguage.forCode(
+            'callFenyvo',
+            languageCode,
+          ),
         ),
         android: AndroidParams(
           isCustomNotification: true,
@@ -252,10 +274,24 @@ class SystemCallService {
           backgroundUrl: avatar,
           actionColor: '#D4AF37',
           textColor: '#FFFFFF',
-          incomingCallNotificationChannelName: 'Звонки FENYVO',
-          missedCallNotificationChannelName: '\u041f\u0440\u043e\u043f\u0443\u0449\u0435\u043d\u043d\u044b\u0435 \u0437\u0432\u043e\u043d\u043a\u0438',
-          textAccept: '\u041f\u0440\u0438\u043d\u044f\u0442\u044c',
-          textDecline: '\u041e\u0442\u043a\u043b\u043e\u043d\u0438\u0442\u044c',
+          incomingCallNotificationChannelName:
+              NativeCallNotificationLanguage.forCode(
+                'callsChannel',
+                languageCode,
+              ),
+          missedCallNotificationChannelName:
+              NativeCallNotificationLanguage.forCode(
+                'missedCallsChannel',
+                languageCode,
+              ),
+          textAccept: NativeCallNotificationLanguage.forCode(
+            'accept',
+            languageCode,
+          ),
+          textDecline: NativeCallNotificationLanguage.forCode(
+            'decline',
+            languageCode,
+          ),
           isShowFullLockedScreen: true,
         ),
       ),

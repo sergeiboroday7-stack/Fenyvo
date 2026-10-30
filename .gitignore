@@ -132,3 +132,5 @@ assets/images/adcfeb10-a5b8-4fb2-9f1d-5d68f2365fba.png
 /third_party/flutter_webrtc_1_6_1_local/test/
 /third_party/flutter_webrtc_1_6_1_local/flutter-webrtc.code-workspace
 /third_party/flutter_webrtc_1_6_1_local/format.sh
+.dart-tool-home/
+/fenyvo_step106_privacy_i18n.js

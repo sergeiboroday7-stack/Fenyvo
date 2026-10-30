@@ -3,6 +3,7 @@ import '../theme/fenyvo_theme.dart';
 import 'package:flutter/material.dart';
 
 import '../services/socket_service.dart';
+import '../services/app_language_service.dart';
 
 class GroupCreateScreen extends StatefulWidget {
   const GroupCreateScreen({super.key});
@@ -24,12 +25,18 @@ class _GroupCreateScreenState extends State<GroupCreateScreen> {
   void initState() {
     super.initState();
     SocketService.instance.addMessageHandler(_handleMessage);
+    AppLanguageService.instance.code.addListener(_onLanguageChanged);
     SocketService.instance.getRegisteredUsers();
+  }
+
+  void _onLanguageChanged() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
     SocketService.instance.removeMessageHandler(_handleMessage);
+    AppLanguageService.instance.code.removeListener(_onLanguageChanged);
     _nameController.dispose();
     super.dispose();
   }
@@ -84,7 +91,7 @@ class _GroupCreateScreenState extends State<GroupCreateScreen> {
         SnackBar(
           content: Text(
             reason == null || reason.isEmpty
-                ? 'Не удалось создать группу'
+                ? AppLanguageService.instance.text('groupCreateFailed')
                 : reason,
           ),
           backgroundColor: FenyvoPalette.surface,
@@ -97,15 +104,23 @@ class _GroupCreateScreenState extends State<GroupCreateScreen> {
     final name = _nameController.text.trim();
 
     if (name.length < 2) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Введите название группы')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            AppLanguageService.instance.text('groupCreateEnterName'),
+          ),
+        ),
+      );
       return;
     }
 
     if (_selectedUsers.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Выберите хотя бы одного участника')),
+        SnackBar(
+          content: Text(
+            AppLanguageService.instance.text('groupCreateSelectMember'),
+          ),
+        ),
       );
       return;
     }
@@ -119,13 +134,14 @@ class _GroupCreateScreenState extends State<GroupCreateScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final t = AppLanguageService.instance.text;
     return Scaffold(
       backgroundColor: FenyvoPalette.canvas,
       appBar: AppBar(
         backgroundColor: FenyvoPalette.canvas,
         foregroundColor: FenyvoPalette.ink,
-        title: const Text(
-          'Новая группа',
+        title: Text(
+          t('groupCreateTitle'),
           style: TextStyle(color: _gold, fontWeight: FontWeight.w800),
         ),
       ),
@@ -139,7 +155,7 @@ class _GroupCreateScreenState extends State<GroupCreateScreen> {
                 maxLength: 60,
                 style: const TextStyle(color: FenyvoPalette.ink),
                 decoration: InputDecoration(
-                  labelText: 'Название группы',
+                  labelText: t('groupCreateName'),
                   labelStyle: const TextStyle(color: FenyvoPalette.secondary),
                   prefixIcon: const Icon(Icons.groups_rounded, color: _gold),
                   filled: true,
@@ -159,8 +175,8 @@ class _GroupCreateScreenState extends State<GroupCreateScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 20),
               child: Row(
                 children: [
-                  const Text(
-                    'Участники',
+                  Text(
+                    t('groupCreateParticipants'),
                     style: TextStyle(
                       color: FenyvoPalette.ink,
                       fontWeight: FontWeight.w700,
@@ -169,7 +185,9 @@ class _GroupCreateScreenState extends State<GroupCreateScreen> {
                   ),
                   const Spacer(),
                   Text(
-                    'Выбрано: ${_selectedUsers.length}',
+                    t(
+                      'groupCreateSelected',
+                    ).replaceAll('{count}', _selectedUsers.length.toString()),
                     style: const TextStyle(color: _gold),
                   ),
                 ],
@@ -180,9 +198,9 @@ class _GroupCreateScreenState extends State<GroupCreateScreen> {
               child: _loadingUsers
                   ? const Center(child: CircularProgressIndicator(color: _gold))
                   : _users.isEmpty
-                  ? const Center(
+                  ? Center(
                       child: Text(
-                        'Нет доступных пользователей',
+                        t('groupCreateNoUsers'),
                         style: TextStyle(color: FenyvoPalette.secondary),
                       ),
                     )
@@ -242,7 +260,9 @@ class _GroupCreateScreenState extends State<GroupCreateScreen> {
                           ),
                         )
                       : const Icon(Icons.group_add_rounded),
-                  label: Text(_creating ? 'Создание...' : 'Создать группу'),
+                  label: Text(
+                    _creating ? t('groupCreateSaving') : t('groupCreateSubmit'),
+                  ),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: FenyvoPalette.blue,
                     foregroundColor: FenyvoPalette.ink,

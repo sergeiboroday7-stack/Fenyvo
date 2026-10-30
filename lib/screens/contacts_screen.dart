@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../services/socket_service.dart';
 import '../theme/fenyvo_theme.dart';
 import 'contact_link_screen.dart';
+import '../services/app_language_service.dart';
 
 class ContactsScreen extends StatefulWidget {
   const ContactsScreen({
@@ -196,7 +197,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
     showDialog<void>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Добавить контакт'),
+        title: Text(AppLanguageService.instance.text('contactsAdd')),
         content: TextField(
           controller: controller,
           autofocus: true,
@@ -208,7 +209,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Отмена'),
+            child: Text(AppLanguageService.instance.text('contactsCancel')),
           ),
           FilledButton(
             onPressed: () {
@@ -224,7 +225,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                 ),
               );
             },
-            child: const Text('Найти'),
+            child: Text(AppLanguageService.instance.text('contactsFind')),
           ),
         ],
       ),
@@ -335,7 +336,9 @@ class _ContactsScreenState extends State<ContactsScreen> {
             ),
             const SizedBox(height: 4),
             Text(
-              _isOnline(username) ? 'В сети' : 'Не в сети',
+              _isOnline(username)
+                  ? AppLanguageService.instance.text('contactsStatusOnline')
+                  : AppLanguageService.instance.text('contactsStatusOffline'),
               style: TextStyle(
                 fontSize: 10,
                 color: _isOnline(username)
@@ -377,15 +380,15 @@ class _ContactsScreenState extends State<ContactsScreen> {
     return Scaffold(
       backgroundColor: FenyvoPalette.canvasDeep,
       appBar: AppBar(
-        title: const Text('Контакты'),
+        title: Text(AppLanguageService.instance.text('contactsPageTitle')),
         actions: [
           IconButton(
-            tooltip: 'Обновить контакты',
+            tooltip: AppLanguageService.instance.text('contactsRefresh'),
             onPressed: _refreshContacts,
             icon: const Icon(Icons.refresh_rounded),
           ),
           IconButton(
-            tooltip: 'Добавить контакт',
+            tooltip: AppLanguageService.instance.text('contactsAdd'),
             onPressed: _addContact,
             icon: const Icon(Icons.person_add_alt_1_rounded),
           ),
@@ -399,7 +402,9 @@ class _ContactsScreenState extends State<ContactsScreen> {
               controller: _search,
               onChanged: (_) => setState(() {}),
               decoration: InputDecoration(
-                hintText: 'Поиск по имени или @username',
+                hintText: AppLanguageService.instance.text(
+                  'contactsSearchHint',
+                ),
                 prefixIcon: const Icon(Icons.search_rounded),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(16),
@@ -418,7 +423,18 @@ class _ContactsScreenState extends State<ContactsScreen> {
                     padding: const EdgeInsets.only(right: 8),
                     child: ChoiceChip(
                       label: Text(
-                        ['Все', 'Избранные', 'Онлайн', 'Недавние'][i],
+                        [
+                          AppLanguageService.instance.text('contactsFilterAll'),
+                          AppLanguageService.instance.text(
+                            'contactsFilterFavorites',
+                          ),
+                          AppLanguageService.instance.text(
+                            'contactsFilterOnline',
+                          ),
+                          AppLanguageService.instance.text(
+                            'contactsFilterRecent',
+                          ),
+                        ][i],
                       ),
                       selected: _filter == i,
                       onSelected: (_) => setState(() => _filter = i),
@@ -431,10 +447,12 @@ class _ContactsScreenState extends State<ContactsScreen> {
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Padding(
+                Padding(
                   padding: EdgeInsets.fromLTRB(18, 14, 18, 12),
                   child: Text(
-                    'ИЗБРАННЫЕ',
+                    AppLanguageService.instance.text(
+                      'contactsFavoritesHeading',
+                    ),
                     style: TextStyle(
                       color: FenyvoPalette.gold,
                       fontWeight: FontWeight.w800,
@@ -470,8 +488,10 @@ class _ContactsScreenState extends State<ContactsScreen> {
                             color: FenyvoPalette.gold,
                           ),
                           const SizedBox(height: 16),
-                          const Text(
-                            'Не удалось загрузить контакты',
+                          Text(
+                            AppLanguageService.instance.text(
+                              'contactsLoadFailed',
+                            ),
                             textAlign: TextAlign.center,
                             style: TextStyle(
                               fontSize: 18,
@@ -479,15 +499,19 @@ class _ContactsScreenState extends State<ContactsScreen> {
                             ),
                           ),
                           const SizedBox(height: 8),
-                          const Text(
-                            'Проверьте соединение с сервером Fenyvo.',
+                          Text(
+                            AppLanguageService.instance.text(
+                              'contactsCheckConnection',
+                            ),
                             textAlign: TextAlign.center,
                           ),
                           const SizedBox(height: 20),
                           FilledButton.icon(
                             onPressed: _refreshContacts,
                             icon: const Icon(Icons.refresh_rounded),
-                            label: const Text('Повторить'),
+                            label: Text(
+                              AppLanguageService.instance.text('contactsRetry'),
+                            ),
                           ),
                         ],
                       ),
@@ -498,7 +522,7 @@ class _ContactsScreenState extends State<ContactsScreen> {
                 : contacts.isEmpty
                 ? Center(
                     child: Text(
-                      'Контактов пока нет',
+                      AppLanguageService.instance.text('contactsEmpty'),
                       style: TextStyle(color: FenyvoPalette.secondary),
                     ),
                   )
@@ -518,12 +542,22 @@ class _ContactsScreenState extends State<ContactsScreen> {
                               child: ListTile(
                                 leading: _contactAvatar(user),
                                 title: Text(user),
-                                subtitle: Text(online ? 'В сети' : 'Не в сети'),
+                                subtitle: Text(
+                                  online
+                                      ? AppLanguageService.instance.text(
+                                          'contactsStatusOnline',
+                                        )
+                                      : AppLanguageService.instance.text(
+                                          'contactsStatusOffline',
+                                        ),
+                                ),
                                 trailing: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
                                     IconButton(
-                                      tooltip: 'Избранное',
+                                      tooltip: AppLanguageService.instance.text(
+                                        'contactsFavoriteTooltip',
+                                      ),
                                       icon: Icon(
                                         _favorites.contains(user.toLowerCase())
                                             ? Icons.star_rounded
@@ -533,7 +567,9 @@ class _ContactsScreenState extends State<ContactsScreen> {
                                       onPressed: () => _toggleFavorite(user),
                                     ),
                                     IconButton(
-                                      tooltip: 'Открыть чат',
+                                      tooltip: AppLanguageService.instance.text(
+                                        'contactsOpenChat',
+                                      ),
                                       icon: const Icon(
                                         Icons.chat_bubble_outline,
                                       ),

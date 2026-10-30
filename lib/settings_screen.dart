@@ -1,4 +1,5 @@
 import 'screens/recovery_setup_screen.dart';
+import 'screens/presence_privacy_screen.dart';
 import 'theme/fenyvo_theme.dart';
 
 import 'dart:convert';
@@ -204,7 +205,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               fontSize: 21,
               fontWeight: FontWeight.w800,
             ),
-            title: const Text('Профиль'),
+            title: Text(AppLanguageService.instance.text('dashboardProfile')),
             content: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -212,34 +213,42 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   TextField(
                     controller: status,
                     maxLength: 80,
-                    decoration: const InputDecoration(
-                      labelText: 'Статус',
-                      hintText: 'Например: Сила в людях',
+                    decoration: InputDecoration(
+                      labelText: AppLanguageService.instance.text('editStatus'),
+                      hintText: AppLanguageService.instance.text(
+                        'editStatusHint',
+                      ),
                     ),
                   ),
                   TextField(
                     controller: about,
                     maxLength: 160,
                     maxLines: 3,
-                    decoration: const InputDecoration(labelText: 'О себе'),
+                    decoration: InputDecoration(
+                      labelText: AppLanguageService.instance.text('editAbout'),
+                    ),
                   ),
                   TextField(
                     controller: region,
                     maxLength: 80,
-                    decoration: const InputDecoration(labelText: 'Регион'),
+                    decoration: InputDecoration(
+                      labelText: AppLanguageService.instance.text('editRegion'),
+                    ),
                   ),
                   TextField(
                     controller: phone,
                     maxLength: 32,
                     keyboardType: TextInputType.phone,
-                    decoration: const InputDecoration(
-                      labelText: 'Телефон (необязательно)',
+                    decoration: InputDecoration(
+                      labelText: AppLanguageService.instance.text('editPhone'),
                       hintText: '+380…',
                     ),
                   ),
                   SwitchListTile.adaptive(
                     contentPadding: EdgeInsets.zero,
-                    title: const Text('Показывать телефон в профиле'),
+                    title: Text(
+                      AppLanguageService.instance.text('editShowPhone'),
+                    ),
                     value: phoneVisible,
                     onChanged: (value) =>
                         setDialogState(() => phoneVisible = value),
@@ -248,12 +257,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     controller: birthDate,
                     readOnly: true,
                     decoration: InputDecoration(
-                      labelText: 'Дата рождения',
-                      hintText: 'ГГГГ-ММ-ДД',
+                      labelText: AppLanguageService.instance.text(
+                        'editBirthday',
+                      ),
+                      hintText: AppLanguageService.instance.text(
+                        'editDateHint',
+                      ),
                       suffixIcon: birthDate.text.isEmpty
                           ? const Icon(Icons.calendar_month_outlined)
                           : IconButton(
-                              tooltip: 'Очистить дату',
+                              tooltip: AppLanguageService.instance.text(
+                                'editClearDate',
+                              ),
                               onPressed: () => setDialogState(birthDate.clear),
                               icon: const Icon(Icons.close_rounded),
                             ),
@@ -279,15 +294,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   SwitchListTile.adaptive(
                     contentPadding: EdgeInsets.zero,
-                    title: const Text('Показывать дату рождения в профиле'),
+                    title: Text(
+                      AppLanguageService.instance.text('editShowBirthday'),
+                    ),
                     value: birthDateVisible,
                     onChanged: (value) =>
                         setDialogState(() => birthDateVisible = value),
                   ),
-                  const Align(
+                  Align(
                     alignment: Alignment.centerLeft,
                     child: Text(
-                      'Телефон и дата рождения скрыты, пока вы сами не включите их показ.',
+                      AppLanguageService.instance.text('editPrivacyNotice'),
                       style: TextStyle(
                         color: FenyvoPalette.secondary,
                         fontSize: 12,
@@ -303,7 +320,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 style: TextButton.styleFrom(
                   foregroundColor: FenyvoPalette.gold,
                 ),
-                child: const Text('Отмена'),
+                child: Text(AppLanguageService.instance.text('contactsCancel')),
               ),
               FilledButton(
                 onPressed: () => Navigator.pop(dialogContext, true),
@@ -311,7 +328,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   backgroundColor: FenyvoPalette.gold,
                   foregroundColor: FenyvoPalette.canvasDeep,
                 ),
-                child: const Text('Сохранить'),
+                child: Text(AppLanguageService.instance.text('editSave')),
               ),
             ],
           ),
@@ -429,8 +446,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Аватарка обновлена'),
+        SnackBar(
+          content: Text(
+            AppLanguageService.instance.text('settingsAvatarUpdated'),
+          ),
           backgroundColor: FenyvoPalette.blue,
         ),
       );
@@ -444,7 +463,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Ошибка: $e'), backgroundColor: Colors.red),
+        SnackBar(
+          content: Text(
+            AppLanguageService.instance.text('settingsAvatarUpdateError'),
+          ),
+          backgroundColor: Colors.red,
+        ),
       );
     }
   }
@@ -464,8 +488,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Аватарка удалена'),
+        SnackBar(
+          content: Text(
+            AppLanguageService.instance.text('settingsAvatarDeleted'),
+          ),
           backgroundColor: Colors.red,
         ),
       );
@@ -476,7 +502,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Ошибка удаления: $e'),
+          content: Text(
+            AppLanguageService.instance.text('settingsAvatarDeleteError'),
+          ),
           backgroundColor: Colors.red,
         ),
       );
@@ -647,8 +675,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Фон обновлён'),
+        SnackBar(
+          content: Text(
+            AppLanguageService.instance.text('settingsBackgroundUpdated'),
+          ),
           backgroundColor: FenyvoPalette.blue,
         ),
       );
@@ -659,7 +689,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Ошибка выбора фона: $e'),
+          content: Text(
+            AppLanguageService.instance.text('settingsBackgroundError'),
+          ),
           backgroundColor: Colors.red,
         ),
       );
@@ -690,8 +722,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
     });
 
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Включён стандартный фон'),
+      SnackBar(
+        content: Text(
+          AppLanguageService.instance.text('settingsDefaultBackgroundEnabled'),
+        ),
         backgroundColor: FenyvoPalette.blue,
       ),
     );
@@ -722,8 +756,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
       context: context,
       builder: (dialogContext) => AlertDialog(
         backgroundColor: FenyvoPalette.surface,
-        title: const Text(
-          'Выберите цвет текста',
+        title: Text(
+          AppLanguageService.instance.text('settingsTextColorPrompt'),
           style: TextStyle(color: FenyvoPalette.ink),
         ),
         content: SizedBox(
@@ -1070,7 +1104,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       appBar: AppBar(
         backgroundColor: FenyvoPalette.canvas,
         title: Text(
-          'Мой Fenyvo',
+          t('settingsMyFenyvo'),
           style: const TextStyle(
             color: FenyvoPalette.ink,
             fontWeight: FontWeight.bold,
@@ -1117,11 +1151,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
               },
             ),
 
-            _buildSection('Помощь и обратная связь', [
+            _buildSection(t('settingsHelpFeedback'), [
               _buildSectionTile(
                 icon: Icons.support_agent_rounded,
-                title: 'Помощник поддержки',
-                subtitle: 'ИИ отвечает на вопросы о Fenyvo',
+                title: t('settingsSupportAssistant'),
+                subtitle: t('settingsSupportDescription'),
                 onTap: () => Navigator.of(context).push(
                   MaterialPageRoute<void>(
                     builder: (_) => const SupportAiScreen(),
@@ -1152,6 +1186,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
             KeyedSubtree(
               key: _privacySectionKey,
               child: _buildSection(t('securitySection'), [
+                ListTile(
+                  leading: const Icon(Icons.visibility_outlined),
+                  title: Text(t('presenceTitle')),
+                  subtitle: Text(t('presenceSettingsSubtitle')),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => const PresencePrivacyScreen(),
+                    ),
+                  ),
+                ),
                 SwitchListTile.adaptive(
                   secondary: const Icon(Icons.lock_outline_rounded),
                   title: Text(t('e2eeTitle')),
@@ -1241,9 +1286,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   Icons.key_outlined,
                   color: FenyvoPalette.ink,
                 ),
-                title: const Text('Секретные слова восстановления'),
-                subtitle: const Text(
-                  'Создание и привязка 12 слов для восстановления доступа',
+                title: Text(
+                  AppLanguageService.instance.text(
+                    'settingsRecoveryWordsTitle',
+                  ),
+                ),
+                subtitle: Text(
+                  AppLanguageService.instance.text(
+                    'settingsRecoveryWordsSubtitle',
+                  ),
                 ),
                 trailing: const Icon(Icons.chevron_right),
                 onTap: () => Navigator.of(context).push(

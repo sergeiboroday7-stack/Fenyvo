@@ -1,3 +1,5 @@
+import 'app_language_service.dart';
+
 import 'dart:async';
 import 'dart:io';
 import 'dart:math';
@@ -169,7 +171,7 @@ class GroupCallService extends ChangeNotifier {
         phase == GroupCallPhase.active &&
         microphoneEnabled &&
         _callScreenVisible &&
-        AppVisibility.instance.foreground;
+        _foreground();
     for (final track in _stream!.getAudioTracks()) {
       track.enabled = enabled;
     }
@@ -936,7 +938,11 @@ class GroupCallService extends ChangeNotifier {
         data['callId'] == current?.id &&
         data['sessionId'] == sessionId &&
         sessionId != null) {
-      await leave(message: data['reason']?.toString());
+      await leave(
+        message: data['reason']?.toString() == 'Автор завершил групповой звонок'
+            ? AppLanguageService.instance.text('groupCallHostEndedBroadcast')
+            : data['reason']?.toString(),
+      );
       return;
     }
     if (type == 'group_call_error') {

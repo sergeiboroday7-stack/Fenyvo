@@ -1,8 +1,11 @@
+import 'package:fenyvo/services/app_language_service.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fenyvo/services/call_result.dart';
 import 'package:fenyvo/services/call_history_service.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  AppLanguageService.instance.code.value = 'ru';
   test('caller cancelling an unanswered incoming call means missed', () {
     expect(
       CallResult.remoteEnd(incoming: true, connected: false, accepted: false),

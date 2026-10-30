@@ -5,8 +5,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fenyvo/screens/call_screen.dart';
 import 'package:fenyvo/services/call_service.dart';
+import 'package:fenyvo/services/app_language_service.dart';
 
 void main() {
+  setUp(() {
+    AppLanguageService.instance.code.value = 'ru';
+  });
+
   setUpAll(() async {
     if (!File('C:/Windows/Fonts/segoeui.ttf').existsSync() ||
         !File(

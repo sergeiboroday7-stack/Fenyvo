@@ -1,3 +1,5 @@
+import 'package:fenyvo/services/app_language_service.dart';
+
 import 'dart:async';
 import 'dart:io';
 
@@ -169,6 +171,8 @@ class Fixture {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  AppLanguageService.instance.code.value = 'ru';
+  TestWidgetsFlutterBinding.ensureInitialized();
   final hasFonts = File('C:/Windows/Fonts/segoeui.ttf').existsSync();
   setUpAll(() async {
     if (!hasFonts) return;
@@ -238,7 +242,7 @@ void main() {
     await f.service.leave();
   });
   test('mute controls captured track, leaving releases mic', () async {
-    final f = Fixture();
+    final f = Fixture(foreground: true);
     await f.join(includeRemote: false);
     f.service.toggleMicrophone();
     expect(f.stream.track.enabled, false);

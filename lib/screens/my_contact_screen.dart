@@ -1,3 +1,5 @@
+import '../services/app_language_service.dart';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:qr_flutter/qr_flutter.dart';
@@ -16,7 +18,9 @@ class MyContactScreen extends StatelessWidget {
     if (!context.mounted) return;
 
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Ссылка на контакт скопирована')),
+      SnackBar(
+        content: Text(AppLanguageService.instance.text('myContactLinkCopied')),
+      ),
     );
   }
 
@@ -24,7 +28,10 @@ class MyContactScreen extends StatelessWidget {
     await SharePlus.instance.share(
       ShareParams(
         title: 'FENYVO',
-        text: 'Добавьте меня в FENYVO: @$username\n$contactLink',
+        text: AppLanguageService.instance
+            .text('myContactInvitation')
+            .replaceAll('{username}', username)
+            .replaceAll('{link}', contactLink),
       ),
     );
   }
@@ -32,7 +39,9 @@ class MyContactScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Мой контакт')),
+      appBar: AppBar(
+        title: Text(AppLanguageService.instance.text('myContactTitle')),
+      ),
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
@@ -51,9 +60,8 @@ class MyContactScreen extends StatelessWidget {
                         ?.copyWith(fontWeight: FontWeight.bold),
                   ),
                   const SizedBox(height: 8),
-                  const Text(
-                    'Покажите этот QR-код или отправьте ссылку, '
-                    'чтобы вас могли добавить в контакты.',
+                  Text(
+                    AppLanguageService.instance.text('myContactQrInstructions'),
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: 28),
@@ -81,7 +89,9 @@ class MyContactScreen extends StatelessWidget {
                     child: FilledButton.icon(
                       onPressed: () => _shareContact(),
                       icon: const Icon(Icons.share_rounded),
-                      label: const Text('Поделиться контактом'),
+                      label: Text(
+                        AppLanguageService.instance.text('myContactShare'),
+                      ),
                     ),
                   ),
                   const SizedBox(height: 10),
@@ -90,13 +100,16 @@ class MyContactScreen extends StatelessWidget {
                     child: OutlinedButton.icon(
                       onPressed: () => _copyLink(context),
                       icon: const Icon(Icons.copy_rounded),
-                      label: const Text('Копировать ссылку'),
+                      label: Text(
+                        AppLanguageService.instance.text('myContactCopyLink'),
+                      ),
                     ),
                   ),
                   const SizedBox(height: 20),
-                  const Text(
-                    'Список пользователей FENYVO не публикуется. '
-                    'Эта ссылка позволяет найти только ваш контакт.',
+                  Text(
+                    AppLanguageService.instance.text(
+                      'myContactPrivacyExplanation',
+                    ),
                     textAlign: TextAlign.center,
                     style: TextStyle(fontSize: 12),
                   ),

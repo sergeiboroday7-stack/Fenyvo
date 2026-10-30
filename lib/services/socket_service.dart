@@ -40,9 +40,9 @@ class SocketService {
       return;
     }
 
-    _send('presence_update', <String, dynamic>{
-      'foreground': AppVisibility.instance.foreground,
-    });
+    final active = AppVisibility.instance.foreground;
+    print('[PRESENCE_SEND] foreground=$active');
+    _send('presence_update', <String, dynamic>{'foreground': active});
   }
 
   WebSocketChannel? _channel;
@@ -66,9 +66,7 @@ class SocketService {
   bool get isAuthenticated => _isConnected && _authenticated;
 
   final ValueNotifier<FenyvoConnectionPhase> connectionPhase =
-      ValueNotifier<FenyvoConnectionPhase>(
-        FenyvoConnectionPhase.disconnected,
-      );
+      ValueNotifier<FenyvoConnectionPhase>(FenyvoConnectionPhase.disconnected);
 
   bool _manualDisconnect = false;
 
@@ -1139,6 +1137,47 @@ class SocketService {
       'challengeId': challengeId,
       'signatureHex': signatureHex,
       'newPassword': newPassword,
+    });
+  }
+
+  /// Fetch this authenticated account's presence privacy settings.
+  void getPresencePrivacy({String? requestId}) {
+    if (!isAuthenticated) return;
+    _send('get_presence_privacy', <String, dynamic>{
+      if (requestId != null) 'requestId': requestId,
+    });
+  }
+
+  /// Update only the provided presence visibility fields.
+  /// The server remains authoritative for validation and persistence.
+  void updatePresencePrivacy({
+    String? onlineVisibility,
+    String? lastSeenVisibility,
+    String? requestId,
+  }) {
+    if (!isAuthenticated) return;
+
+    const valid = <String>{'all', 'contacts', 'nobody'};
+    final settings = <String, dynamic>{};
+
+    if (onlineVisibility != null) {
+      if (!valid.contains(onlineVisibility)) {
+        throw ArgumentError.value(onlineVisibility, 'onlineVisibility');
+      }
+      settings['onlineVisibility'] = onlineVisibility;
+    }
+
+    if (lastSeenVisibility != null) {
+      if (!valid.contains(lastSeenVisibility)) {
+        throw ArgumentError.value(lastSeenVisibility, 'lastSeenVisibility');
+      }
+      settings['lastSeenVisibility'] = lastSeenVisibility;
+    }
+
+    if (settings.isEmpty) return;
+    _send('set_presence_privacy', <String, dynamic>{
+      'settings': settings,
+      if (requestId != null) 'requestId': requestId,
     });
   }
 

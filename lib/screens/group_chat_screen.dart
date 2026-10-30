@@ -1,3 +1,4 @@
+import '../services/app_language_service.dart';
 import '../main.dart';
 import '../theme/fenyvo_theme.dart';
 
@@ -225,7 +226,7 @@ class _InlineGroupVideoState extends State<_InlineGroupVideo> {
             const SizedBox(width: 10),
             Expanded(
               child: Text(
-                'Видео не удалось открыть',
+                AppLanguageService.instance.text('groupInlineVideoOpenFailed'),
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(
@@ -235,7 +236,7 @@ class _InlineGroupVideoState extends State<_InlineGroupVideo> {
               ),
             ),
             IconButton(
-              tooltip: 'Сохранить видео',
+              tooltip: AppLanguageService.instance.text('groupInlineVideoSave'),
               onPressed: () => unawaited(widget.onSave()),
               icon: Icon(Icons.download_rounded, color: foreground),
             ),
@@ -344,7 +345,9 @@ class _InlineGroupVideoState extends State<_InlineGroupVideo> {
                     ),
                   ),
                 IconButton(
-                  tooltip: 'Сохранить видео',
+                  tooltip: AppLanguageService.instance.text(
+                    'groupInlineVideoSave',
+                  ),
                   visualDensity: VisualDensity.compact,
                   onPressed: () => unawaited(widget.onSave()),
                   icon: const Icon(
@@ -443,7 +446,9 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
 
   String get _groupName {
     final name = _group['name']?.toString().trim() ?? '';
-    return name.isEmpty ? 'Группа' : name;
+    return name.isEmpty
+        ? AppLanguageService.instance.text('groupChatDefaultGroupName')
+        : name;
   }
 
   String get _currentUser => SocketService.instance.currentUser ?? '';
@@ -518,8 +523,10 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
   Future<void> _startGroupCall({bool withVideo = true}) async {
     if (_recordingVoice) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Сначала завершите запись голосового сообщения'),
+        SnackBar(
+          content: Text(
+            AppLanguageService.instance.text('groupVoiceFinishRecordingFirst'),
+          ),
         ),
       );
       return;
@@ -591,15 +598,21 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
           children: [
             ListTile(
               leading: const Icon(Icons.event_rounded),
-              title: const Text('Запланировать звонок'),
-              subtitle: const Text('Сообщить группе дату и время'),
+              title: Text(
+                AppLanguageService.instance.text('groupChatPlanCall'),
+              ),
+              subtitle: Text(
+                AppLanguageService.instance.text('groupChatPlanCallHint'),
+              ),
               onTap: () => Navigator.pop(sheetContext, 'plan'),
             ),
             ListTile(
               leading: const Icon(Icons.videocam_rounded),
-              title: const Text('Начать звонок сейчас'),
-              subtitle: const Text(
-                'Участники войдут сами с разрешения ведущего',
+              title: Text(
+                AppLanguageService.instance.text('groupChatStartCallNow'),
+              ),
+              subtitle: Text(
+                AppLanguageService.instance.text('groupChatStartCallHint'),
               ),
               onTap: () => Navigator.pop(sheetContext, 'start'),
             ),
@@ -644,12 +657,12 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
               Expanded(
                 child: Text(
                   alreadyInside
-                      ? 'Групповой видеозвонок · ${call.members.where((member) => !member.isViewer).length}/4\nВернуться в звонок'
+                      ? '${AppLanguageService.instance.text('groupChatCallBannerTitle')} · ${call.members.where((member) => !member.isViewer).length}/4\n${AppLanguageService.instance.text('groupChatCallReturn')}'
                       : pending
-                      ? 'Групповой видеозвонок · ${call.members.where((member) => !member.isViewer).length}/4\nЖдём разрешения ведущего…'
+                      ? '${AppLanguageService.instance.text('groupChatCallBannerTitle')} · ${call.members.where((member) => !member.isViewer).length}/4\n${AppLanguageService.instance.text('groupChatCallWaitingApproval')}'
                       : canReturnAsHost
-                      ? 'Групповой видеозвонок · ${call.members.where((member) => !member.isViewer).length}/4\nВернуться в эфир'
-                      : 'Групповой видеозвонок · ${call.members.where((member) => !member.isViewer).length}/4\nСмотреть трансляцию и открыть чат',
+                      ? '${AppLanguageService.instance.text('groupChatCallBannerTitle')} · ${call.members.where((member) => !member.isViewer).length}/4\n${AppLanguageService.instance.text('groupChatCallReturnBroadcast')}'
+                      : '${AppLanguageService.instance.text('groupChatCallBannerTitle')} · ${call.members.where((member) => !member.isViewer).length}/4\n${AppLanguageService.instance.text('groupChatCallWatch')}',
                   style: const TextStyle(color: Colors.white),
                 ),
               ),
@@ -790,8 +803,8 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
 
     if (!alreadyPinned && _pinnedMessageIds.length >= 10) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('В группе можно закрепить до 10 сообщений'),
+        SnackBar(
+          content: Text(AppLanguageService.instance.text('groupPinLimit')),
           backgroundColor: FenyvoPalette.surface,
         ),
       );
@@ -817,7 +830,9 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
         duration: const Duration(milliseconds: 1100),
         backgroundColor: FenyvoPalette.surface,
         content: Text(
-          alreadyPinned ? 'Сообщение откреплено' : 'Сообщение закреплено',
+          alreadyPinned
+              ? AppLanguageService.instance.text('groupPinRemoved')
+              : AppLanguageService.instance.text('groupPinAdded'),
         ),
       ),
     );
@@ -1015,7 +1030,9 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
       }
     } else {
       if (!MediaTransferService.isReady) {
-        _mediaSnack('�����-������ �� �����. ����������� � �������.');
+        _mediaSnack(
+          AppLanguageService.instance.text('groupCallMediaServerUnavailable'),
+        );
         return;
       }
 
@@ -1093,7 +1110,11 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
           }
         }
       } catch (error) {
-        _mediaSnack('Не удалось переслать: $error');
+        _mediaSnack(
+          AppLanguageService.instance
+              .text('groupForwardFailed')
+              .replaceAll('{error}', error.toString()),
+        );
         return;
       } finally {
         if (mounted) {
@@ -1107,8 +1128,10 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
       SnackBar(
         content: Text(
           recipients.length == 1
-              ? 'Сообщение переслано'
-              : 'Отправлено получателям: ${recipients.length}',
+              ? AppLanguageService.instance.text('groupForwardSuccess')
+              : AppLanguageService.instance
+                    .text('groupForwardRecipientsCount')
+                    .replaceAll('{count}', recipients.length.toString()),
         ),
         backgroundColor: FenyvoPalette.surface,
       ),
@@ -1122,7 +1145,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
     final text = rawText.isNotEmpty
         ? rawText
         : messageType == 'voice'
-        ? '?? ��������� ���������'
+        ? AppLanguageService.instance.text('groupCallVoiceMessage')
         : messageType == 'image'
         ? '📷 Фото'
         : messageType == 'video'
@@ -1149,8 +1172,10 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
       }
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Нет доступных чатов для пересылки'),
+        SnackBar(
+          content: Text(
+            AppLanguageService.instance.text('groupForwardNoChats'),
+          ),
           backgroundColor: FenyvoPalette.surface,
         ),
       );
@@ -1188,14 +1213,16 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                 height: MediaQuery.sizeOf(sheetContext).height * 0.72,
                 child: Column(
                   children: [
-                    const Padding(
-                      padding: EdgeInsets.fromLTRB(18, 8, 18, 12),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(18, 8, 18, 12),
                       child: Row(
                         children: [
                           Icon(Icons.forward_rounded, color: _gold),
                           SizedBox(width: 10),
                           Text(
-                            '��������� ���������',
+                            AppLanguageService.instance.text(
+                              'groupChatForward',
+                            ),
                             style: TextStyle(
                               color: FenyvoPalette.ink,
                               fontSize: 18,
@@ -1215,7 +1242,9 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                         },
                         style: const TextStyle(color: FenyvoPalette.ink),
                         decoration: InputDecoration(
-                          hintText: '����� ����������',
+                          hintText: AppLanguageService.instance.text(
+                            'groupChatSearchRecipients',
+                          ),
                           hintStyle: const TextStyle(
                             color: FenyvoPalette.muted,
                           ),
@@ -1247,7 +1276,10 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            '? ��������� �� $_groupName � $forwardedFrom',
+                            AppLanguageService.instance
+                                .text('groupChatForwardedFrom')
+                                .replaceAll('{group}', _groupName.toString())
+                                .replaceAll('{user}', forwardedFrom.toString()),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
@@ -1335,10 +1367,19 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                           icon: const Icon(Icons.send_rounded),
                           label: Text(
                             selectedUsers.isEmpty
-                                ? 'Выберите получателя'
+                                ? AppLanguageService.instance.text(
+                                    'groupForwardSelectRecipient',
+                                  )
                                 : selectedUsers.length == 1
-                                ? 'Отправить'
-                                : 'Отправить (${selectedUsers.length})',
+                                ? AppLanguageService.instance.text(
+                                    'groupForwardSend',
+                                  )
+                                : AppLanguageService.instance
+                                      .text('groupForwardSendCount')
+                                      .replaceAll(
+                                        '{count}',
+                                        selectedUsers.length.toString(),
+                                      ),
                           ),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: FenyvoPalette.blue,
@@ -1430,7 +1471,11 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                             ],
                             Flexible(
                               child: Text(
-                                text.isEmpty ? 'Сообщение' : text,
+                                text.isEmpty
+                                    ? AppLanguageService.instance.text(
+                                        'groupMessageFallback',
+                                      )
+                                    : text,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(
@@ -1444,7 +1489,9 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                               width: 28,
                               height: 28,
                               child: IconButton(
-                                tooltip: 'Открепить',
+                                tooltip: AppLanguageService.instance.text(
+                                  'groupActionUnpin',
+                                ),
                                 padding: EdgeInsets.zero,
                                 constraints: const BoxConstraints(),
                                 onPressed: () {
@@ -1492,7 +1539,9 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
               onChanged: _onSearchChanged,
               style: const TextStyle(color: FenyvoPalette.ink),
               decoration: InputDecoration(
-                hintText: '����� �� ������',
+                hintText: AppLanguageService.instance.text(
+                  'groupChatSearchGroup',
+                ),
                 hintStyle: const TextStyle(color: FenyvoPalette.muted),
                 prefixIcon: const Icon(Icons.search_rounded, color: _gold),
                 suffixText: _searchQuery.isEmpty
@@ -1513,7 +1562,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
             ),
           ),
           IconButton(
-            tooltip: '����������',
+            tooltip: AppLanguageService.instance.text('groupChatPreviousMatch'),
             onPressed: matchCount == 0
                 ? null
                 : () {
@@ -1522,7 +1571,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
             icon: const Icon(Icons.keyboard_arrow_up_rounded, color: _gold),
           ),
           IconButton(
-            tooltip: 'Следующее',
+            tooltip: AppLanguageService.instance.text('groupSearchNextMatch'),
             onPressed: matchCount == 0
                 ? null
                 : () {
@@ -1531,7 +1580,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
             icon: const Icon(Icons.keyboard_arrow_down_rounded, color: _gold),
           ),
           IconButton(
-            tooltip: 'Закрыть поиск',
+            tooltip: AppLanguageService.instance.text('groupSearchClose'),
             onPressed: _closeSearch,
             icon: const Icon(
               Icons.close_rounded,
@@ -1636,18 +1685,39 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
           ..sort();
 
     if (users.isEmpty) {
-      return '$memberCount участников';
+      final lastTwo = memberCount % 100;
+      final lastDigit = memberCount % 10;
+      final unitKey =
+          AppLanguageService.instance.text('groupStatusMemberOne') == 'member'
+          ? (memberCount == 1
+                ? 'groupStatusMemberOne'
+                : 'groupStatusMemberMany')
+          : lastTwo >= 11 && lastTwo <= 14
+          ? 'groupStatusMemberMany'
+          : lastDigit == 1
+          ? 'groupStatusMemberOne'
+          : lastDigit >= 2 && lastDigit <= 4
+          ? 'groupStatusMemberFew'
+          : 'groupStatusMemberMany';
+      return '$memberCount ${AppLanguageService.instance.text(unitKey)}';
     }
 
     if (users.length == 1) {
-      return '${users.first} печатает...';
+      return AppLanguageService.instance
+          .text('groupStatusTypingOne')
+          .replaceAll('{user}', users.first);
     }
 
     if (users.length == 2) {
-      return '${users[0]} и ${users[1]} печатают...';
+      return AppLanguageService.instance
+          .text('groupStatusTypingTwo')
+          .replaceAll('{first}', users[0])
+          .replaceAll('{second}', users[1]);
     }
 
-    return '${users.length} участника печатают...';
+    return AppLanguageService.instance
+        .text('groupStatusTypingMany')
+        .replaceAll('{count}', users.length.toString());
   }
 
   void _handleMessage(Map<String, dynamic> msg) {
@@ -1890,7 +1960,8 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
       }
 
       final reason =
-          data['reason']?.toString().trim() ?? 'Ошибка группового чата';
+          data['reason']?.toString().trim() ??
+          AppLanguageService.instance.text('groupChatErrorFallback');
 
       setState(() {
         _sending = false;
@@ -1899,10 +1970,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(reason),
-          backgroundColor: FenyvoPalette.surface,
-        ),
+        SnackBar(content: Text(reason), backgroundColor: FenyvoPalette.surface),
       );
     }
   }
@@ -1946,11 +2014,11 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
     final difference = today.difference(target).inDays;
 
     if (difference == 0) {
-      return 'Сегодня';
+      return AppLanguageService.instance.text('groupStatusToday');
     }
 
     if (difference == 1) {
-      return 'Вчера';
+      return AppLanguageService.instance.text('groupStatusYesterday');
     }
 
     return '${_twoDigits(date.day)}.${_twoDigits(date.month)}.${date.year}';
@@ -2078,11 +2146,19 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
         ? raw.toInt()
         : int.tryParse(raw?.toString() ?? '') ?? 0;
     if (bytes <= 0) return '';
-    if (bytes < 1024) return '$bytes Р‘';
+
+    final language = AppLanguageService.instance;
+    if (bytes < 1024) {
+      return '$bytes ${language.text('groupSizeBytes')}';
+    }
+
     final kb = bytes / 1024;
-    if (kb < 1024) return '${kb.toStringAsFixed(kb >= 100 ? 0 : 1)} КБ';
+    if (kb < 1024) {
+      return '${kb.toStringAsFixed(kb >= 100 ? 0 : 1)} ${language.text('groupSizeKilobytes')}';
+    }
+
     final mb = kb / 1024;
-    return '${mb.toStringAsFixed(mb >= 100 ? 0 : 1)} МБ';
+    return '${mb.toStringAsFixed(mb >= 100 ? 0 : 1)} ${language.text('groupSizeMegabytes')}';
   }
 
   String _durationText(dynamic raw) {
@@ -2135,9 +2211,21 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              item(Icons.photo_library_outlined, 'Фото', _pickGroupImage),
-              item(Icons.video_library_outlined, 'Видео', _pickGroupVideo),
-              item(Icons.attach_file_rounded, 'Р¤Р°Р№Р»', _pickGroupFile),
+              item(
+                Icons.photo_library_outlined,
+                AppLanguageService.instance.text('groupCallPhoto'),
+                _pickGroupImage,
+              ),
+              item(
+                Icons.video_library_outlined,
+                AppLanguageService.instance.text('groupCallVideo'),
+                _pickGroupVideo,
+              ),
+              item(
+                Icons.attach_file_rounded,
+                AppLanguageService.instance.text('groupCallFile'),
+                _pickGroupFile,
+              ),
             ],
           ),
         );
@@ -2161,7 +2249,11 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
         maxBytes: 100 * 1024 * 1024,
       );
     } catch (error) {
-      _mediaSnack('Не удалось выбрать фото: $error');
+      _mediaSnack(
+        AppLanguageService.instance
+            .text('groupAttachmentPhotoPickFailed')
+            .replaceAll('{error}', error.toString()),
+      );
     }
   }
 
@@ -2178,7 +2270,11 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
         maxBytes: 1024 * 1024 * 1024,
       );
     } catch (error) {
-      _mediaSnack('Не удалось выбрать видео: $error');
+      _mediaSnack(
+        AppLanguageService.instance
+            .text('groupAttachmentVideoPickFailed')
+            .replaceAll('{error}', error.toString()),
+      );
     }
   }
 
@@ -2192,7 +2288,9 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
       final picked = result.files.single;
       final path = picked.path?.trim() ?? '';
       if (path.isEmpty) {
-        _mediaSnack('Не удалось получить путь к файлу');
+        _mediaSnack(
+          AppLanguageService.instance.text('groupAttachmentPathMissing'),
+        );
         return;
       }
       final name = picked.name.trim().isEmpty ? 'file.bin' : picked.name.trim();
@@ -2207,7 +2305,11 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
         maxBytes: isVideo ? 1024 * 1024 * 1024 : 512 * 1024 * 1024,
       );
     } catch (error) {
-      _mediaSnack('Не удалось выбрать файл: $error');
+      _mediaSnack(
+        AppLanguageService.instance
+            .text('groupAttachmentFilePickFailed')
+            .replaceAll('{error}', error.toString()),
+      );
     }
   }
 
@@ -2219,7 +2321,9 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
     }
     try {
       if (!await _audioRecorder.hasPermission()) {
-        _mediaSnack('Нет разрешения на микрофон');
+        _mediaSnack(
+          AppLanguageService.instance.text('groupVoiceMicrophoneDenied'),
+        );
         return;
       }
       final temp = await getTemporaryDirectory();
@@ -2239,7 +2343,11 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
         _voiceStartedAt = DateTime.now();
       });
     } catch (error) {
-      _mediaSnack('Не удалось начать запись: $error');
+      _mediaSnack(
+        AppLanguageService.instance
+            .text('groupVoiceRecordFailed')
+            .replaceAll('{error}', error.toString()),
+      );
     }
   }
 
@@ -2264,7 +2372,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
         path: file.path,
         fileName: _basename(path),
         mimeType: 'audio/mp4',
-        text: '??? ��������� ���������',
+        text: 'Voice message',
         maxBytes: 20 * 1024 * 1024,
         voiceDurationMs: durationMs,
       );
@@ -2278,7 +2386,11 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
           _voiceStartedAt = null;
         });
       }
-      _mediaSnack('Не удалось отправить голосовое: $error');
+      _mediaSnack(
+        AppLanguageService.instance
+            .text('groupVoiceSendFailed')
+            .replaceAll('{error}', error.toString()),
+      );
     }
   }
 
@@ -2293,11 +2405,13 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
   }) async {
     if (_groupId.isEmpty || _sending) return;
     if (!SocketService.instance.isConnected) {
-      _mediaSnack('Нет соединения с сервером');
+      _mediaSnack(AppLanguageService.instance.text('noServerConnection'));
       return;
     }
     if (!MediaTransferService.isReady) {
-      _mediaSnack('�����-������ �� �����. ����������� � �������.');
+      _mediaSnack(
+        AppLanguageService.instance.text('groupCallMediaServerUnavailable'),
+      );
       return;
     }
 
@@ -2329,14 +2443,18 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
       );
     } catch (error) {
       if (mounted) setState(() => _sending = false);
-      _mediaSnack('Не удалось отправить файл: $error');
+      _mediaSnack(
+        AppLanguageService.instance
+            .text('groupAttachmentSendFailed')
+            .replaceAll('{error}', error.toString()),
+      );
     }
   }
 
   Future<void> _playVoiceMessage(Map<String, dynamic> message) async {
     final id = _messageId(message);
     if (id.isEmpty) {
-      _mediaSnack('Голосовое сообщение повреждено');
+      _mediaSnack(AppLanguageService.instance.text('groupVoiceCorrupted'));
       return;
     }
 
@@ -2367,7 +2485,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
       }
 
       if (path == null) {
-        _mediaSnack('Голосовое сообщение недоступно');
+        _mediaSnack(AppLanguageService.instance.text('groupVoiceUnavailable'));
         return;
       }
 
@@ -2379,7 +2497,11 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
         });
       }
     } catch (error) {
-      _mediaSnack('Не удалось воспроизвести голосовое: $error');
+      _mediaSnack(
+        AppLanguageService.instance
+            .text('groupVoicePlaybackFailed')
+            .replaceAll('{error}', error.toString()),
+      );
     }
   }
 
@@ -2402,7 +2524,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
   Future<void> _saveMediaAttachment(Map<String, dynamic> message) async {
     final bytes = await MediaCacheService.readBytes(message);
     if (bytes == null || bytes.isEmpty) {
-      _mediaSnack('Вложение повреждено');
+      _mediaSnack(AppLanguageService.instance.text('groupAttachmentCorrupted'));
       return;
     }
 
@@ -2417,9 +2539,17 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
         fileName: original,
         mimeType: mime,
       );
-      _mediaSnack('Сохранено в Fenyvo: $savedPath');
+      _mediaSnack(
+        AppLanguageService.instance
+            .text('groupAttachmentSaved')
+            .replaceAll('{path}', savedPath.toString()),
+      );
     } catch (error) {
-      _mediaSnack('Не удалось сохранить файл: $error');
+      _mediaSnack(
+        AppLanguageService.instance
+            .text('groupAttachmentSaveFailed')
+            .replaceAll('{error}', error.toString()),
+      );
     }
   }
 
@@ -2430,7 +2560,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
     if (path == null &&
         (bytes == null || bytes.isEmpty) &&
         networkUrl == null) {
-      _mediaSnack('Фото повреждено');
+      _mediaSnack(AppLanguageService.instance.text('photoDamaged'));
       return;
     }
 
@@ -2476,7 +2606,9 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     IconButton.filled(
-                      tooltip: 'Скачать',
+                      tooltip: AppLanguageService.instance.text(
+                        'groupAttachmentDownload',
+                      ),
                       onPressed: () => unawaited(_saveMediaAttachment(message)),
                       icon: const Icon(Icons.download_rounded),
                     ),
@@ -2507,10 +2639,8 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
           (bytes == null || bytes.isEmpty) &&
           networkUrl == null) {
         return Text(
-          '?? ���� ����������',
-          style: TextStyle(
-            color: isMe ? FenyvoPalette.ink : FenyvoPalette.ink,
-          ),
+          AppLanguageService.instance.text('groupChatPhotoUnavailable'),
+          style: TextStyle(color: isMe ? FenyvoPalette.ink : FenyvoPalette.ink),
         );
       }
 
@@ -2578,7 +2708,9 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
           mainAxisSize: MainAxisSize.min,
           children: [
             IconButton(
-              tooltip: playing ? 'Стоп' : 'Воспроизвести',
+              tooltip: playing
+                  ? AppLanguageService.instance.text('groupVoiceStop')
+                  : AppLanguageService.instance.text('groupVoicePlay'),
               onPressed: () => unawaited(_playVoiceMessage(message)),
               icon: Icon(
                 playing
@@ -2595,7 +2727,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
-                    'Голосовое сообщение',
+                    AppLanguageService.instance.text('groupCallVoiceMessage'),
                     style: TextStyle(
                       color: isMe ? FenyvoPalette.ink : FenyvoPalette.ink,
                       fontWeight: FontWeight.w700,
@@ -2628,10 +2760,8 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
           (bytes == null || bytes.isEmpty) &&
           networkUrl == null) {
         return Text(
-          '?? ����� ����������',
-          style: TextStyle(
-            color: isMe ? FenyvoPalette.ink : FenyvoPalette.ink,
-          ),
+          AppLanguageService.instance.text('groupChatVideoUnavailable'),
+          style: TextStyle(color: isMe ? FenyvoPalette.ink : FenyvoPalette.ink),
         );
       }
 
@@ -2700,7 +2830,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
               ),
             ),
             IconButton(
-              tooltip: 'Сохранить',
+              tooltip: AppLanguageService.instance.text('groupAttachmentSave'),
               onPressed: () => unawaited(_saveMediaAttachment(message)),
               icon: Icon(
                 Icons.download_rounded,
@@ -2737,7 +2867,9 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
 
     if (!SocketService.instance.isConnected) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Нет соединения с сервером')),
+        SnackBar(
+          content: Text(AppLanguageService.instance.text('noServerConnection')),
+        ),
       );
       return;
     }
@@ -2796,8 +2928,8 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
       builder: (dialogContext) {
         return AlertDialog(
           backgroundColor: FenyvoPalette.surface,
-          title: const Text(
-            'Редактировать сообщение',
+          title: Text(
+            AppLanguageService.instance.text('groupDialogEditTitle'),
             style: TextStyle(color: FenyvoPalette.ink),
           ),
           content: TextField(
@@ -2808,7 +2940,9 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
             decoration: InputDecoration(
               filled: true,
               fillColor: FenyvoPalette.surface,
-              hintText: 'Сообщение...',
+              hintText: AppLanguageService.instance.text(
+                'groupChatMessagePlaceholder',
+              ),
               hintStyle: const TextStyle(color: FenyvoPalette.secondary),
               enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(14),
@@ -2823,8 +2957,8 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text(
-                'Отмена',
+              child: Text(
+                AppLanguageService.instance.text('groupDialogCancel'),
                 style: TextStyle(color: FenyvoPalette.secondary),
               ),
             ),
@@ -2839,7 +2973,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                   Navigator.of(dialogContext).pop(value);
                 }
               },
-              child: const Text('Сохранить'),
+              child: Text(AppLanguageService.instance.text('groupActionSave')),
             ),
           ],
         );
@@ -2879,26 +3013,26 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
           builder: (dialogContext) {
             return AlertDialog(
               backgroundColor: FenyvoPalette.surface,
-              title: const Text(
-                'Удалить сообщение?',
+              title: Text(
+                AppLanguageService.instance.text('groupDialogDeleteTitle'),
                 style: TextStyle(color: FenyvoPalette.ink),
               ),
-              content: const Text(
-                'Сообщение исчезнет у всех участников группы.',
+              content: Text(
+                AppLanguageService.instance.text('groupDialogDeleteWarning'),
                 style: TextStyle(color: FenyvoPalette.secondary),
               ),
               actions: [
                 TextButton(
                   onPressed: () => Navigator.of(dialogContext).pop(false),
-                  child: const Text(
-                    'Отмена',
+                  child: Text(
+                    AppLanguageService.instance.text('groupDialogCancel'),
                     style: TextStyle(color: FenyvoPalette.secondary),
                   ),
                 ),
                 TextButton(
                   onPressed: () => Navigator.of(dialogContext).pop(true),
-                  child: const Text(
-                    'Удалить у всех',
+                  child: Text(
+                    AppLanguageService.instance.text('groupActionDeleteForAll'),
                     style: TextStyle(color: Color(0xFFFF5A5A)),
                   ),
                 ),
@@ -2994,12 +3128,12 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                   ),
                 ),
                 const SizedBox(height: 14),
-                const Row(
+                Row(
                   children: [
-                    Icon(Icons.emoji_emotions_outlined, color: _gold),
-                    SizedBox(width: 10),
+                    const Icon(Icons.emoji_emotions_outlined, color: _gold),
+                    const SizedBox(width: 10),
                     Text(
-                      'Выберите реакцию',
+                      AppLanguageService.instance.text('groupReactionChoose'),
                       style: TextStyle(
                         color: FenyvoPalette.ink,
                         fontSize: 17,
@@ -3041,9 +3175,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                           decoration: BoxDecoration(
                             color: selected
                                 ? FenyvoPalette.blue.withValues(alpha: 0.20)
-                                : FenyvoPalette.surface.withValues(
-                                    alpha: 0.42,
-                                  ),
+                                : FenyvoPalette.surface.withValues(alpha: 0.42),
                             borderRadius: BorderRadius.circular(16),
                             border: Border.all(
                               color: _gold.withValues(
@@ -3076,16 +3208,18 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
       }, origin: 'Группа: ${_group['name'] ?? _group['id']}');
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Добавлено в «Сохранённое» на этом устройстве'),
+        SnackBar(
+          content: Text(
+            AppLanguageService.instance.text('groupChatSavedLocally'),
+          ),
         ),
       );
     } catch (_) {
       if (mounted)
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
+          SnackBar(
             content: Text(
-              '�� ������� ���������. ��������� ����������� ��������.',
+              AppLanguageService.instance.text('groupChatSaveFailed'),
             ),
           ),
         );
@@ -3130,7 +3264,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
               children: [
                 action(
                   icon: Icons.bookmark_add_outlined,
-                  title: 'Сохранить',
+                  title: AppLanguageService.instance.text('groupActionSave'),
                   onTap: () {
                     Navigator.of(sheetContext).pop();
                     unawaited(_saveToSaved(message));
@@ -3138,7 +3272,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                 ),
                 action(
                   icon: Icons.reply_rounded,
-                  title: 'Ответить',
+                  title: AppLanguageService.instance.text('groupActionReply'),
                   onTap: () {
                     Navigator.of(sheetContext).pop();
                     _startReply(message);
@@ -3146,7 +3280,9 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                 ),
                 action(
                   icon: Icons.emoji_emotions_outlined,
-                  title: 'Реакция',
+                  title: AppLanguageService.instance.text(
+                    'groupActionReaction',
+                  ),
                   onTap: () {
                     Navigator.of(sheetContext).pop();
                     Future<void>.delayed(const Duration(milliseconds: 80), () {
@@ -3158,7 +3294,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                 ),
                 action(
                   icon: Icons.copy_rounded,
-                  title: 'Копировать',
+                  title: AppLanguageService.instance.text('groupActionCopy'),
                   onTap: () {
                     final text = message['text']?.toString() ?? '';
                     Clipboard.setData(ClipboardData(text: text));
@@ -3167,7 +3303,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                 ),
                 action(
                   icon: Icons.forward_rounded,
-                  title: '���������',
+                  title: AppLanguageService.instance.text('groupChatForward'),
                   onTap: () {
                     Navigator.of(sheetContext).pop();
                     Future<void>.delayed(const Duration(milliseconds: 80), () {
@@ -3182,8 +3318,8 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                       ? Icons.push_pin_outlined
                       : Icons.push_pin_rounded,
                   title: _pinnedMessageIds.contains(_messageId(message))
-                      ? 'Открепить'
-                      : 'Закрепить',
+                      ? AppLanguageService.instance.text('groupActionUnpin')
+                      : AppLanguageService.instance.text('groupActionPin'),
                   onTap: () {
                     Navigator.of(sheetContext).pop();
                     Future<void>.delayed(const Duration(milliseconds: 80), () {
@@ -3196,7 +3332,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                 if (canEdit)
                   action(
                     icon: Icons.edit_rounded,
-                    title: 'Редактировать',
+                    title: AppLanguageService.instance.text('groupActionEdit'),
                     onTap: () {
                       Navigator.of(sheetContext).pop();
                       Future<void>.delayed(
@@ -3212,7 +3348,9 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                 if (isMe)
                   action(
                     icon: Icons.delete_outline_rounded,
-                    title: 'Удалить у всех',
+                    title: AppLanguageService.instance.text(
+                      'groupActionDeleteForAll',
+                    ),
                     danger: true,
                     onTap: () {
                       Navigator.of(sheetContext).pop();
@@ -3307,9 +3445,14 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                           style: const TextStyle(color: FenyvoPalette.ink),
                         ),
                         trailing: member == creator
-                            ? const Text(
-                                'создатель',
-                                style: TextStyle(color: _gold, fontSize: 12),
+                            ? Text(
+                                AppLanguageService.instance.text(
+                                  'groupStatusCreator',
+                                ),
+                                style: const TextStyle(
+                                  color: _gold,
+                                  fontSize: 12,
+                                ),
                               )
                             : null,
                       );
@@ -3377,7 +3520,9 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            from.isEmpty ? 'Сообщение' : from,
+            from.isEmpty
+                ? AppLanguageService.instance.text('groupMessageFallback')
+                : from,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: TextStyle(
@@ -3535,7 +3680,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
               Align(
                 alignment: Alignment.bottomRight,
                 child: Text(
-                  '${editedAt.isNotEmpty ? 'изменено • ' : ''}${_formatTime(message['time'])}',
+                  '${editedAt.isNotEmpty ? AppLanguageService.instance.text('groupMessageEditedPrefix') : ''}${_formatTime(message['time'])}',
                   style: TextStyle(
                     color: isMe
                         ? FenyvoPalette.secondary
@@ -3568,18 +3713,18 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
               size: 58,
             ),
             const SizedBox(height: 14),
-            const Text(
-              'Сообщений пока нет',
-              style: TextStyle(
+            Text(
+              AppLanguageService.instance.text('groupEmptyTitle'),
+              style: const TextStyle(
                 color: FenyvoPalette.ink,
                 fontSize: 17,
                 fontWeight: FontWeight.w800,
               ),
             ),
             const SizedBox(height: 6),
-            const Text(
-              'Напишите первое сообщение в группу',
-              style: TextStyle(color: FenyvoPalette.secondary),
+            Text(
+              AppLanguageService.instance.text('groupEmptySubtitle'),
+              style: const TextStyle(color: FenyvoPalette.secondary),
             ),
           ],
         ),
@@ -3640,7 +3785,9 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  from.isEmpty ? 'Ответ' : from,
+                  from.isEmpty
+                      ? AppLanguageService.instance.text('groupReplyFallback')
+                      : from,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(
@@ -3663,7 +3810,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
             ),
           ),
           IconButton(
-            tooltip: 'Отменить ответ',
+            tooltip: AppLanguageService.instance.text('groupReplyCancel'),
             visualDensity: VisualDensity.compact,
             onPressed: _cancelReply,
             icon: const Icon(
@@ -3712,7 +3859,9 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
                     IconButton.outlined(
-                      tooltip: 'Вложение',
+                      tooltip: AppLanguageService.instance.text(
+                        'groupAttachmentAdd',
+                      ),
                       onPressed: _sending
                           ? null
                           : () {
@@ -3748,13 +3897,17 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                             fontSize: 16,
                           ),
                           decoration: InputDecoration(
-                            hintText: 'Сообщение...',
+                            hintText: AppLanguageService.instance.text(
+                              'groupChatMessagePlaceholder',
+                            ),
                             fillColor: FenyvoPalette.canvasDeep.withValues(
                               alpha: .72,
                             ),
                             filled: true,
                             suffixIcon: PopupMenuButton<String>(
-                              tooltip: 'Эмодзи',
+                              tooltip: AppLanguageService.instance.text(
+                                'groupAttachmentEmoji',
+                              ),
                               icon: const Icon(
                                 Icons.emoji_emotions_outlined,
                                 color: FenyvoPalette.ink,
@@ -3826,10 +3979,16 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                       height: 48,
                       child: IconButton.filled(
                         tooltip: _recordingVoice
-                            ? 'Остановить и отправить'
+                            ? AppLanguageService.instance.text(
+                                'groupVoiceStopAndSend',
+                              )
                             : _composerHasText
-                            ? 'Отправить сообщение'
-                            : 'Голосовое сообщение',
+                            ? AppLanguageService.instance.text(
+                                'groupCallSendMessage',
+                              )
+                            : AppLanguageService.instance.text(
+                                'groupCallVoiceMessage',
+                              ),
                         onPressed: _sending
                             ? null
                             : _recordingVoice
@@ -4022,17 +4181,21 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
         ),
         actions: [
           IconButton(
-            tooltip: 'Групповой голосовой звонок',
+            tooltip: AppLanguageService.instance.text(
+              'groupChatAudioCallTooltip',
+            ),
             onPressed: () => _startGroupCall(withVideo: false),
             icon: const Icon(Icons.call_rounded, color: _gold),
           ),
           IconButton(
-            tooltip: 'Групповой видеозвонок',
+            tooltip: AppLanguageService.instance.text(
+              'groupChatVideoCallTooltip',
+            ),
             onPressed: _showGroupCallOptions,
             icon: const Icon(Icons.videocam_rounded, color: _gold),
           ),
           IconButton(
-            tooltip: '�����',
+            tooltip: AppLanguageService.instance.text('groupChatSearch'),
             onPressed: _searchMode ? _closeSearch : _openSearch,
             icon: Icon(
               _searchMode ? Icons.search_off_rounded : Icons.search_rounded,
@@ -4040,13 +4203,13 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
             ),
           ),
           IconButton(
-            tooltip: 'Участники',
+            tooltip: AppLanguageService.instance.text('groupCallParticipants'),
             onPressed: _showMembers,
             icon: const Icon(Icons.info_outline_rounded, color: _gold),
           ),
           if (canManageMembers)
             IconButton(
-              tooltip: 'Добавить участников',
+              tooltip: AppLanguageService.instance.text('groupAddTitle'),
               onPressed: _openAddMembers,
               icon: const Icon(Icons.person_add_alt_1_rounded, color: _gold),
             ),

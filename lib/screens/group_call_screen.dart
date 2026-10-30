@@ -12,6 +12,7 @@ import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../services/call_service.dart';
+import '../services/app_language_service.dart';
 import '../services/group_call_service.dart';
 import '../services/group_call_state.dart';
 import '../services/media_transfer_service.dart';
@@ -165,27 +166,31 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
     final message = await showDialog<String>(
       context: sheetContext,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Запрос на общение'),
+        title: Text(AppLanguageService.instance.text('groupCallRequestTitle')),
         content: TextField(
           controller: controller,
           autofocus: true,
           maxLength: 300,
           maxLines: 4,
-          decoration: const InputDecoration(
-            hintText: 'Напишите одно короткое сообщение…',
+          decoration: InputDecoration(
+            hintText: AppLanguageService.instance.text('groupCallRequestHint'),
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Отмена'),
+            child: Text(
+              AppLanguageService.instance.text('groupCallRequestCancel'),
+            ),
           ),
           FilledButton(
             onPressed: () {
               final text = controller.text.trim();
               if (text.isNotEmpty) Navigator.pop(dialogContext, text);
             },
-            child: const Text('Отправить'),
+            child: Text(
+              AppLanguageService.instance.text('groupCallRequestSend'),
+            ),
           ),
         ],
       ),
@@ -210,10 +215,10 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
       }
     }
     final roleLabel = selectedMember?.isHost == true
-        ? 'Ведущий'
+        ? AppLanguageService.instance.text('groupCallRoleHost')
         : selectedMember?.isModerator == true
-        ? 'Модератор'
-        : 'Участник звонка';
+        ? AppLanguageService.instance.text('groupCallRoleModerator')
+        : AppLanguageService.instance.text('groupCallRoleParticipant');
     final participantCount = call.current?.members.length ?? 0;
 
     _activeCommunicationUser = user;
@@ -282,7 +287,9 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
                     ),
                     const Spacer(),
                     IconButton.filledTonal(
-                      tooltip: 'Закрыть карточку',
+                      tooltip: AppLanguageService.instance.text(
+                        'groupCallCloseUserCard',
+                      ),
                       onPressed: () => Navigator.pop(sheetContext),
                       icon: const Icon(Icons.close_rounded),
                     ),
@@ -323,7 +330,7 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
                             ),
                           ),
                           const SizedBox(height: 5),
-                          const Row(
+                          Row(
                             children: [
                               Icon(
                                 Icons.circle,
@@ -332,7 +339,9 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
                               ),
                               SizedBox(width: 7),
                               Text(
-                                'В сети',
+                                AppLanguageService.instance.text(
+                                  'groupCallOnline',
+                                ),
                                 style: TextStyle(
                                   color: Colors.white70,
                                   fontSize: 15,
@@ -361,14 +370,37 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
                     borderRadius: BorderRadius.circular(14),
                     border: Border.all(color: Colors.white10),
                   ),
-                  child: const Row(
+                  child: Row(
                     children: [
                       Expanded(
-                        child: _ProfileTab(label: 'Информация', active: true),
+                        child: _ProfileTab(
+                          label: AppLanguageService.instance.text(
+                            'groupCallTabInfo',
+                          ),
+                          active: true,
+                        ),
                       ),
-                      Expanded(child: _ProfileTab(label: 'Медиа')),
-                      Expanded(child: _ProfileTab(label: 'Общие группы')),
-                      Expanded(child: _ProfileTab(label: 'В звонке')),
+                      Expanded(
+                        child: _ProfileTab(
+                          label: AppLanguageService.instance.text(
+                            'groupCallTabMedia',
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: _ProfileTab(
+                          label: AppLanguageService.instance.text(
+                            'groupCallTabCommonGroups',
+                          ),
+                        ),
+                      ),
+                      Expanded(
+                        child: _ProfileTab(
+                          label: AppLanguageService.instance.text(
+                            'groupCallTabInCall',
+                          ),
+                        ),
+                      ),
                     ],
                   ),
                 ),
@@ -377,8 +409,12 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
                     (call.isHost || call.isModerator)) ...[
                   _CallUserAction(
                     icon: Icons.video_call_rounded,
-                    label: 'Пригласить в видеочат',
-                    subtitle: 'Отправить приглашение на сцену',
+                    label: AppLanguageService.instance.text(
+                      'groupCallInviteToStage',
+                    ),
+                    subtitle: AppLanguageService.instance.text(
+                      'groupCallSendStageInvite',
+                    ),
                     accent: const Color(0xFF8B68FF),
                     onTap: () => Navigator.pop(sheetContext, 'stage-invite'),
                   ),
@@ -390,35 +426,49 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
                     children: [
                       _ProfileInfoRow(
                         icon: Icons.badge_rounded,
-                        label: 'Имя в чате',
+                        label: AppLanguageService.instance.text(
+                          'groupCallProfileName',
+                        ),
                         value: user,
                       ),
                       _ProfileInfoRow(
                         icon: Icons.info_outline_rounded,
-                        label: 'О себе',
+                        label: AppLanguageService.instance.text(
+                          'groupCallProfileAbout',
+                        ),
                         value:
                             profile?['about']?.toString().trim().isNotEmpty ==
                                 true
                             ? profile!['about'].toString()
-                            : 'Не указано',
+                            : AppLanguageService.instance.text(
+                                'groupCallNotSpecified',
+                              ),
                       ),
                       _ProfileInfoRow(
                         icon: Icons.location_on_rounded,
-                        label: 'Регион',
+                        label: AppLanguageService.instance.text(
+                          'groupCallProfileRegion',
+                        ),
                         value:
                             profile?['region']?.toString().trim().isNotEmpty ==
                                 true
                             ? profile!['region'].toString()
-                            : 'Не указано',
+                            : AppLanguageService.instance.text(
+                                'groupCallNotSpecified',
+                              ),
                       ),
                       _ProfileInfoRow(
                         icon: Icons.groups_rounded,
-                        label: 'Участников в звонке',
+                        label: AppLanguageService.instance.text(
+                          'groupCallParticipantCount',
+                        ),
                         value: '$participantCount',
                       ),
                       _ProfileInfoRow(
                         icon: Icons.verified_user_rounded,
-                        label: 'Роль',
+                        label: AppLanguageService.instance.text(
+                          'groupCallProfileRole',
+                        ),
                         value: roleLabel,
                       ),
                     ],
@@ -448,8 +498,12 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
                                 width: width,
                                 child: _CallUserAction(
                                   icon: Icons.chat_bubble_rounded,
-                                  label: 'Написать',
-                                  subtitle: 'Личное сообщение',
+                                  label: AppLanguageService.instance.text(
+                                    'groupCallWrite',
+                                  ),
+                                  subtitle: AppLanguageService.instance.text(
+                                    'groupCallPrivateMessage',
+                                  ),
                                   accent: const Color(0xFF4A91FF),
                                   onTap: () =>
                                       Navigator.pop(sheetContext, 'chat'),
@@ -459,8 +513,12 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
                                 width: width,
                                 child: _CallUserAction(
                                   icon: Icons.call_rounded,
-                                  label: 'Аудиозвонок',
-                                  subtitle: 'Позвонить сейчас',
+                                  label: AppLanguageService.instance.text(
+                                    'groupCallAudioCall',
+                                  ),
+                                  subtitle: AppLanguageService.instance.text(
+                                    'groupCallCallNow',
+                                  ),
                                   accent: const Color(0xFF20C768),
                                   onTap: () =>
                                       Navigator.pop(sheetContext, 'audio'),
@@ -470,8 +528,12 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
                                 width: width,
                                 child: _CallUserAction(
                                   icon: Icons.videocam_rounded,
-                                  label: 'Видеозвонок',
-                                  subtitle: 'Начать звонок',
+                                  label: AppLanguageService.instance.text(
+                                    'groupCallVideoCall',
+                                  ),
+                                  subtitle: AppLanguageService.instance.text(
+                                    'groupCallStartCall',
+                                  ),
                                   accent: const Color(0xFF8B68FF),
                                   onTap: () =>
                                       Navigator.pop(sheetContext, 'video'),
@@ -498,7 +560,9 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
                                 border: Border.all(color: Colors.white12),
                               ),
                               child: Text(
-                                'Причина обращения:\n$requestMessage',
+                                AppLanguageService.instance
+                                    .text('groupCallRequestReason')
+                                    .replaceAll('{message}', requestMessage),
                                 style: const TextStyle(color: Colors.white70),
                               ),
                             ),
@@ -509,7 +573,9 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
                               Expanded(
                                 child: _CallUserAction(
                                   icon: Icons.close_rounded,
-                                  label: 'Отклонить',
+                                  label: AppLanguageService.instance.text(
+                                    'groupCallDecline',
+                                  ),
                                   onTap: () {
                                     SocketService.instance
                                         .respondCommunicationRequest(
@@ -523,7 +589,9 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
                               Expanded(
                                 child: _CallUserAction(
                                   icon: Icons.check_rounded,
-                                  label: 'Принять',
+                                  label: AppLanguageService.instance.text(
+                                    'groupCallAccept',
+                                  ),
                                   onTap: () {
                                     SocketService.instance
                                         .respondCommunicationRequest(
@@ -540,25 +608,33 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
                     }
 
                     if (status == 'pending' && outgoing) {
-                      return const _CallUserAction(
+                      return _CallUserAction(
                         icon: Icons.hourglass_top_rounded,
-                        label: 'Запрос отправлен',
+                        label: AppLanguageService.instance.text(
+                          'groupCallRequestSent',
+                        ),
                         onTap: null,
                       );
                     }
 
                     if (status == 'loading') {
-                      return const _CallUserAction(
+                      return _CallUserAction(
                         icon: Icons.sync_rounded,
-                        label: 'Проверяем связь...',
+                        label: AppLanguageService.instance.text(
+                          'groupCallCheckingConnection',
+                        ),
                         onTap: null,
                       );
                     }
 
                     return _CallUserAction(
                       icon: Icons.person_add_alt_1_rounded,
-                      label: 'Запросить связь',
-                      subtitle: 'Отправить одно сообщение',
+                      label: AppLanguageService.instance.text(
+                        'groupCallRequestConnection',
+                      ),
+                      subtitle: AppLanguageService.instance.text(
+                        'groupCallSendOneMessage',
+                      ),
                       accent: const Color(0xFF4A91FF),
                       onTap: () =>
                           _sendCommunicationRequest(sheetContext, user),
@@ -640,7 +716,13 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
       if (!await _recorder.hasPermission()) {
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Нет разрешения на микрофон')),
+            SnackBar(
+              content: Text(
+                AppLanguageService.instance.text(
+                  'groupCallMicrophonePermissionDenied',
+                ),
+              ),
+            ),
           );
         }
         return;
@@ -683,7 +765,13 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Не удалось начать запись: $error')),
+        SnackBar(
+          content: Text(
+            AppLanguageService.instance
+                .text('groupCallRecordingStartFailed')
+                .replaceAll('{error}', error.toString()),
+          ),
+        ),
       );
     }
   }
@@ -701,7 +789,13 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Не удалось остановить запись: $error')),
+          SnackBar(
+            content: Text(
+              AppLanguageService.instance
+                  .text('groupCallRecordingStopFailed')
+                  .replaceAll('{error}', error.toString()),
+            ),
+          ),
         );
       }
     } finally {
@@ -772,7 +866,13 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Не удалось отправить голосовое: $error')),
+          SnackBar(
+            content: Text(
+              AppLanguageService.instance
+                  .text('groupCallVoiceSendFailed')
+                  .replaceAll('{error}', error.toString()),
+            ),
+          ),
         );
       }
     } finally {
@@ -835,17 +935,23 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
     final groupId = call.groupId?.trim() ?? '';
 
     if (groupId.isEmpty) {
-      _callMediaSnack('Группа звонка не найдена');
+      _callMediaSnack(
+        AppLanguageService.instance.text('groupCallGroupNotFound'),
+      );
       return false;
     }
 
     if (!SocketService.instance.isConnected) {
-      _callMediaSnack('Нет соединения с сервером');
+      _callMediaSnack(
+        AppLanguageService.instance.text('groupCallServerDisconnected'),
+      );
       return false;
     }
 
     if (!MediaTransferService.isReady) {
-      _callMediaSnack('Медиа-сервер не готов. Перезайдите в аккаунт.');
+      _callMediaSnack(
+        AppLanguageService.instance.text('groupCallMediaServerUnavailable'),
+      );
       return false;
     }
 
@@ -875,7 +981,11 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
 
       return true;
     } catch (error) {
-      _callMediaSnack('Не удалось отправить файл: $error');
+      _callMediaSnack(
+        AppLanguageService.instance
+            .text('groupCallFileSendFailed')
+            .replaceAll('{error}', error.toString()),
+      );
       return false;
     }
   }
@@ -899,7 +1009,11 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
         maxBytes: 100 * 1024 * 1024,
       );
     } catch (error) {
-      _callMediaSnack('Не удалось выбрать фото: $error');
+      _callMediaSnack(
+        AppLanguageService.instance
+            .text('groupCallPhotoPickFailed')
+            .replaceAll('{error}', error.toString()),
+      );
     }
   }
 
@@ -919,7 +1033,11 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
         maxBytes: 1024 * 1024 * 1024,
       );
     } catch (error) {
-      _callMediaSnack('Не удалось выбрать видео: $error');
+      _callMediaSnack(
+        AppLanguageService.instance
+            .text('groupCallVideoPickFailed')
+            .replaceAll('{error}', error.toString()),
+      );
     }
   }
 
@@ -936,7 +1054,9 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
       final path = picked.path?.trim() ?? '';
 
       if (path.isEmpty) {
-        _callMediaSnack('Не удалось получить путь к файлу');
+        _callMediaSnack(
+          AppLanguageService.instance.text('groupCallFilePathUnavailable'),
+        );
         return;
       }
 
@@ -956,7 +1076,11 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
         maxBytes: isVideo ? 1024 * 1024 * 1024 : 512 * 1024 * 1024,
       );
     } catch (error) {
-      _callMediaSnack('Не удалось выбрать файл: $error');
+      _callMediaSnack(
+        AppLanguageService.instance
+            .text('groupCallFilePickFailed')
+            .replaceAll('{error}', error.toString()),
+      );
     }
   }
 
@@ -1093,7 +1217,9 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
     if (rawData is! Map) return;
     final data = Map<String, dynamic>.from(rawData);
     if (type == 'group_call_stage_invite') {
-      final by = data['by']?.toString().trim() ?? 'Ведущий';
+      final by =
+          data['by']?.toString().trim() ??
+          AppLanguageService.instance.text('groupCallRoleHost');
       final call = widget.service ?? GroupCallService.instance;
       if (!call.isViewer || data['callId'] != call.current?.id) return;
       final key = '${data['callId']}::stage-invite';
@@ -1102,22 +1228,34 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
         final withVideo = await showDialog<bool>(
           context: context,
           builder: (dialogContext) => AlertDialog(
-            title: const Text('Приглашение в видеочат'),
-            content: Text('$by приглашает вас выйти на сцену.'),
+            title: Text(
+              AppLanguageService.instance.text('groupCallStageInviteTitle'),
+            ),
+            content: Text(
+              AppLanguageService.instance
+                  .text('groupCallStageInviteMessage')
+                  .replaceAll('{user}', by),
+            ),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(dialogContext),
-                child: const Text('Отклонить'),
+                child: Text(
+                  AppLanguageService.instance.text('groupCallDecline'),
+                ),
               ),
               OutlinedButton.icon(
                 onPressed: () => Navigator.pop(dialogContext, false),
                 icon: const Icon(Icons.mic_rounded),
-                label: const Text('Без камеры'),
+                label: Text(
+                  AppLanguageService.instance.text('groupCallWithoutCamera'),
+                ),
               ),
               FilledButton.icon(
                 onPressed: () => Navigator.pop(dialogContext, true),
                 icon: const Icon(Icons.videocam_rounded),
-                label: const Text('С камерой'),
+                label: Text(
+                  AppLanguageService.instance.text('groupCallWithCamera'),
+                ),
               ),
             ],
           ),
@@ -1146,17 +1284,23 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
         context: context,
         barrierDismissible: false,
         builder: (dialogContext) => AlertDialog(
-          title: const Text('Запрос на подключение'),
-          content: Text('$user хочет войти в групповой звонок'),
+          title: Text(
+            AppLanguageService.instance.text('groupCallJoinRequestTitle'),
+          ),
+          content: Text(
+            AppLanguageService.instance
+                .text('groupCallJoinRequestMessage')
+                .replaceAll('{user}', user),
+          ),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(dialogContext, false),
-              child: const Text('Отклонить'),
+              child: Text(AppLanguageService.instance.text('groupCallDecline')),
             ),
             FilledButton.icon(
               onPressed: () => Navigator.pop(dialogContext, true),
               icon: const Icon(Icons.login_rounded),
-              label: const Text('Разрешить'),
+              label: Text(AppLanguageService.instance.text('groupCallAllow')),
             ),
           ],
         ),
@@ -1200,7 +1344,9 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
           children: [
             ListTile(
               title: Text(
-                'На сцене · ${stage.length}/4',
+                AppLanguageService.instance
+                    .text('groupCallStageCount')
+                    .replaceAll('{count}', stage.length.toString()),
                 style: const TextStyle(fontWeight: FontWeight.w800),
               ),
             ),
@@ -1210,10 +1356,14 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
                 title: Text(member.user),
                 subtitle: Text(
                   member.isHost
-                      ? 'Ведущий'
+                      ? AppLanguageService.instance.text('groupCallRoleHost')
                       : member.isModerator
-                      ? 'Модератор'
-                      : 'Участник',
+                      ? AppLanguageService.instance.text(
+                          'groupCallRoleModerator',
+                        )
+                      : AppLanguageService.instance.text(
+                          'groupCallRoleParticipant',
+                        ),
                 ),
                 trailing: Icon(
                   member.videoEnabled
@@ -1227,14 +1377,18 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
               ),
             ListTile(
               title: Text(
-                'Смотрят · ${viewers.length}',
+                AppLanguageService.instance
+                    .text('groupCallViewerCount')
+                    .replaceAll('{count}', viewers.length.toString()),
                 style: const TextStyle(fontWeight: FontWeight.w800),
               ),
             ),
             if (viewers.isEmpty)
-              const ListTile(
+              ListTile(
                 leading: Icon(Icons.visibility_outlined),
-                title: Text('Пока нет зрителей'),
+                title: Text(
+                  AppLanguageService.instance.text('groupCallNoViewers'),
+                ),
               ),
             for (final member in viewers)
               ListTile(
@@ -1242,10 +1396,16 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
                   child: Icon(Icons.visibility_rounded),
                 ),
                 title: Text(member.user),
-                subtitle: const Text('Смотрит и пишет в чате'),
+                subtitle: Text(
+                  AppLanguageService.instance.text(
+                    'groupCallViewerDescription',
+                  ),
+                ),
                 trailing: call.isHost || call.isModerator
                     ? IconButton(
-                        tooltip: 'Пригласить в видеочат',
+                        tooltip: AppLanguageService.instance.text(
+                          'groupCallInviteToStage',
+                        ),
                         icon: const Icon(Icons.video_call_rounded),
                         onPressed: () {
                           call.inviteViewer(member.user);
@@ -1593,7 +1753,9 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
                             child: Row(
                               children: [
                                 IconButton(
-                                  tooltip: 'Смайлик',
+                                  tooltip: AppLanguageService.instance.text(
+                                    'groupCallEmoji',
+                                  ),
                                   onPressed: () {
                                     _chatFocusNode.unfocus();
                                     setState(() {
@@ -1625,8 +1787,9 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
                                       color: Colors.white,
                                       fontSize: 16,
                                     ),
-                                    decoration: const InputDecoration(
-                                      hintText: 'Сообщение группе...',
+                                    decoration: InputDecoration(
+                                      hintText: AppLanguageService.instance
+                                          .text('groupCallMessageHint'),
                                       hintStyle: TextStyle(
                                         color: Colors.white54,
                                       ),
@@ -1638,7 +1801,9 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
                                   ),
                                 ),
                                 IconButton(
-                                  tooltip: 'Вложения',
+                                  tooltip: AppLanguageService.instance.text(
+                                    'groupCallAttachments',
+                                  ),
                                   onPressed: () async {
                                     _chatFocusNode.unfocus();
 
@@ -1659,8 +1824,12 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
                                                           .photo_library_outlined,
                                                       color: Colors.white,
                                                     ),
-                                                    title: const Text(
-                                                      'Фото',
+                                                    title: Text(
+                                                      AppLanguageService
+                                                          .instance
+                                                          .text(
+                                                            'groupCallPhoto',
+                                                          ),
                                                       style: TextStyle(
                                                         color: Colors.white,
                                                       ),
@@ -1676,8 +1845,12 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
                                                           .video_library_outlined,
                                                       color: Colors.white,
                                                     ),
-                                                    title: const Text(
-                                                      'Видео',
+                                                    title: Text(
+                                                      AppLanguageService
+                                                          .instance
+                                                          .text(
+                                                            'groupCallVideo',
+                                                          ),
                                                       style: TextStyle(
                                                         color: Colors.white,
                                                       ),
@@ -1692,8 +1865,12 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
                                                       Icons.attach_file_rounded,
                                                       color: Colors.white,
                                                     ),
-                                                    title: const Text(
-                                                      'Файл',
+                                                    title: Text(
+                                                      AppLanguageService
+                                                          .instance
+                                                          .text(
+                                                            'groupCallFile',
+                                                          ),
                                                       style: TextStyle(
                                                         color: Colors.white,
                                                       ),
@@ -1730,7 +1907,9 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
                                 ),
                                 if (_chatController.text.trim().isNotEmpty)
                                   IconButton(
-                                    tooltip: 'Отправить сообщение',
+                                    tooltip: AppLanguageService.instance.text(
+                                      'groupCallSendMessage',
+                                    ),
                                     onPressed: () => _sendChatMessage(call),
                                     icon: const Icon(
                                       Icons.send_rounded,
@@ -1739,8 +1918,12 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
                                   ),
                                 IconButton(
                                   tooltip: _recordingVoice
-                                      ? 'Остановить запись'
-                                      : 'Голосовое сообщение',
+                                      ? AppLanguageService.instance.text(
+                                          'groupCallStopRecording',
+                                        )
+                                      : AppLanguageService.instance.text(
+                                          'groupCallVoiceMessage',
+                                        ),
                                   onPressed: () => unawaited(
                                     _recordingVoice
                                         ? _finishVoiceRecording(call)
@@ -1789,8 +1972,12 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
                           icon: const Icon(Icons.video_call_rounded, size: 18),
                           label: Text(
                             call.isJoinPending(call.groupId ?? '')
-                                ? 'Запрос отправлен'
-                                : 'Запросить место',
+                                ? AppLanguageService.instance.text(
+                                    'groupCallSeatRequested',
+                                  )
+                                : AppLanguageService.instance.text(
+                                    'groupCallRequestSeat',
+                                  ),
                           ),
                         ),
                       ),
@@ -1818,7 +2005,7 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
                               const SizedBox(width: 7),
                               Expanded(
                                 child: Text(
-                                  '${call.current!.pinnedMessage!['from']?.toString().trim() ?? ''}: ${call.current!.pinnedMessage!['text']?.toString().trim() ?? 'Сообщение'}',
+                                  '${call.current!.pinnedMessage!['from']?.toString().trim() ?? ''}: ${call.current!.pinnedMessage!['text']?.toString().trim() ?? AppLanguageService.instance.text('groupCallMessageFallback')}',
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(
@@ -1889,16 +2076,26 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
 
                                   switch (messageType) {
                                     case 'voice':
-                                      body = '🎙️ Голосовое сообщение';
+                                      body =
+                                          '🎙️ ' +
+                                          AppLanguageService.instance.text(
+                                            'groupCallVoiceMessage',
+                                          );
                                       break;
                                     case 'image':
                                     case 'photo':
-                                      body = text.isNotEmpty ? text : '📷 Фото';
+                                      body = text.isNotEmpty
+                                          ? text
+                                          : '📷 ' +
+                                                AppLanguageService.instance
+                                                    .text('groupCallPhoto');
                                       break;
                                     case 'video':
                                       body = text.isNotEmpty
                                           ? text
-                                          : '🎬 Видео';
+                                          : '🎬 ' +
+                                                AppLanguageService.instance
+                                                    .text('groupCallVideo');
                                       break;
                                     case 'file':
                                       final fileName =
@@ -1908,12 +2105,16 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
                                           '';
                                       body = fileName.isNotEmpty
                                           ? '📎 $fileName'
-                                          : '📎 Файл';
+                                          : '📎 ' +
+                                                AppLanguageService.instance
+                                                    .text('groupCallFile');
                                       break;
                                     default:
                                       body = text.isNotEmpty
                                           ? text
-                                          : 'Сообщение';
+                                          : AppLanguageService.instance.text(
+                                              'groupCallMessageFallback',
+                                            );
                                   }
 
                                   return GestureDetector(
@@ -1927,8 +2128,11 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
                                                 leading: const Icon(
                                                   Icons.push_pin_rounded,
                                                 ),
-                                                title: const Text(
-                                                  'Закрепить сообщение',
+                                                title: Text(
+                                                  AppLanguageService.instance
+                                                      .text(
+                                                        'groupCallPinMessage',
+                                                      ),
                                                 ),
                                                 onTap: () => Navigator.pop(
                                                   sheetContext,
@@ -2085,9 +2289,9 @@ class _CallStage extends StatelessWidget {
     }
 
     if (members.isEmpty) {
-      return const Center(
+      return Center(
         child: Text(
-          'Ожидание участников...',
+          AppLanguageService.instance.text('groupCallWaitingParticipants'),
           style: TextStyle(color: Colors.white70, fontSize: 16),
         ),
       );
@@ -2263,8 +2467,10 @@ class _HostGraceStageState extends State<_HostGraceStage> {
                   ),
                 ),
                 const SizedBox(height: 8),
-                const Text(
-                  'Ведущий временно отсутствует',
+                Text(
+                  AppLanguageService.instance.text(
+                    'groupCallHostTemporarilyAbsent',
+                  ),
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: Colors.white70,
@@ -2296,8 +2502,10 @@ class _HostGraceStageState extends State<_HostGraceStage> {
                   ),
                 ),
                 const SizedBox(height: 14),
-                const Text(
-                  'Если автор не вернётся и модератор не подтвердит продолжение, эфир завершится',
+                Text(
+                  AppLanguageService.instance.text(
+                    'groupCallHostAbsentWarning',
+                  ),
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     color: Colors.white60,
@@ -2310,7 +2518,11 @@ class _HostGraceStageState extends State<_HostGraceStage> {
                   FilledButton.icon(
                     onPressed: widget.onTakeOver,
                     icon: const Icon(Icons.play_arrow_rounded),
-                    label: const Text('Вернуться в эфир'),
+                    label: Text(
+                      AppLanguageService.instance.text(
+                        'groupCallReturnToBroadcast',
+                      ),
+                    ),
                   ),
                 ],
               ],
@@ -2359,8 +2571,8 @@ class _HostGraceStageState extends State<_HostGraceStage> {
                             fontSize: 13,
                           ),
                         ),
-                        const Text(
-                          'Ведущий',
+                        Text(
+                          AppLanguageService.instance.text('groupCallRoleHost'),
                           style: TextStyle(
                             color: FenyvoPalette.gold,
                             fontSize: 11,
@@ -2393,10 +2605,10 @@ class _FeaturedUserChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final role = member.isHost
-        ? 'Ведущий'
+        ? AppLanguageService.instance.text('groupCallRoleHost')
         : member.isModerator
-        ? 'Модератор'
-        : 'Участник';
+        ? AppLanguageService.instance.text('groupCallRoleModerator')
+        : AppLanguageService.instance.text('groupCallRoleParticipant');
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -2614,7 +2826,9 @@ class _VideoTile extends StatelessWidget {
                             ),
                           ),
                           child: Text(
-                            me ? '${member.user} · Вы' : member.user,
+                            me
+                                ? "${member.user} · ${AppLanguageService.instance.text('groupCallYou')}"
+                                : member.user,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
@@ -2738,21 +2952,45 @@ class _VideoTile extends StatelessWidget {
       final accepted = await showDialog<bool>(
         context: context,
         builder: (dialogContext) => AlertDialog(
-          title: Text('Назначить ${member.user} модератором?'),
-          content: const Column(
+          title: Text(
+            AppLanguageService.instance
+                .text('groupCallModeratorConfirmTitle')
+                .replaceAll('{user}', member.user),
+          ),
+          content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Модератор сможет:'),
-              SizedBox(height: 10),
-              Text('• принимать запросы на участие в видеосвязи;'),
-              Text('• приглашать зрителей в видеочат;'),
-              Text('• выключать микрофон и камеру участников;'),
-              Text('• удалять участников из звонка;'),
-              Text('• подтвердить продолжение эфира после выхода автора.'),
+              Text(AppLanguageService.instance.text('groupCallModeratorCan')),
               SizedBox(height: 10),
               Text(
-                'Назначать других модераторов может только создатель звонка.',
+                AppLanguageService.instance.text(
+                  'groupCallModeratorPermissionRequests',
+                ),
+              ),
+              Text(
+                AppLanguageService.instance.text(
+                  'groupCallModeratorPermissionInvite',
+                ),
+              ),
+              Text(
+                AppLanguageService.instance.text(
+                  'groupCallModeratorPermissionMute',
+                ),
+              ),
+              Text(
+                AppLanguageService.instance.text(
+                  'groupCallModeratorPermissionRemove',
+                ),
+              ),
+              Text(
+                AppLanguageService.instance.text(
+                  'groupCallModeratorPermissionContinue',
+                ),
+              ),
+              SizedBox(height: 10),
+              Text(
+                AppLanguageService.instance.text('groupCallModeratorOnlyOwner'),
                 style: TextStyle(color: Colors.white60),
               ),
             ],
@@ -2760,11 +2998,15 @@ class _VideoTile extends StatelessWidget {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(dialogContext, false),
-              child: const Text('Отмена'),
+              child: Text(
+                AppLanguageService.instance.text('groupCallRequestCancel'),
+              ),
             ),
             FilledButton(
               onPressed: () => Navigator.pop(dialogContext, true),
-              child: const Text('Назначить'),
+              child: Text(
+                AppLanguageService.instance.text('groupCallModeratorAssign'),
+              ),
             ),
           ],
         ),
@@ -2814,7 +3056,9 @@ class _TopAndBottomChrome extends StatelessWidget {
             children: [
               _CircleButton(
                 icon: Icons.keyboard_arrow_down_rounded,
-                tooltip: active ? 'Завершить звонок' : 'Выйти',
+                tooltip: active
+                    ? AppLanguageService.instance.text('groupCallEndCall')
+                    : AppLanguageService.instance.text('groupCallLeave'),
                 onTap: () => unawaited(onLeave()),
               ),
               const SizedBox(width: 8),
@@ -2836,12 +3080,20 @@ class _TopAndBottomChrome extends StatelessWidget {
                     const SizedBox(height: 2),
                     Text(
                       active
-                          ? '$stageCount/4 · смотрят $viewerCount · $duration'
+                          ? AppLanguageService.instance
+                                .text('groupCallActiveSummary')
+                                .replaceAll('{stage}', stageCount.toString())
+                                .replaceAll('{viewers}', viewerCount.toString())
+                                .replaceAll('{duration}', duration)
                           : invited
-                          ? 'Входящий групповой звонок'
+                          ? AppLanguageService.instance.text(
+                              'groupCallIncoming',
+                            )
                           : leaving
-                          ? 'Выход из звонка...'
-                          : 'Подключение...',
+                          ? AppLanguageService.instance.text('groupCallLeaving')
+                          : AppLanguageService.instance.text(
+                              'groupCallConnecting',
+                            ),
                       style: const TextStyle(
                         color: Colors.white70,
                         fontSize: 12,
@@ -2852,19 +3104,21 @@ class _TopAndBottomChrome extends StatelessWidget {
               ),
               _CircleButton(
                 icon: Icons.groups_rounded,
-                tooltip: 'Участники',
+                tooltip: AppLanguageService.instance.text(
+                  'groupCallParticipants',
+                ),
                 onTap: active ? onParticipants : null,
               ),
               const SizedBox(width: 8),
               _CircleButton(
                 icon: Icons.grid_view_rounded,
-                tooltip: 'Раскладка',
+                tooltip: AppLanguageService.instance.text('groupCallLayout'),
                 onTap: active ? () => _showLayoutSheet(context) : null,
               ),
               const SizedBox(width: 8),
               _CircleButton(
                 icon: Icons.more_horiz_rounded,
-                tooltip: 'Ещё',
+                tooltip: AppLanguageService.instance.text('groupCallMore'),
                 onTap: active ? () => _showActions(context) : null,
               ),
             ],
@@ -2881,7 +3135,9 @@ class _TopAndBottomChrome extends StatelessWidget {
                   child: FilledButton.tonalIcon(
                     onPressed: () => unawaited(call.leave()),
                     icon: const Icon(Icons.close_rounded),
-                    label: const Text('Отклонить'),
+                    label: Text(
+                      AppLanguageService.instance.text('groupCallDecline'),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -2889,7 +3145,9 @@ class _TopAndBottomChrome extends StatelessWidget {
                   child: FilledButton.icon(
                     onPressed: onJoin,
                     icon: const Icon(Icons.call_rounded),
-                    label: const Text('Присоединиться'),
+                    label: Text(
+                      AppLanguageService.instance.text('groupCallJoin'),
+                    ),
                   ),
                 ),
               ],
@@ -2907,14 +3165,14 @@ class _TopAndBottomChrome extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const ListTile(
+            ListTile(
               title: Text(
-                'Раскладка участников',
+                AppLanguageService.instance.text('groupCallLayoutTitle'),
                 style: TextStyle(fontWeight: FontWeight.w700),
               ),
             ),
             _LayoutOption(
-              title: 'Сцена',
+              title: AppLanguageService.instance.text('groupCallLayoutStage'),
               icon: Icons.person_rounded,
               selected: call.layout == GroupCallLayout.stage,
               onTap: () {
@@ -2923,7 +3181,7 @@ class _TopAndBottomChrome extends StatelessWidget {
               },
             ),
             _LayoutOption(
-              title: 'Сетка',
+              title: AppLanguageService.instance.text('groupCallLayoutGrid'),
               icon: Icons.grid_view_rounded,
               selected: call.layout == GroupCallLayout.grid,
               onTap: () {
@@ -2932,7 +3190,9 @@ class _TopAndBottomChrome extends StatelessWidget {
               },
             ),
             _LayoutOption(
-              title: 'В центре',
+              title: AppLanguageService.instance.text(
+                'groupCallLayoutSpotlight',
+              ),
               icon: Icons.center_focus_strong_rounded,
               selected: call.layout == GroupCallLayout.spotlight,
               onTap: () {
@@ -2956,9 +3216,9 @@ class _TopAndBottomChrome extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const ListTile(
+              ListTile(
                 title: Text(
-                  'Действия звонка',
+                  AppLanguageService.instance.text('groupCallActionsTitle'),
                   style: TextStyle(fontWeight: FontWeight.w700),
                 ),
               ),
@@ -2970,8 +3230,10 @@ class _TopAndBottomChrome extends StatelessWidget {
                 ),
                 title: Text(
                   call.microphoneEnabled
-                      ? 'Выключить микрофон'
-                      : 'Включить микрофон',
+                      ? AppLanguageService.instance.text('groupCallMuteMember')
+                      : AppLanguageService.instance.text(
+                          'groupCallEnableMicrophone',
+                        ),
                 ),
                 onTap: () {
                   Navigator.pop(context);
@@ -2985,7 +3247,13 @@ class _TopAndBottomChrome extends StatelessWidget {
                       : Icons.videocam_off_rounded,
                 ),
                 title: Text(
-                  call.videoEnabled ? 'Выключить камеру' : 'Включить камеру',
+                  call.videoEnabled
+                      ? AppLanguageService.instance.text(
+                          'groupCallDisableMemberVideo',
+                        )
+                      : AppLanguageService.instance.text(
+                          'groupCallEnableCamera',
+                        ),
                 ),
                 onTap: () {
                   Navigator.pop(context);
@@ -2995,7 +3263,9 @@ class _TopAndBottomChrome extends StatelessWidget {
               if ((Platform.isAndroid || Platform.isIOS) && call.videoEnabled)
                 ListTile(
                   leading: const Icon(Icons.cameraswitch_rounded),
-                  title: const Text('Переключить камеру'),
+                  title: Text(
+                    AppLanguageService.instance.text('groupCallSwitchCamera'),
+                  ),
                   onTap: () {
                     Navigator.pop(context);
                     unawaited(call.switchCamera());
@@ -3003,7 +3273,9 @@ class _TopAndBottomChrome extends StatelessWidget {
                 ),
               ListTile(
                 leading: const Icon(Icons.grid_view_rounded),
-                title: const Text('Раскладка участников'),
+                title: Text(
+                  AppLanguageService.instance.text('groupCallLayoutTitle'),
+                ),
                 onTap: () {
                   Navigator.pop(context);
                   _showLayoutSheet(context);
@@ -3015,25 +3287,41 @@ class _TopAndBottomChrome extends StatelessWidget {
                     Icons.stop_circle_outlined,
                     color: Colors.red,
                   ),
-                  title: const Text('Завершить эфир'),
+                  title: Text(
+                    AppLanguageService.instance.text('groupCallEndBroadcast'),
+                  ),
                   onTap: () async {
                     Navigator.pop(context);
                     final confirmed = await showDialog<bool>(
                       context: context,
                       builder: (dialogContext) => AlertDialog(
-                        title: const Text('Завершить эфир для всех?'),
-                        content: const Text(
-                          'Все участники будут отключены от звонка.',
+                        title: Text(
+                          AppLanguageService.instance.text(
+                            'groupCallEndConfirmTitle',
+                          ),
+                        ),
+                        content: Text(
+                          AppLanguageService.instance.text(
+                            'groupCallEndConfirmMessage',
+                          ),
                         ),
                         actions: [
                           TextButton(
                             onPressed: () =>
                                 Navigator.pop(dialogContext, false),
-                            child: const Text('Отмена'),
+                            child: Text(
+                              AppLanguageService.instance.text(
+                                'groupCallRequestCancel',
+                              ),
+                            ),
                           ),
                           TextButton(
                             onPressed: () => Navigator.pop(dialogContext, true),
-                            child: const Text('Завершить для всех'),
+                            child: Text(
+                              AppLanguageService.instance.text(
+                                'groupCallEndForEveryone',
+                              ),
+                            ),
                           ),
                         ],
                       ),
@@ -3093,8 +3381,10 @@ class _InviteOverlay extends StatelessWidget {
                 ),
               ),
               const SizedBox(height: 8),
-              const Text(
-                'Вас приглашают в групповой звонок.',
+              Text(
+                AppLanguageService.instance.text(
+                  'groupCallInviteOverlayMessage',
+                ),
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 20),
@@ -3103,14 +3393,18 @@ class _InviteOverlay extends StatelessWidget {
                   Expanded(
                     child: FilledButton.tonal(
                       onPressed: onDecline,
-                      child: const Text('Отклонить'),
+                      child: Text(
+                        AppLanguageService.instance.text('groupCallDecline'),
+                      ),
                     ),
                   ),
                   const SizedBox(width: 10),
                   Expanded(
                     child: FilledButton(
                       onPressed: onJoin,
-                      child: const Text('Присоединиться'),
+                      child: Text(
+                        AppLanguageService.instance.text('groupCallJoin'),
+                      ),
                     ),
                   ),
                 ],
@@ -3313,7 +3607,7 @@ class _TileMenu extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return PopupMenuButton<String>(
-      tooltip: 'Действия с участником',
+      tooltip: AppLanguageService.instance.text('groupCallMemberActions'),
       onSelected: (value) {
         if (value == 'feature') {
           onFeature();
@@ -3322,23 +3616,44 @@ class _TileMenu extends StatelessWidget {
         }
       },
       itemBuilder: (context) => [
-        const PopupMenuItem(value: 'feature', child: Text('Показать крупно')),
+        PopupMenuItem(
+          value: 'feature',
+          child: Text(
+            AppLanguageService.instance.text('groupCallFeatureMember'),
+          ),
+        ),
         if (canModerate)
-          const PopupMenuItem(value: 'mute', child: Text('Выключить микрофон')),
+          PopupMenuItem(
+            value: 'mute',
+            child: Text(
+              AppLanguageService.instance.text('groupCallMuteMember'),
+            ),
+          ),
         if (canModerate)
-          const PopupMenuItem(
+          PopupMenuItem(
             value: 'video_off',
-            child: Text('Выключить камеру'),
+            child: Text(
+              AppLanguageService.instance.text('groupCallDisableMemberVideo'),
+            ),
           ),
         if (canAssignModerator)
           PopupMenuItem(
             value: member.isModerator ? 'demote' : 'promote',
             child: Text(
-              member.isModerator ? 'Снять модератора' : 'Назначить модератором',
+              member.isModerator
+                  ? AppLanguageService.instance.text('groupCallRemoveModerator')
+                  : AppLanguageService.instance.text(
+                      'groupCallAssignModerator',
+                    ),
             ),
           ),
         if (canModerate)
-          const PopupMenuItem(value: 'kick', child: Text('Удалить из звонка')),
+          PopupMenuItem(
+            value: 'kick',
+            child: Text(
+              AppLanguageService.instance.text('groupCallRemoveMember'),
+            ),
+          ),
       ],
       icon: const Icon(Icons.more_vert_rounded, color: Colors.white),
     );
@@ -3369,23 +3684,35 @@ class _ModerationSheet extends StatelessWidget {
           ListTile(
             leading: const Icon(Icons.person_rounded),
             title: Text(member.user),
-            subtitle: Text(member.isModerator ? 'Модератор' : 'Участник'),
+            subtitle: Text(
+              member.isModerator
+                  ? AppLanguageService.instance.text('groupCallRoleModerator')
+                  : AppLanguageService.instance.text(
+                      'groupCallRoleParticipant',
+                    ),
+            ),
           ),
           ListTile(
             leading: const Icon(Icons.center_focus_strong_rounded),
-            title: const Text('Показать крупно'),
+            title: Text(
+              AppLanguageService.instance.text('groupCallFeatureMember'),
+            ),
             onTap: onFeature,
           ),
           if (canModerate)
             ListTile(
               leading: const Icon(Icons.mic_off_rounded),
-              title: const Text('Выключить микрофон'),
+              title: Text(
+                AppLanguageService.instance.text('groupCallMuteMember'),
+              ),
               onTap: () => onModerate('mute'),
             ),
           if (canModerate)
             ListTile(
               leading: const Icon(Icons.videocam_off_rounded),
-              title: const Text('Выключить камеру'),
+              title: Text(
+                AppLanguageService.instance.text('groupCallDisableMemberVideo'),
+              ),
               onTap: () => onModerate('video_off'),
             ),
           if (canAssignModerator)
@@ -3393,8 +3720,12 @@ class _ModerationSheet extends StatelessWidget {
               leading: const Icon(Icons.shield_rounded),
               title: Text(
                 member.isModerator
-                    ? 'Снять модератора'
-                    : 'Назначить модератором',
+                    ? AppLanguageService.instance.text(
+                        'groupCallRemoveModerator',
+                      )
+                    : AppLanguageService.instance.text(
+                        'groupCallAssignModerator',
+                      ),
               ),
               onTap: () =>
                   onModerate(member.isModerator ? 'demote' : 'promote'),
@@ -3402,7 +3733,9 @@ class _ModerationSheet extends StatelessWidget {
           if (canModerate)
             ListTile(
               leading: const Icon(Icons.person_remove_rounded),
-              title: const Text('Удалить из звонка'),
+              title: Text(
+                AppLanguageService.instance.text('groupCallRemoveMember'),
+              ),
               onTap: () => onModerate('kick'),
             ),
           const SizedBox(height: 8),
@@ -3468,20 +3801,30 @@ Future<bool> _confirmLeave(
   final result = await showDialog<bool>(
     context: context,
     builder: (context) => AlertDialog(
-      title: Text(endForAll ? 'Завершить звонок?' : 'Выйти из звонка?'),
+      title: Text(
+        endForAll
+            ? AppLanguageService.instance.text('groupCallLeaveEndTitle')
+            : AppLanguageService.instance.text('groupCallLeaveExitTitle'),
+      ),
       content: Text(
         endForAll
-            ? 'Вы создатель звонка. Звонок завершится для всех участников.'
-            : 'Вы действительно хотите покинуть групповой звонок?',
+            ? AppLanguageService.instance.text('groupCallLeaveOwnerWarning')
+            : AppLanguageService.instance.text('groupCallLeaveQuestion'),
       ),
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context, false),
-          child: const Text('Отмена'),
+          child: Text(
+            AppLanguageService.instance.text('groupCallRequestCancel'),
+          ),
         ),
         TextButton(
           onPressed: () => Navigator.pop(context, true),
-          child: Text(endForAll ? 'Завершить для всех' : 'Выйти'),
+          child: Text(
+            endForAll
+                ? AppLanguageService.instance.text('groupCallEndForEveryone')
+                : AppLanguageService.instance.text('groupCallLeave'),
+          ),
         ),
       ],
     ),
@@ -3496,17 +3839,21 @@ Future<void> _chooseJoinMode(
   final withVideo = await showDialog<bool>(
     context: context,
     builder: (context) => AlertDialog(
-      title: const Text('Как присоединиться?'),
-      content: const Text('Выберите, хотите ли вы войти с включённой камерой.'),
+      title: Text(AppLanguageService.instance.text('groupCallJoinModeTitle')),
+      content: Text(
+        AppLanguageService.instance.text('groupCallJoinModeDescription'),
+      ),
       actions: [
         TextButton(
           onPressed: () => Navigator.pop(context, false),
-          child: const Text('Без камеры'),
+          child: Text(
+            AppLanguageService.instance.text('groupCallWithoutCamera'),
+          ),
         ),
         FilledButton.icon(
           onPressed: () => Navigator.pop(context, true),
           icon: const Icon(Icons.videocam_rounded),
-          label: const Text('С камерой'),
+          label: Text(AppLanguageService.instance.text('groupCallWithCamera')),
         ),
       ],
     ),

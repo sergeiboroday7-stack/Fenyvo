@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../theme/fenyvo_theme.dart';
+import '../services/app_language_service.dart';
 
 class MyFenyvoDashboard extends StatelessWidget {
   const MyFenyvoDashboard({
@@ -36,9 +37,11 @@ class MyFenyvoDashboard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final safeStatus = status.trim().isEmpty ? 'На связи' : status.trim();
+    final safeStatus = status.trim().isEmpty
+        ? AppLanguageService.instance.text('dashboardStatusFallback')
+        : status.trim();
     final safeAbout = about.trim().isEmpty
-        ? 'Ваше личное пространство в Fenyvo'
+        ? AppLanguageService.instance.text('dashboardAboutFallback')
         : about.trim();
 
     return Padding(
@@ -56,10 +59,7 @@ class MyFenyvoDashboard extends StatelessWidget {
               gradient: const LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
-                colors: [
-                  FenyvoPalette.surfaceRaised,
-                  FenyvoPalette.canvasDeep,
-                ],
+                colors: [FenyvoPalette.surfaceRaised, FenyvoPalette.canvasDeep],
               ),
               boxShadow: const [
                 BoxShadow(
@@ -88,12 +88,14 @@ class MyFenyvoDashboard extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 12),
-                    const Expanded(
+                    Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            'МОЙ FENYVO',
+                            AppLanguageService.instance.text(
+                              'dashboardHeroTitle',
+                            ),
                             style: TextStyle(
                               color: FenyvoPalette.ink,
                               fontSize: 20,
@@ -102,7 +104,9 @@ class MyFenyvoDashboard extends StatelessWidget {
                             ),
                           ),
                           Text(
-                            'Личный кабинет',
+                            AppLanguageService.instance.text(
+                              'dashboardPersonalCabinet',
+                            ),
                             style: TextStyle(
                               color: FenyvoPalette.gold,
                               fontSize: 12,
@@ -290,10 +294,10 @@ class MyFenyvoDashboard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 18),
-          const Padding(
+          Padding(
             padding: EdgeInsets.only(left: 4, bottom: 10),
             child: Text(
-              'БЫСТРЫЕ ДЕЙСТВИЯ',
+              AppLanguageService.instance.text('dashboardQuickActions'),
               style: TextStyle(
                 color: FenyvoPalette.gold,
                 fontSize: 12,
@@ -312,8 +316,10 @@ class MyFenyvoDashboard extends StatelessWidget {
                   _DashboardAction(
                     width: cardWidth,
                     icon: Icons.manage_accounts_rounded,
-                    title: 'Профиль',
-                    subtitle: 'Данные, QR и контакт',
+                    title: AppLanguageService.instance.text('dashboardProfile'),
+                    subtitle: AppLanguageService.instance.text(
+                      'dashboardProfileSubtitle',
+                    ),
                     onTap: () {
                       showModalBottomSheet<void>(
                         context: context,
@@ -324,7 +330,11 @@ class MyFenyvoDashboard extends StatelessWidget {
                             children: [
                               ListTile(
                                 leading: const Icon(Icons.edit_outlined),
-                                title: const Text('Редактировать профиль'),
+                                title: Text(
+                                  AppLanguageService.instance.text(
+                                    'dashboardEditProfile',
+                                  ),
+                                ),
                                 onTap: () {
                                   Navigator.pop(sheetContext);
                                   onEditProfile();
@@ -332,7 +342,11 @@ class MyFenyvoDashboard extends StatelessWidget {
                               ),
                               ListTile(
                                 leading: const Icon(Icons.qr_code_rounded),
-                                title: const Text('Мой контакт и QR-код'),
+                                title: Text(
+                                  AppLanguageService.instance.text(
+                                    'dashboardContactQr',
+                                  ),
+                                ),
                                 onTap: () {
                                   Navigator.pop(sheetContext);
                                   onOpenContact();
@@ -347,15 +361,21 @@ class MyFenyvoDashboard extends StatelessWidget {
                   _DashboardAction(
                     width: cardWidth,
                     icon: Icons.palette_outlined,
-                    title: 'Внешний вид',
-                    subtitle: 'Темы и оформление',
+                    title: AppLanguageService.instance.text(
+                      'dashboardAppearance',
+                    ),
+                    subtitle: AppLanguageService.instance.text(
+                      'dashboardAppearanceSubtitle',
+                    ),
                     onTap: onOpenAppearance,
                   ),
                   _DashboardAction(
                     width: cardWidth,
                     icon: Icons.shield_outlined,
-                    title: 'Приватность',
-                    subtitle: 'Защита общения',
+                    title: AppLanguageService.instance.text('dashboardPrivacy'),
+                    subtitle: AppLanguageService.instance.text(
+                      'dashboardPrivacySubtitle',
+                    ),
                     onTap: onOpenPrivacy,
                   ),
                 ],
@@ -375,10 +395,7 @@ class MyFenyvoDashboard extends StatelessWidget {
               gradient: const LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
-                colors: [
-                  FenyvoPalette.surfaceRaised,
-                  FenyvoPalette.canvasDeep,
-                ],
+                colors: [FenyvoPalette.surfaceRaised, FenyvoPalette.canvasDeep],
               ),
             ),
             child: Row(
@@ -397,12 +414,14 @@ class MyFenyvoDashboard extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 14),
-                const Expanded(
+                Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'РАЗВИТИЕ FENYVO',
+                        AppLanguageService.instance.text(
+                          'dashboardDevelopmentTitle',
+                        ),
                         style: TextStyle(
                           color: FenyvoPalette.gold,
                           fontSize: 16,
@@ -412,7 +431,9 @@ class MyFenyvoDashboard extends StatelessWidget {
                       ),
                       SizedBox(height: 7),
                       Text(
-                        'Вместе делаем Fenyvo лучше',
+                        AppLanguageService.instance.text(
+                          'dashboardDevelopmentTagline',
+                        ),
                         style: TextStyle(
                           color: FenyvoPalette.ink,
                           fontSize: 14,
@@ -421,9 +442,9 @@ class MyFenyvoDashboard extends StatelessWidget {
                       ),
                       SizedBox(height: 6),
                       Text(
-                        'В будущем: особые темы, рамки аватара '
-                        'и фирменные значки. Основное общение '
-                        'останется бесплатным.',
+                        AppLanguageService.instance.text(
+                          'dashboardDevelopmentDescription',
+                        ),
                         style: TextStyle(
                           color: FenyvoPalette.secondary,
                           fontSize: 12,
@@ -432,7 +453,9 @@ class MyFenyvoDashboard extends StatelessWidget {
                       ),
                       SizedBox(height: 10),
                       Text(
-                        'НОВЫЕ ВОЗМОЖНОСТИ — ВПЕРЕДИ',
+                        AppLanguageService.instance.text(
+                          'dashboardDevelopmentComingSoon',
+                        ),
                         style: TextStyle(
                           color: FenyvoPalette.gold,
                           fontSize: 11,

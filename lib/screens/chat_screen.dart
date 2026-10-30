@@ -529,10 +529,7 @@ class _ChatScreenState extends State<ChatScreen>
                 decoration: BoxDecoration(
                   color: FenyvoPalette.online,
                   shape: BoxShape.circle,
-                  border: Border.all(
-                    color: FenyvoPalette.canvasDeep,
-                    width: 2,
-                  ),
+                  border: Border.all(color: FenyvoPalette.canvasDeep, width: 2),
                 ),
               ),
             ),
@@ -2842,9 +2839,7 @@ class _ChatScreenState extends State<ChatScreen>
           networkUrl == null) {
         return Text(
           '📷 ${_chatText('photoUnavailable')}',
-          style: TextStyle(
-            color: isMe ? FenyvoPalette.ink : FenyvoPalette.ink,
-          ),
+          style: TextStyle(color: isMe ? FenyvoPalette.ink : FenyvoPalette.ink),
         );
       }
       return Stack(
@@ -2978,9 +2973,7 @@ class _ChatScreenState extends State<ChatScreen>
           networkUrl == null) {
         return Text(
           '🎥 ${_chatText('videoUnavailable')}',
-          style: TextStyle(
-            color: isMe ? FenyvoPalette.ink : FenyvoPalette.ink,
-          ),
+          style: TextStyle(color: isMe ? FenyvoPalette.ink : FenyvoPalette.ink),
         );
       }
       return _InlinePrivateVideo(
@@ -4001,9 +3994,7 @@ class _ChatScreenState extends State<ChatScreen>
             : FenyvoPalette.surface.withValues(alpha: 0.32),
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
-          color: isMe
-              ? FenyvoPalette.secondary
-              : _gold.withValues(alpha: 0.55),
+          color: isMe ? FenyvoPalette.secondary : _gold.withValues(alpha: 0.55),
           width: 1,
         ),
       ),
@@ -6798,9 +6789,7 @@ class _ChatScreenState extends State<ChatScreen>
                             width: 44,
                             height: 44,
                             decoration: BoxDecoration(
-                              color: FenyvoPalette.blue.withValues(
-                                alpha: 0.12,
-                              ),
+                              color: FenyvoPalette.blue.withValues(alpha: 0.12),
                               shape: BoxShape.circle,
                               border: Border.all(
                                 color: _gold.withValues(alpha: 0.55),
@@ -8356,9 +8345,7 @@ class _ChatScreenState extends State<ChatScreen>
                           decoration: BoxDecoration(
                             color: selected
                                 ? FenyvoPalette.blue.withValues(alpha: 0.20)
-                                : FenyvoPalette.surface.withValues(
-                                    alpha: 0.42,
-                                  ),
+                                : FenyvoPalette.surface.withValues(alpha: 0.42),
                             borderRadius: BorderRadius.circular(16),
                             border: Border.all(
                               color: _gold.withValues(
@@ -9424,9 +9411,7 @@ class _ChatScreenState extends State<ChatScreen>
                         Text(
                           text,
                           style: TextStyle(
-                            color: isMe
-                                ? FenyvoPalette.ink
-                                : FenyvoPalette.ink,
+                            color: isMe ? FenyvoPalette.ink : FenyvoPalette.ink,
                             fontSize: 16,
                           ),
                         ),
@@ -9472,9 +9457,7 @@ class _ChatScreenState extends State<ChatScreen>
                         Text(
                           forwardComment,
                           style: TextStyle(
-                            color: isMe
-                                ? FenyvoPalette.ink
-                                : FenyvoPalette.ink,
+                            color: isMe ? FenyvoPalette.ink : FenyvoPalette.ink,
                             fontSize: 14,
                             height: 1.18,
                           ),
@@ -9520,9 +9503,7 @@ class _ChatScreenState extends State<ChatScreen>
                                       Icon(
                                         Icons.forward_rounded,
                                         size: 16,
-                                        color: isMe
-                                            ? FenyvoPalette.ink
-                                            : _gold,
+                                        color: isMe ? FenyvoPalette.ink : _gold,
                                       ),
                                       const SizedBox(width: 5),
                                       Text(
@@ -10735,8 +10716,7 @@ class _ChatScreenState extends State<ChatScreen>
                     active != null &&
                     service.phase == FenyvoPulsePhase.incoming;
                 final matched =
-                    active != null &&
-                    service.phase == FenyvoPulsePhase.matched;
+                    active != null && service.phase == FenyvoPulsePhase.matched;
                 final width = MediaQuery.sizeOf(context).width;
 
                 Widget modeButton({
@@ -10814,9 +10794,7 @@ class _ChatScreenState extends State<ChatScreen>
                                 decoration: BoxDecoration(
                                   color: FenyvoPalette.blue,
                                   borderRadius: BorderRadius.circular(18),
-                                  border: Border.all(
-                                    color: FenyvoPalette.gold,
-                                  ),
+                                  border: Border.all(color: FenyvoPalette.gold),
                                   boxShadow: [
                                     BoxShadow(
                                       color: FenyvoPalette.gold.withValues(
@@ -11372,9 +11350,13 @@ class _ChatScreenState extends State<ChatScreen>
                       children: [
                         const Icon(Icons.security_rounded),
                         const SizedBox(width: 12),
-                        const Expanded(child: Text('Защита экрана')),
+                        Expanded(
+                          child: Text(_chatText('chatScreenProtection')),
+                        ),
                         Text(
-                          _screenSecurityEnabled ? 'Вкл.' : 'Выкл.',
+                          _screenSecurityEnabled
+                              ? _chatText('commonEnabledShort')
+                              : _chatText('commonDisabledShort'),
                           style: TextStyle(
                             color: _screenSecurityEnabled
                                 ? Colors.greenAccent

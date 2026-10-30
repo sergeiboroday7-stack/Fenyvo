@@ -5,3 +5,7 @@ analyzer:
     - third_party/**
     - "**/*.bak"
     - "**/*.backup"
+    - build/**
+    - outputs/**
+    - android/**
+    - windows/**

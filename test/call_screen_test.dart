@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:fenyvo/main.dart';
 import 'package:fenyvo/screens/call_screen.dart';
 import 'package:fenyvo/services/call_service.dart';
+import 'package:fenyvo/services/app_language_service.dart';
 import 'package:fenyvo/services/call_result.dart';
 import 'package:fenyvo/services/system_call_service.dart';
 
@@ -10,6 +11,7 @@ void main() {
   final service = CallService.instance;
 
   setUp(() async {
+    AppLanguageService.instance.code.value = 'ru';
     await service.hangUp();
   });
 

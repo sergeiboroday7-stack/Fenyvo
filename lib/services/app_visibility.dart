@@ -7,8 +7,8 @@ import 'package:flutter/services.dart';
 class AppVisibility with WidgetsBindingObserver {
   AppVisibility._();
   static final instance = AppVisibility._();
-  bool foreground = true;
-  final ValueNotifier<bool> changes = ValueNotifier(true);
+  bool foreground = false;
+  final ValueNotifier<bool> changes = ValueNotifier(false);
   void initialize() {
     WidgetsBinding.instance.addObserver(this);
     if (Platform.isWindows) {
@@ -20,7 +20,7 @@ class AppVisibility with WidgetsBindingObserver {
           });
     }
     didChangeAppLifecycleState(
-      WidgetsBinding.instance.lifecycleState ?? AppLifecycleState.resumed,
+      WidgetsBinding.instance.lifecycleState ?? AppLifecycleState.detached,
     );
   }
 
@@ -33,7 +33,9 @@ class AppVisibility with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (Platform.isWindows) return;
-    _setForeground(state == AppLifecycleState.resumed);
+    final active = state == AppLifecycleState.resumed;
+    debugPrint('[PRESENCE_LIFECYCLE] state=$state foreground=$active');
+    _setForeground(active);
   }
 
   static bool shouldNotify({

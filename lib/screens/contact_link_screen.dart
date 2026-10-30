@@ -1,3 +1,5 @@
+import '../services/app_language_service.dart';
+
 import 'package:flutter/material.dart';
 
 import '../services/socket_service.dart';
@@ -14,7 +16,7 @@ class ContactLinkScreen extends StatefulWidget {
 
 class _ContactLinkScreenState extends State<ContactLinkScreen> {
   final TextEditingController _messageController = TextEditingController(
-    text: 'Хочу добавить вас в контакты.',
+    text: AppLanguageService.instance.text('contactLinkDefaultMessage'),
   );
 
   Map<String, dynamic>? _profile;
@@ -101,7 +103,11 @@ class _ContactLinkScreenState extends State<ContactLinkScreen> {
   void _sendRequest() {
     final text = _messageController.text.trim();
     if (text.isEmpty || text.length > 300) {
-      setState(() => _error = 'Введите сообщение длиной до 300 символов');
+      setState(
+        () => _error = AppLanguageService.instance.text(
+          'contactLinkMessageTooLong',
+        ),
+      );
       return;
     }
     setState(() {
@@ -126,7 +132,9 @@ class _ContactLinkScreenState extends State<ContactLinkScreen> {
     final statusText = _profile?['statusText']?.toString().trim() ?? '';
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Контакт Fenyvo')),
+      appBar: AppBar(
+        title: Text(AppLanguageService.instance.text('contactLinkTitle')),
+      ),
       body: ListView(
         padding: const EdgeInsets.all(20),
         children: [
@@ -182,26 +190,38 @@ class _ContactLinkScreenState extends State<ContactLinkScreen> {
             FilledButton.icon(
               onPressed: _openChat,
               icon: const Icon(Icons.chat_bubble_rounded),
-              label: const Text('Открыть чат'),
+              label: Text(
+                AppLanguageService.instance.text('contactLinkOpenChat'),
+              ),
             )
           else if (_communicationStatus == 'pending')
-            const ListTile(
+            ListTile(
               leading: Icon(Icons.hourglass_top_rounded),
-              title: Text('Запрос отправлен'),
-              subtitle: Text('Ожидаем подтверждения пользователя'),
+              title: Text(
+                AppLanguageService.instance.text('contactLinkRequestSent'),
+              ),
+              subtitle: Text(
+                AppLanguageService.instance.text(
+                  'contactLinkWaitingConfirmation',
+                ),
+              ),
             )
           else if (_communicationStatus == 'self')
-            const ListTile(
+            ListTile(
               leading: Icon(Icons.person_rounded),
-              title: Text('Это ваш контакт'),
+              title: Text(
+                AppLanguageService.instance.text('contactLinkOwnContact'),
+              ),
             )
           else ...[
             TextField(
               controller: _messageController,
               maxLength: 300,
               maxLines: 3,
-              decoration: const InputDecoration(
-                labelText: 'Сообщение к запросу',
+              decoration: InputDecoration(
+                labelText: AppLanguageService.instance.text(
+                  'contactLinkRequestMessage',
+                ),
                 border: OutlineInputBorder(),
               ),
             ),
@@ -214,7 +234,9 @@ class _ContactLinkScreenState extends State<ContactLinkScreen> {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Icon(Icons.person_add_alt_1_rounded),
-              label: const Text('Добавить в контакты'),
+              label: Text(
+                AppLanguageService.instance.text('contactLinkAddContact'),
+              ),
             ),
           ],
         ],

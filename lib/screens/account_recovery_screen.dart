@@ -6,6 +6,7 @@ import 'dart:async';
 import '../services/crypto/account_recovery_service.dart';
 import '../services/crypto/recovery_signature_service.dart';
 import '../services/socket_service.dart';
+import '../services/app_language_service.dart';
 
 import 'package:flutter/material.dart';
 
@@ -35,11 +36,16 @@ class _AccountRecoveryScreenState extends State<AccountRecoveryScreen> {
   void initState() {
     super.initState();
     _socket.addMessageHandler(_onRecoveryMessage);
+    AppLanguageService.instance.code.addListener(_onLanguageChanged);
     _brandTimer = Timer.periodic(const Duration(seconds: 4), (_) {
       if (mounted && !MediaQuery.disableAnimationsOf(context)) {
         setState(() => _brandExpanded = !_brandExpanded);
       }
     });
+  }
+
+  void _onLanguageChanged() {
+    if (mounted) setState(() {});
   }
 
   void _finish(String message) {
@@ -61,12 +67,16 @@ class _AccountRecoveryScreenState extends State<AccountRecoveryScreen> {
     final data = message['data'];
     if (type == 'recovery_challenge') {
       if (data is! Map) {
-        _finish('Некорректный ответ сервера.');
+        _finish(
+          AppLanguageService.instance.text('recoveryErrorInvalidResponse'),
+        );
         return;
       }
       final id = data['challengeId'];
       if (id is! String || !RegExp(r'^[0-9a-f]{64}$').hasMatch(id)) {
-        _finish('Некорректное подтверждение сервера.');
+        _finish(
+          AppLanguageService.instance.text('recoveryErrorInvalidChallenge'),
+        );
         return;
       }
       _submitSignedChallenge(id);
@@ -78,7 +88,11 @@ class _AccountRecoveryScreenState extends State<AccountRecoveryScreen> {
       if (mounted) Navigator.of(context).pop(_username.text.trim());
     } else if (type == 'recovery_error') {
       final reason = data is Map ? data['reason'] : null;
-      _finish(reason is String ? reason : 'Не удалось восстановить доступ.');
+      _finish(
+        reason is String
+            ? reason
+            : AppLanguageService.instance.text('recoveryErrorGeneric'),
+      );
     }
   }
 
@@ -100,10 +114,10 @@ class _AccountRecoveryScreenState extends State<AccountRecoveryScreen> {
         signatureHex: hex,
         newPassword: _password.text,
       )) {
-        _finish('Нет соединения с сервером.');
+        _finish(AppLanguageService.instance.text('recoveryErrorDisconnected'));
       }
     } catch (_) {
-      _finish('Не удалось создать подтверждение из секретных слов.');
+      _finish(AppLanguageService.instance.text('recoveryErrorSigningFailed'));
     }
   }
 
@@ -111,12 +125,12 @@ class _AccountRecoveryScreenState extends State<AccountRecoveryScreen> {
     if (_busy || !_validInput) return;
     setState(() {
       _busy = true;
-      _status = 'Запрашиваем подтверждение...';
+      _status = AppLanguageService.instance.text('recoveryStatusRequesting');
     });
     _timeout?.cancel();
     _timeout = Timer(
       const Duration(seconds: 45),
-      () => _finish('Сервер не ответил. Попробуйте снова.'),
+      () => _finish(AppLanguageService.instance.text('recoveryErrorTimeout')),
     );
     // RECOVERY_AUTO_CONNECT_V1
     try {
@@ -125,16 +139,20 @@ class _AccountRecoveryScreenState extends State<AccountRecoveryScreen> {
       );
       if (!mounted || !_busy) return;
       if (!connected) {
-        _finish('Не удалось подключиться к серверу.');
+        _finish(
+          AppLanguageService.instance.text('recoveryErrorConnectionFailed'),
+        );
         return;
       }
     } catch (_) {
-      _finish('Не удалось подключиться к серверу.');
+      _finish(
+        AppLanguageService.instance.text('recoveryErrorConnectionFailed'),
+      );
       return;
     }
 
     if (!_socket.requestRecoveryChallenge(_username.text.trim())) {
-      _finish('Нет соединения с сервером.');
+      _finish(AppLanguageService.instance.text('recoveryErrorDisconnected'));
     }
   }
 
@@ -144,6 +162,7 @@ class _AccountRecoveryScreenState extends State<AccountRecoveryScreen> {
     _brandTimer?.cancel();
     _noticeTimer?.cancel();
     _socket.removeMessageHandler(_onRecoveryMessage);
+    AppLanguageService.instance.code.removeListener(_onLanguageChanged);
     _username.dispose();
     _words.dispose();
     _password.dispose();
@@ -164,8 +183,9 @@ class _AccountRecoveryScreenState extends State<AccountRecoveryScreen> {
   @override
   Widget build(BuildContext context) {
     final isValid = _validInput;
+    final t = AppLanguageService.instance.text;
     return Scaffold(
-      appBar: AppBar(title: const Text('Восстановление доступа')),
+      appBar: AppBar(title: Text(t('recoveryScreenTitle'))),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(20),
@@ -195,15 +215,15 @@ class _AccountRecoveryScreenState extends State<AccountRecoveryScreen> {
               ),
             ),
             const SizedBox(height: 24),
-            const Text(
-              'Введите 12 секретных слов для подтверждения владения аккаунтом. Слова останутся на устройстве.',
-            ),
+            Text(t('recoveryScreenDescription')),
             const SizedBox(height: 20),
             TextField(
               controller: _username,
               enabled: !_busy,
               onChanged: (_) => setState(() {}),
-              decoration: const InputDecoration(labelText: 'Имя пользователя'),
+              decoration: InputDecoration(
+                labelText: t('recoveryScreenUsername'),
+              ),
             ),
             const SizedBox(height: 12),
             TextField(
@@ -213,7 +233,7 @@ class _AccountRecoveryScreenState extends State<AccountRecoveryScreen> {
               maxLines: 3,
               autocorrect: false,
               enableSuggestions: false,
-              decoration: const InputDecoration(labelText: '12 секретных слов'),
+              decoration: InputDecoration(labelText: t('recoveryScreenWords')),
             ),
             const SizedBox(height: 12),
             TextField(
@@ -221,7 +241,9 @@ class _AccountRecoveryScreenState extends State<AccountRecoveryScreen> {
               enabled: !_busy,
               onChanged: (_) => setState(() {}),
               obscureText: true,
-              decoration: const InputDecoration(labelText: 'Новый пароль'),
+              decoration: InputDecoration(
+                labelText: t('recoveryScreenNewPassword'),
+              ),
             ),
             const SizedBox(height: 12),
             TextField(
@@ -229,14 +251,16 @@ class _AccountRecoveryScreenState extends State<AccountRecoveryScreen> {
               enabled: !_busy,
               onChanged: (_) => setState(() {}),
               obscureText: true,
-              decoration: const InputDecoration(
-                labelText: 'Повторите новый пароль',
+              decoration: InputDecoration(
+                labelText: t('recoveryScreenConfirmPassword'),
               ),
             ),
             const SizedBox(height: 24),
             FilledButton(
               onPressed: isValid && !_busy ? _startRecovery : null,
-              child: Text(_busy ? 'Восстановление...' : 'Восстановить пароль'),
+              child: Text(
+                _busy ? t('recoveryScreenBusy') : t('recoveryScreenSubmit'),
+              ),
             ),
             const SizedBox(height: 12),
             const SizedBox(height: 30),
@@ -246,7 +270,7 @@ class _AccountRecoveryScreenState extends State<AccountRecoveryScreen> {
                 transitionBuilder: (child, animation) =>
                     FadeTransition(opacity: animation, child: child),
                 child: Text(
-                  _brandExpanded ? 'Служба Безопасности Fenyvo' : 'СБF',
+                  _brandExpanded ? t('recoveryScreenSecurityService') : 'СБF',
                   key: ValueKey(_brandExpanded),
                   textAlign: TextAlign.center,
                   style: const TextStyle(

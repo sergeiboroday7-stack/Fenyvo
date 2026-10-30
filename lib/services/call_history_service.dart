@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
+import 'app_language_service.dart';
 import 'call_service.dart';
 import 'socket_service.dart';
 import 'call_clock.dart';
@@ -10,7 +11,9 @@ import 'call_clock.dart';
 /// Observes calls without changing WebRTC or signaling.
 class CallHistoryService {
   static String title(Map<String, dynamic> item) {
-    final direction = item['incoming'] == true ? 'Входящий' : 'Исходящий';
+    final direction = item['incoming'] == true
+        ? AppLanguageService.instance.text('callsIncoming')
+        : AppLanguageService.instance.text('callsOutgoing');
     final kind = item['video'] == true ? 'видеозвонок' : 'аудиозвонок';
     return '$direction $kind';
   }
@@ -22,11 +25,13 @@ class CallHistoryService {
       );
     }
     return switch (item['outcome']) {
-      'missed' => 'Пропущенный звонок',
-      'declined' => 'Отклонён',
-      'cancelled' => 'Отменён',
-      'failed' => item['reason']?.toString() ?? 'Не удалось соединиться',
-      _ => 'Без соединения',
+      'missed' => AppLanguageService.instance.text('callHistoryMissed'),
+      'declined' => AppLanguageService.instance.text('callHistoryDeclined'),
+      'cancelled' => AppLanguageService.instance.text('callHistoryCancelled'),
+      'failed' =>
+        item['reason']?.toString() ??
+            AppLanguageService.instance.text('callHistoryFailed'),
+      _ => AppLanguageService.instance.text('callHistoryNoConnection'),
     };
   }
 

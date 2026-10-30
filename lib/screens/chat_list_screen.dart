@@ -55,18 +55,16 @@ class _ChatListScreenState extends State<ChatListScreen> {
     final configure = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Защитите свой аккаунт'),
-        content: const Text(
-          'Настройте 12 секретных слов, чтобы восстановить доступ, если забудете пароль. Сохраните слова в безопасном месте.',
-        ),
+        title: Text(_tr('chatListRecoveryPromptTitle')),
+        content: Text(_tr('chatListRecoveryPromptDescription')),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Позже'),
+            child: Text(_tr('chatListRecoveryLater')),
           ),
           FilledButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Настроить'),
+            child: Text(_tr('chatListRecoverySetup')),
           ),
         ],
       ),
@@ -399,12 +397,12 @@ class _ChatListScreenState extends State<ChatListScreen> {
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) => AlertDialog(
-        title: const Text('Запрос связи'),
+        title: Text(_tr('chatListCommunicationRequestTitle')),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('$user хочет связаться с вами'),
+            Text(_tr('chatListCommunicationRequestBody', {'user': user})),
             if (message.trim().isNotEmpty) ...[
               const SizedBox(height: 14),
               Container(
@@ -424,11 +422,11 @@ class _ChatListScreenState extends State<ChatListScreen> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Отклонить'),
+            child: Text(_tr('groupCallDecline')),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Принять'),
+            child: Text(_tr('groupCallAccept')),
           ),
         ],
       ),
@@ -1775,7 +1773,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
-                            'Запросы FENYVO PULSE · ${pulses.length}',
+                            '${_tr('pulseRequests')} · ${pulses.length}',
                             style: const TextStyle(
                               fontSize: 19,
                               fontWeight: FontWeight.w800,
@@ -1783,7 +1781,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                           ),
                         ),
                         IconButton(
-                          tooltip: 'Закрыть',
+                          tooltip: _tr('close'),
                           onPressed: () => Navigator.pop(sheetContext),
                           icon: const Icon(Icons.close_rounded),
                         ),
@@ -1791,10 +1789,10 @@ class _ChatListScreenState extends State<ChatListScreen> {
                     ),
                   ),
                   if (pulses.isEmpty)
-                    const Padding(
+                    Padding(
                       padding: EdgeInsets.fromLTRB(24, 24, 24, 40),
                       child: Text(
-                        'Активных запросов пока нет',
+                        _tr('pulseNoActiveRequests'),
                         style: TextStyle(color: FenyvoPalette.secondary),
                       ),
                     )
@@ -1815,12 +1813,14 @@ class _ChatListScreenState extends State<ChatListScreen> {
                           final accepted = pulse.state == 'accepted';
                           final minutes = service.remainingMinutes(pulse);
                           final status = matched
-                              ? 'Оба готовы · соединяем'
+                              ? _tr('pulseStatusConnecting')
                               : incoming
-                              ? 'Входящий запрос · ещё $minutes мин.'
+                              ? _tr('pulseStatusIncoming', {'minutes': minutes})
                               : accepted
-                              ? 'Готовность подтверждена'
-                              : 'Исходящий запрос · ещё $minutes мин.';
+                              ? _tr('pulseStatusAccepted')
+                              : _tr('pulseStatusOutgoing', {
+                                  'minutes': minutes,
+                                });
                           return Material(
                             color: FenyvoPalette.canvas,
                             borderRadius: BorderRadius.circular(16),
@@ -1859,8 +1859,8 @@ class _ChatListScreenState extends State<ChatListScreen> {
                                           ),
                                           Text(
                                             pulse.video
-                                                ? 'Видеозвонок'
-                                                : 'Аудиозвонок',
+                                                ? _tr('groupCallVideoCall')
+                                                : _tr('groupCallAudioCall'),
                                             style: const TextStyle(
                                               color: FenyvoPalette.gold,
                                               fontSize: 12,
@@ -1872,13 +1872,13 @@ class _ChatListScreenState extends State<ChatListScreen> {
                                   ),
                                   if (incoming) ...[
                                     IconButton(
-                                      tooltip: 'Не сейчас',
+                                      tooltip: _tr('pulseNotNow'),
                                       onPressed: () =>
                                           service.declinePulse(pulse.id),
                                       icon: const Icon(Icons.close_rounded),
                                     ),
                                     IconButton.filled(
-                                      tooltip: 'Я готов',
+                                      tooltip: _tr('imReady'),
                                       onPressed: () =>
                                           service.acceptPulse(pulse.id),
                                       style: IconButton.styleFrom(
@@ -1889,7 +1889,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                                     ),
                                   ] else if (!matched)
                                     IconButton(
-                                      tooltip: 'Отменить',
+                                      tooltip: _tr('pulseCancelAction'),
                                       onPressed: () =>
                                           service.cancelPulse(pulse.id),
                                       icon: const Icon(Icons.close_rounded),
@@ -1925,11 +1925,11 @@ class _ChatListScreenState extends State<ChatListScreen> {
       final matched = service.phase == FenyvoPulsePhase.matched;
       final minutes = service.remainingMinutes(pulse);
       final stateText = matched
-          ? 'Оба готовы · звонок через ${service.countdownSeconds} сек.'
+          ? _tr('pulseDockCountdown', {'seconds': service.countdownSeconds})
           : incoming
-          ? 'Входящий · осталось $minutes мин.'
-          : 'Ждём готовность · осталось $minutes мин.';
-      final mode = pulse.video ? 'видеозвонок' : 'аудиозвонок';
+          ? _tr('pulseDockIncoming', {'minutes': minutes})
+          : _tr('pulseDockWaiting', {'minutes': minutes});
+      final mode = pulse.video ? _tr('videoCall') : _tr('audioCall');
       final requestCount = service.requestCount;
       final unreadCount = service.unreadCount;
 
@@ -1995,8 +1995,14 @@ class _ChatListScreenState extends State<ChatListScreen> {
                         ),
                         Text(
                           unreadCount > 0
-                              ? '$stateText · новых: $unreadCount'
-                              : '$stateText · запросов: $requestCount',
+                              ? _tr('pulseDockUnread', {
+                                  'state': stateText,
+                                  'count': unreadCount,
+                                })
+                              : _tr('pulseDockRequests', {
+                                  'state': stateText,
+                                  'count': requestCount,
+                                }),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
@@ -2009,7 +2015,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                   ),
                   if (incoming) ...[
                     IconButton(
-                      tooltip: 'Не сейчас',
+                      tooltip: _tr('pulseNotNow'),
                       onPressed: service.decline,
                       icon: const Icon(
                         Icons.close_rounded,
@@ -2017,7 +2023,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                       ),
                     ),
                     IconButton.filled(
-                      tooltip: 'Я готов',
+                      tooltip: _tr('imReady'),
                       onPressed: service.accept,
                       style: IconButton.styleFrom(
                         backgroundColor: FenyvoPalette.gold,
@@ -2027,7 +2033,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                     ),
                   ] else if (!matched)
                     IconButton(
-                      tooltip: 'Отменить FENYVO PULSE',
+                      tooltip: _tr('cancelPulse'),
                       onPressed: service.cancel,
                       icon: const Icon(
                         Icons.close_rounded,
@@ -2051,10 +2057,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
   Widget _buildChatListPane() {
     final visible = _visibleChats;
     final query = _search.text.trim().toLowerCase();
-    final contactCount = _chats
-        .where((item) => !item.startsWith('group::'))
-        .length;
-    final eventCount = PulseService.instance.requestCount;
+    final onlineCount = _onlineUsers.length;
     final savedSearchText = '${_tr('saved')} ${_tr('savedSearchTerms')}'
         .toLowerCase();
     final showSaved =
@@ -2113,7 +2116,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                         const SizedBox(height: 3),
                         Text(
                           MediaQuery.sizeOf(context).width >= 900
-                              ? 'БОЛЬШЕ ЧЕМ ОБЩЕНИЕ'
+                              ? _tr('brandBeyondCommunication')
                               : _tr('commandCenter'),
                           style: const TextStyle(
                             color: FenyvoPalette.gold,
@@ -2145,9 +2148,8 @@ class _ChatListScreenState extends State<ChatListScreen> {
                           : _tr('offlineShort');
                       return Tooltip(
                         message: connected
-                            ? _tr('serverConnectedDetails', {
-                                'people': contactCount,
-                                'events': eventCount,
+                            ? _tr('onlinePeopleDetails', {
+                                'people': onlineCount,
                               })
                             : connecting
                             ? _tr('serverReconnecting')
@@ -2194,7 +2196,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                               if (connected) ...[
                                 const SizedBox(width: 6),
                                 Text(
-                                  '$contactCount · $eventCount',
+                                  '$onlineCount',
                                   style: const TextStyle(
                                     color: FenyvoPalette.secondary,
                                     fontSize: 9,
@@ -2355,20 +2357,29 @@ class _ChatListScreenState extends State<ChatListScreen> {
   void _dial(String user, bool video) {
     if (!SocketService.instance.isAuthenticated) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Для звонка подключитесь к серверу')),
+        SnackBar(
+          content: Text(
+            AppLanguageService.instance.text('callsNeedConnection'),
+          ),
+        ),
       );
       return;
     }
     if (CallService.instance.hasCall) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Звонок уже активен')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(AppLanguageService.instance.text('callsAlreadyActive')),
+        ),
+      );
       return;
     }
     unawaited(CallService.instance.startCall(peer: user, video: video));
   }
 
   Widget _callsPane() => Scaffold(
-    appBar: AppBar(title: const Text('Звонки')),
+    appBar: AppBar(
+      title: Text(AppLanguageService.instance.text('callsPageTitle')),
+    ),
     body: ValueListenableBuilder<int>(
       valueListenable: CallHistoryService.changes,
       builder: (context, _, child) {
@@ -2380,16 +2391,16 @@ class _ChatListScreenState extends State<ChatListScreen> {
         return ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            const Text(
-              'Недавние',
+            Text(
+              AppLanguageService.instance.text('callsRecentHeading'),
               style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 12),
             if (history.isEmpty)
-              const Padding(
+              Padding(
                 padding: EdgeInsets.symmetric(vertical: 20),
                 child: Text(
-                  'История появится после новых звонков.',
+                  AppLanguageService.instance.text('callHistoryEmpty'),
                   style: TextStyle(color: FenyvoPalette.secondary),
                 ),
               ),
@@ -2399,7 +2410,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                 leading: _buildAvatar(item['peer'].toString(), radius: 22),
                 title: Text(item['peer'].toString()),
                 subtitle: Text(
-                  '${item['incoming'] == true ? 'Входящий' : 'Исходящий'} · '
+                  '${item['incoming'] == true ? AppLanguageService.instance.text('callsIncoming') : AppLanguageService.instance.text('callsOutgoing')} · '
                   '${CallHistoryService.status(item)}'
                   '\n${_formatCallDate(item['time']?.toString() ?? '')}',
                   style: item['outcome'] == 'missed'
@@ -2407,7 +2418,9 @@ class _ChatListScreenState extends State<ChatListScreen> {
                       : null,
                 ),
                 trailing: IconButton(
-                  tooltip: 'Повторить звонок',
+                  tooltip: AppLanguageService.instance.text(
+                    'callsRetryTooltip',
+                  ),
                   icon: Icon(
                     item['video'] == true
                         ? Icons.videocam_outlined
@@ -2418,8 +2431,8 @@ class _ChatListScreenState extends State<ChatListScreen> {
                 ),
               ),
             const SizedBox(height: 24),
-            const Text(
-              'Позвонить контакту',
+            Text(
+              AppLanguageService.instance.text('callsContactHeading'),
               style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 8),
@@ -2428,17 +2441,25 @@ class _ChatListScreenState extends State<ChatListScreen> {
                 contentPadding: EdgeInsets.zero,
                 leading: _buildAvatar(user, radius: 22),
                 title: Text(user),
-                subtitle: Text(_isUserOnline(user) ? 'в сети' : 'не в сети'),
+                subtitle: Text(
+                  _isUserOnline(user)
+                      ? AppLanguageService.instance.text('contactsStatusOnline')
+                      : AppLanguageService.instance.text(
+                          'contactsStatusOffline',
+                        ),
+                ),
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     IconButton(
-                      tooltip: 'Аудиозвонок: $user',
+                      tooltip:
+                          "${AppLanguageService.instance.text('callsAudioTooltip')}$user",
                       onPressed: () => _dial(user, false),
                       icon: const Icon(Icons.call_outlined),
                     ),
                     IconButton(
-                      tooltip: 'Видеозвонок: $user',
+                      tooltip:
+                          "${AppLanguageService.instance.text('callsVideoTooltip')}$user",
                       onPressed: () => _dial(user, true),
                       icon: const Icon(Icons.videocam_outlined),
                     ),
@@ -2711,7 +2732,11 @@ class _ChatListScreenState extends State<ChatListScreen> {
                   icon: const Icon(Icons.bolt_rounded, size: 30),
                 ),
               ),
-              _mobileDeckButton(3, Icons.people_outline_rounded, 'Контакты'),
+              _mobileDeckButton(
+                3,
+                Icons.people_outline_rounded,
+                AppLanguageService.instance.text('navContacts'),
+              ),
               _mobileDeckButton(1, Icons.call_outlined, language.text('calls')),
               _mobileDeckButton(
                 2,
@@ -2747,9 +2772,11 @@ class _ChatListScreenState extends State<ChatListScreen> {
               padding: const EdgeInsets.fromLTRB(20, 17, 12, 12),
               child: Row(
                 children: [
-                  const Expanded(
+                  Expanded(
                     child: Text(
-                      'ПРОФИЛЬ',
+                      AppLanguageService.instance
+                          .text('dashboardProfile')
+                          .toUpperCase(),
                       style: TextStyle(
                         color: FenyvoPalette.gold,
                         fontSize: 12,
@@ -2759,7 +2786,9 @@ class _ChatListScreenState extends State<ChatListScreen> {
                     ),
                   ),
                   IconButton(
-                    tooltip: 'Скрыть профиль',
+                    tooltip: AppLanguageService.instance.text(
+                      'desktopProfileHide',
+                    ),
                     onPressed: () =>
                         setState(() => _desktopProfileVisible = false),
                     icon: const Icon(Icons.close_rounded, size: 20),
@@ -2803,14 +2832,18 @@ class _ChatListScreenState extends State<ChatListScreen> {
                 ),
                 const SizedBox(width: 7),
                 Text(
-                  online ? 'В сети' : 'Не в сети',
+                  online
+                      ? AppLanguageService.instance.text('contactsStatusOnline')
+                      : AppLanguageService.instance.text(
+                          'contactsStatusOffline',
+                        ),
                   style: const TextStyle(color: FenyvoPalette.secondary),
                 ),
               ],
             ),
             if (trusted) ...[
               const SizedBox(height: 9),
-              const Row(
+              Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(
@@ -2820,7 +2853,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                   ),
                   SizedBox(width: 5),
                   Text(
-                    'Доверенный контакт',
+                    AppLanguageService.instance.text('desktopTrustedContact'),
                     style: TextStyle(color: FenyvoPalette.gold, fontSize: 12),
                   ),
                 ],
@@ -2834,7 +2867,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                   Expanded(
                     child: _desktopProfileAction(
                       Icons.call_rounded,
-                      'Аудио',
+                      _tr('audio'),
                       () => _dial(user, false),
                     ),
                   ),
@@ -2842,7 +2875,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                   Expanded(
                     child: _desktopProfileAction(
                       Icons.videocam_rounded,
-                      'Видео',
+                      _tr('video'),
                       () => _dial(user, true),
                     ),
                   ),
@@ -2856,8 +2889,8 @@ class _ChatListScreenState extends State<ChatListScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'ПЕРЕПИСКА',
+                  Text(
+                    _tr('desktopConversationHeading'),
                     style: TextStyle(
                       color: FenyvoPalette.gold,
                       fontWeight: FontWeight.w800,
@@ -2876,7 +2909,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                       const SizedBox(width: 11),
                       Expanded(
                         child: Text(
-                          'Сообщений на устройстве',
+                          _tr('desktopMessagesOnDevice'),
                           style: const TextStyle(
                             color: FenyvoPalette.secondary,
                             fontSize: 12,
@@ -2893,7 +2926,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                     ],
                   ),
                   const SizedBox(height: 15),
-                  const Row(
+                  Row(
                     children: [
                       Icon(
                         Icons.lock_outline_rounded,
@@ -2903,7 +2936,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                       SizedBox(width: 11),
                       Expanded(
                         child: Text(
-                          'Настройки защиты — в чате',
+                          _tr('desktopSecuritySettingsInChat'),
                           style: TextStyle(
                             color: FenyvoPalette.secondary,
                             fontSize: 12,
@@ -2916,10 +2949,10 @@ class _ChatListScreenState extends State<ChatListScreen> {
               ),
             ),
             const Spacer(),
-            const Padding(
+            Padding(
               padding: EdgeInsets.fromLTRB(20, 10, 20, 23),
               child: Text(
-                'FENYVO · БОЛЬШЕ ЧЕМ ОБЩЕНИЕ',
+                'FENYVO · ${_tr('brandBeyondCommunication')}',
                 style: TextStyle(
                   color: FenyvoPalette.muted,
                   fontSize: 9,
@@ -3018,7 +3051,9 @@ class _ChatListScreenState extends State<ChatListScreen> {
                       _desktopContactPanel(_selectedDesktopUser!)
                     else
                       IconButton(
-                        tooltip: 'Показать профиль',
+                        tooltip: AppLanguageService.instance.text(
+                          'desktopProfileShow',
+                        ),
                         onPressed: () =>
                             setState(() => _desktopProfileVisible = true),
                         icon: const Icon(
@@ -3051,7 +3086,11 @@ class _ChatListScreenState extends State<ChatListScreen> {
                         Icons.chat_bubble_outline_rounded,
                         AppLanguageService.instance.text('chats'),
                       ),
-                      _railButton(3, Icons.people_outline_rounded, 'Контакты'),
+                      _railButton(
+                        3,
+                        Icons.people_outline_rounded,
+                        AppLanguageService.instance.text('navContacts'),
+                      ),
                       _railButton(
                         1,
                         Icons.call_outlined,

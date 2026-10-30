@@ -1,9 +1,12 @@
+import 'package:fenyvo/services/app_language_service.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fenyvo/theme/fenyvo_theme.dart';
 import 'package:fenyvo/widgets/my_fenyvo_dashboard.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  AppLanguageService.instance.code.value = 'ru';
   testWidgets('My Fenyvo keeps its identity and opens every quick action', (
     tester,
   ) async {

@@ -6,7 +6,7 @@ import '../lib/services/windows_update_core.dart';
 
 void main() {
   const expectedHash =
-      '5c8e0d97e2a6cdb5bf3415f404335cfc9390c974eb943a6570fb37b675204d73';
+      '1b7d012c8d8f25db8dc48eacb130b4c3c883d5b3a5273aea5dff772a92d4048f';
 
   final downloadUri = Uri.parse(
     'https://fenyvo.com/download/Fenyvo-1.8.2-windows-x64.zip',
@@ -15,21 +15,21 @@ void main() {
   Future<File> download(String hash, Directory temp) {
     return const WindowsUpdateCore().downloadAndVerify(
       uri: downloadUri,
-      build: 4251,
+      build: 4254,
       sha256Hex: hash,
-      sizeBytes: 31335170,
+      sizeBytes: 31490214,
       temporaryDirectory: temp,
     );
   }
 
-  test('downloads and verifies real Windows release 4251', () async {
+  test('downloads and verifies real Windows release 4254', () async {
     final temp = await Directory.systemTemp.createTemp('fenyvo-test-');
 
     try {
       final file = await download(expectedHash, temp);
 
       expect(await file.exists(), isTrue);
-      expect(await file.length(), 31335170);
+      expect(await file.length(), 31490214);
     } finally {
       await temp.delete(recursive: true);
     }
@@ -49,11 +49,11 @@ void main() {
       );
 
       final partial = File(
-        '${updateDir.path}${Platform.pathSeparator}fenyvo-4251.zip.part',
+        '${updateDir.path}${Platform.pathSeparator}fenyvo-4254.zip.part',
       );
 
       final completed = File(
-        '${updateDir.path}${Platform.pathSeparator}fenyvo-4251.zip',
+        '${updateDir.path}${Platform.pathSeparator}fenyvo-4254.zip',
       );
 
       expect(await partial.exists(), isFalse);

@@ -2,8 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fenyvo/widgets/call_controls.dart';
+import 'package:fenyvo/services/app_language_service.dart';
 
 void main() {
+  setUp(() {
+    // Existing widget assertions intentionally verify Russian UI labels.
+    // Ukrainian and English require separate localized expectations.
+    AppLanguageService.instance.code.value = 'ru';
+  });
   Widget controls({
     bool microphone = true,
     bool camera = true,

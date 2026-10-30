@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../services/socket_service.dart';
+import '../services/app_language_service.dart';
 import '../theme/fenyvo_theme.dart';
 
 class SupportAiScreen extends StatefulWidget {
@@ -18,10 +19,7 @@ class _SupportAiScreenState extends State<SupportAiScreen> {
   final TextEditingController _controller = TextEditingController();
   final ScrollController _scrollController = ScrollController();
   final List<_SupportMessage> _messages = <_SupportMessage>[
-    const _SupportMessage(
-      text: 'Я автоматический помощник Fenyvo. Я могу объяснить функции приложения и помочь с обычными неполадками. Не отправляйте пароли, ключи, платёжные данные или документы. Для вопросов о персональных данных напишите на privacy@fenyvo.com.',
-      fromUser: false,
-    ),
+    const _SupportMessage(text: 'supportAiWelcome', fromUser: false),
   ];
 
   String? _pendingRequestId;
@@ -62,12 +60,10 @@ class _SupportAiScreenState extends State<SupportAiScreen> {
           _messages.add(
             _SupportMessage(
               text: accepted && ticketId.isNotEmpty
-                  ? 'Обращение передано специалисту. Номер: $ticketId. '
-                        'Ответ придёт на указанный email.'
-                  : (reason.isNotEmpty
-                        ? reason
-                        : 'Подтверждение отправки не получено. '
-                              'Не создавайте повторное обращение до проверки.'),
+                  ? AppLanguageService.instance
+                        .text('supportTicketAccepted')
+                        .replaceAll('{ticketId}', ticketId)
+                  : (reason.isNotEmpty ? reason : 'supportTicketUnconfirmed'),
               fromUser: false,
             ),
           );
@@ -85,9 +81,7 @@ class _SupportAiScreenState extends State<SupportAiScreen> {
         _pendingRequestId = null;
         _messages.add(
           _SupportMessage(
-            text: result.isEmpty
-                ? 'Не удалось сформировать ответ. Напишите на support@fenyvo.com.'
-                : result,
+            text: result.isEmpty ? 'supportAiEmptyResponse' : result,
             fromUser: false,
           ),
         );
@@ -103,9 +97,7 @@ class _SupportAiScreenState extends State<SupportAiScreen> {
         _pendingRequestId = null;
         _messages.add(
           _SupportMessage(
-            text: reason.isEmpty
-                ? 'Помощник временно недоступен. Напишите на support@fenyvo.com.'
-                : reason,
+            text: reason.isEmpty ? 'supportAiUnavailable' : reason,
             fromUser: false,
           ),
         );
@@ -121,10 +113,7 @@ class _SupportAiScreenState extends State<SupportAiScreen> {
         _waiting = false;
         _pendingRequestId = null;
         _messages.add(
-          const _SupportMessage(
-            text: 'Помощник не ответил вовремя. Проверьте соединение и попробуйте снова.',
-            fromUser: false,
-          ),
+          const _SupportMessage(text: 'supportAiTimeout', fromUser: false),
         );
       });
       _scrollToEnd();
@@ -138,10 +127,7 @@ class _SupportAiScreenState extends State<SupportAiScreen> {
     if (!SocketService.instance.isConnected) {
       setState(() {
         _messages.add(
-          const _SupportMessage(
-            text: 'Нет соединения с сервером Fenyvo. Проверьте интернет и попробуйте снова.',
-            fromUser: false,
-          ),
+          const _SupportMessage(text: 'supportAiDisconnected', fromUser: false),
         );
       });
       _scrollToEnd();
@@ -181,24 +167,23 @@ class _SupportAiScreenState extends State<SupportAiScreen> {
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (dialogContext, setDialogState) => AlertDialog(
-          title: const Text('Передать вопрос специалисту'),
+          title: Text(AppLanguageService.instance.text('supportAiTicketTitle')),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
-                  'Проверьте текст перед отправкой. '
-                  'Личные чаты не прикладываются автоматически.',
-                ),
+                Text(AppLanguageService.instance.text('supportAiTicketNotice')),
                 const SizedBox(height: 12),
                 TextField(
                   controller: issueController,
                   maxLength: 2000,
                   maxLines: 5,
                   minLines: 3,
-                  decoration: const InputDecoration(
-                    labelText: 'Текст обращения',
+                  decoration: InputDecoration(
+                    labelText: AppLanguageService.instance.text(
+                      'supportAiTicketText',
+                    ),
                     border: OutlineInputBorder(),
                   ),
                 ),
@@ -207,8 +192,10 @@ class _SupportAiScreenState extends State<SupportAiScreen> {
                   controller: emailController,
                   keyboardType: TextInputType.emailAddress,
                   maxLength: 254,
-                  decoration: const InputDecoration(
-                    labelText: 'Email для ответа',
+                  decoration: InputDecoration(
+                    labelText: AppLanguageService.instance.text(
+                      'supportAiTicketEmail',
+                    ),
                     border: OutlineInputBorder(),
                   ),
                 ),
@@ -216,9 +203,8 @@ class _SupportAiScreenState extends State<SupportAiScreen> {
                   value: consent,
                   contentPadding: EdgeInsets.zero,
                   controlAffinity: ListTileControlAffinity.leading,
-                  title: const Text(
-                    'Согласен передать указанный текст и email '
-                    'в службу поддержки Fenyvo для ответа.',
+                  title: Text(
+                    AppLanguageService.instance.text('supportAiTicketConsent'),
                     style: TextStyle(fontSize: 13),
                   ),
                   onChanged: (value) => setDialogState(() {
@@ -239,7 +225,7 @@ class _SupportAiScreenState extends State<SupportAiScreen> {
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('Отмена'),
+              child: Text(AppLanguageService.instance.text('cancel')),
             ),
             FilledButton(
               onPressed: () {
@@ -253,14 +239,17 @@ class _SupportAiScreenState extends State<SupportAiScreen> {
                     !validEmail ||
                     !consent) {
                   setDialogState(
-                    () => validationError =
-                        'Проверьте вопрос (5–2000 символов), email и согласие.',
+                    () => validationError = AppLanguageService.instance.text(
+                      'supportAiTicketValidation',
+                    ),
                   );
                   return;
                 }
                 Navigator.of(dialogContext).pop((text: text, email: email));
               },
-              child: const Text('Передать'),
+              child: Text(
+                AppLanguageService.instance.text('supportAiTicketSubmit'),
+              ),
             ),
           ],
         ),
@@ -274,9 +263,9 @@ class _SupportAiScreenState extends State<SupportAiScreen> {
     if (!mounted || submitted == null) return;
     if (!SocketService.instance.isAuthenticated) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
+        SnackBar(
           content: Text(
-            'Для обращения войдите в аккаунт и подключитесь к серверу.',
+            AppLanguageService.instance.text('supportTicketLoginRequired'),
           ),
         ),
       );
@@ -293,8 +282,10 @@ class _SupportAiScreenState extends State<SupportAiScreen> {
     );
     if (!sent) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Не удалось отправить запрос. Проверьте соединение.'),
+        SnackBar(
+          content: Text(
+            AppLanguageService.instance.text('supportTicketSendFailed'),
+          ),
         ),
       );
       return;
@@ -303,10 +294,7 @@ class _SupportAiScreenState extends State<SupportAiScreen> {
       _pendingTicketId = requestId;
       _ticketWaiting = true;
       _messages.add(
-        const _SupportMessage(
-          text: 'Запрос передан серверу. Ожидаем подтверждения…',
-          fromUser: false,
-        ),
+        const _SupportMessage(text: 'supportTicketPending', fromUser: false),
       );
     });
     _scrollToEnd();
@@ -316,12 +304,7 @@ class _SupportAiScreenState extends State<SupportAiScreen> {
         _pendingTicketId = null;
         _ticketWaiting = false;
         _messages.add(
-          const _SupportMessage(
-            text:
-                'Подтверждение не получено. Результат неизвестен. '
-                'Не отправляйте повторно до проверки в поддержке.',
-            fromUser: false,
-          ),
+          const _SupportMessage(text: 'supportTicketUnknown', fromUser: false),
         );
       });
       _scrollToEnd();
@@ -346,12 +329,13 @@ class _SupportAiScreenState extends State<SupportAiScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final t = AppLanguageService.instance.text;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Помощник поддержки'),
+        title: Text(t('supportAiTitle')),
         actions: [
           IconButton(
-            tooltip: 'Написать владельцу',
+            tooltip: t('supportAiEmailTooltip'),
             onPressed: _emailSupport,
             icon: const Icon(Icons.mail_outline_rounded),
           ),
@@ -371,9 +355,12 @@ class _SupportAiScreenState extends State<SupportAiScreen> {
                   color: FenyvoPalette.ink.withValues(alpha: 0.22),
                 ),
               ),
-              child: const Text(
-                'Отвечает ИИ, а не человек. Вопрос отправляется только после нажатия кнопки. Личные чаты автоматически не читаются.',
-                style: TextStyle(color: FenyvoPalette.secondary, fontSize: 12),
+              child: Text(
+                t('supportAiDisclosure'),
+                style: const TextStyle(
+                  color: FenyvoPalette.secondary,
+                  fontSize: 12,
+                ),
               ),
             ),
             Padding(
@@ -385,8 +372,8 @@ class _SupportAiScreenState extends State<SupportAiScreen> {
                   icon: const Icon(Icons.support_agent_outlined),
                   label: Text(
                     _ticketWaiting
-                        ? 'Ожидаем подтверждения обращения…'
-                        : 'Передать вопрос специалисту',
+                        ? t('supportAiWaiting')
+                        : t('supportAiEscalate'),
                   ),
                 ),
               ),
@@ -419,7 +406,19 @@ class _SupportAiScreenState extends State<SupportAiScreen> {
                         ),
                       ),
                       child: Text(
-                        message.text,
+                        message.fromUser ||
+                                !const {
+                                  'supportAiWelcome',
+                                  'supportAiTimeout',
+                                  'supportAiDisconnected',
+                                  'supportAiEmptyResponse',
+                                  'supportAiUnavailable',
+                                  'supportTicketPending',
+                                  'supportTicketUnconfirmed',
+                                  'supportTicketUnknown',
+                                }.contains(message.text)
+                            ? message.text
+                            : AppLanguageService.instance.text(message.text),
                         style: const TextStyle(color: FenyvoPalette.ink),
                       ),
                     ),
@@ -445,15 +444,15 @@ class _SupportAiScreenState extends State<SupportAiScreen> {
                       maxLines: 4,
                       textInputAction: TextInputAction.send,
                       onSubmitted: (_) => _send(),
-                      decoration: const InputDecoration(
-                        hintText: 'Опишите вопрос без секретных данных',
+                      decoration: InputDecoration(
+                        hintText: t('supportAiQuestionHint'),
                         counterText: '',
                       ),
                     ),
                   ),
                   const SizedBox(width: 8),
                   IconButton.filled(
-                    tooltip: 'Отправить',
+                    tooltip: t('supportAiSendTooltip'),
                     onPressed: _waiting ? null : _send,
                     icon: const Icon(Icons.send_rounded),
                   ),

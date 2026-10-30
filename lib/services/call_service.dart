@@ -645,7 +645,9 @@ class CallService extends ChangeNotifier {
       case 'call_error':
         if (_matchesCurrentCall(data, requirePeer: false)) {
           unawaited(
-            _finishWithMessage(data['reason']?.toString() ?? 'Ошибка звонка'),
+            _finishWithMessage(
+              data['reason'] == 'busy' ? 'Пользователь занят' : 'Ошибка звонка',
+            ),
           );
         }
         break;
@@ -1188,6 +1190,6 @@ class CallService extends ChangeNotifier {
           ? 'Разрешите доступ к камере и микрофону'
           : 'Разрешите доступ к микрофону';
     }
-    return text.isEmpty ? 'Не удалось начать звонок' : text;
+    return 'Не удалось начать звонок';
   }
 }

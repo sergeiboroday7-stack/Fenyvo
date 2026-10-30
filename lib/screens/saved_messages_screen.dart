@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 
 import '../services/download_service.dart';
+import '../services/app_language_service.dart';
 import '../services/saved_messages_service.dart';
 import '../theme/fenyvo_theme.dart';
 import '../widgets/emoji_picker.dart';
@@ -43,7 +44,11 @@ class _SavedMessagesScreenState extends State<SavedMessagesScreen> {
     } catch (_) {
       if (mounted)
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Не удалось сохранить заметку')),
+          SnackBar(
+            content: Text(
+              AppLanguageService.instance.text('savedNoteSaveFailed'),
+            ),
+          ),
         );
     } finally {
       if (mounted) setState(() => _saving = false);
@@ -54,16 +59,16 @@ class _SavedMessagesScreenState extends State<SavedMessagesScreen> {
     final remove = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('Убрать из сохранённого?'),
-        content: const Text('Исходное сообщение в чате останется.'),
+        title: Text(AppLanguageService.instance.text('savedRemoveConfirm')),
+        content: Text(AppLanguageService.instance.text('savedOriginalRemains')),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('Отмена'),
+            child: Text(AppLanguageService.instance.text('cancel')),
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('Убрать'),
+            child: Text(AppLanguageService.instance.text('savedRemove')),
           ),
         ],
       ),
@@ -74,7 +79,11 @@ class _SavedMessagesScreenState extends State<SavedMessagesScreen> {
       } catch (_) {
         if (mounted)
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Не удалось убрать запись')),
+            SnackBar(
+              content: Text(
+                AppLanguageService.instance.text('savedRemoveFailed'),
+              ),
+            ),
           );
       }
     }
@@ -83,12 +92,15 @@ class _SavedMessagesScreenState extends State<SavedMessagesScreen> {
   @override
   Widget build(BuildContext context) => Scaffold(
     appBar: AppBar(
-      title: const Column(
+      title: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Сохранённое', style: TextStyle(fontSize: 18)),
           Text(
-            'Только на этом устройстве',
+            AppLanguageService.instance.text('saved'),
+            style: TextStyle(fontSize: 18),
+          ),
+          Text(
+            AppLanguageService.instance.text('savedLocalOnly'),
             style: TextStyle(fontSize: 12, color: FenyvoPalette.secondary),
           ),
         ],
@@ -102,7 +114,7 @@ class _SavedMessagesScreenState extends State<SavedMessagesScreen> {
             builder: (context, _, child) {
               final items = SavedMessagesService.items(widget.owner);
               if (items.isEmpty)
-                return const Center(
+                return Center(
                   child: Padding(
                     padding: EdgeInsets.all(24),
                     child: Column(
@@ -115,12 +127,12 @@ class _SavedMessagesScreenState extends State<SavedMessagesScreen> {
                         ),
                         SizedBox(height: 16),
                         Text(
-                          'Важное — под рукой',
+                          AppLanguageService.instance.text('savedEmptyTitle'),
                           style: TextStyle(fontSize: 20),
                         ),
                         SizedBox(height: 8),
                         Text(
-                          'Напишите заметку или выберите «Сохранить»\nв меню сообщения в чате.',
+                          AppLanguageService.instance.text('savedEmptyHint'),
                           textAlign: TextAlign.center,
                           style: TextStyle(color: FenyvoPalette.secondary),
                         ),
@@ -156,8 +168,15 @@ class _SavedMessagesScreenState extends State<SavedMessagesScreen> {
                               Expanded(
                                 child: Text(
                                   origin.isEmpty
-                                      ? 'Заметка'
-                                      : 'Из чата: $origin',
+                                      ? AppLanguageService.instance.text(
+                                          'savedNoteLabel',
+                                        )
+                                      : AppLanguageService.instance
+                                            .text('savedFromChat')
+                                            .replaceAll(
+                                              '{origin}',
+                                              origin.toString(),
+                                            ),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(
@@ -167,7 +186,9 @@ class _SavedMessagesScreenState extends State<SavedMessagesScreen> {
                                 ),
                               ),
                               PopupMenuButton<String>(
-                                tooltip: 'Действия с сохранённым',
+                                tooltip: AppLanguageService.instance.text(
+                                  'savedActions',
+                                ),
                                 onSelected: (action) async {
                                   if (action == 'remove') {
                                     await _remove(item);
@@ -179,14 +200,22 @@ class _SavedMessagesScreenState extends State<SavedMessagesScreen> {
                                     );
                                   }
                                 },
-                                itemBuilder: (_) => const [
+                                itemBuilder: (_) => [
                                   PopupMenuItem(
                                     value: 'copy',
-                                    child: Text('Копировать текст'),
+                                    child: Text(
+                                      AppLanguageService.instance.text(
+                                        'savedCopyText',
+                                      ),
+                                    ),
                                   ),
                                   PopupMenuItem(
                                     value: 'remove',
-                                    child: Text('Убрать из сохранённого'),
+                                    child: Text(
+                                      AppLanguageService.instance.text(
+                                        'savedRemoveFromSaved',
+                                      ),
+                                    ),
                                   ),
                                 ],
                               ),
@@ -225,9 +254,11 @@ class _SavedMessagesScreenState extends State<SavedMessagesScreen> {
                     maxLines: 5,
                     onChanged: (_) => setState(() {}),
                     decoration: InputDecoration(
-                      hintText: 'Заметка…',
+                      hintText: AppLanguageService.instance.text(
+                        'savedNoteHint',
+                      ),
                       suffixIcon: IconButton(
-                        tooltip: 'Смайлики',
+                        tooltip: AppLanguageService.instance.text('emoji'),
                         icon: const Icon(Icons.emoji_emotions_outlined),
                         onPressed: () {
                           _inputFocus.unfocus();
@@ -239,7 +270,7 @@ class _SavedMessagesScreenState extends State<SavedMessagesScreen> {
                 ),
                 const SizedBox(width: 8),
                 IconButton.filled(
-                  tooltip: 'Сохранить заметку',
+                  tooltip: AppLanguageService.instance.text('savedSaveNote'),
                   onPressed: _saving || _input.text.trim().isEmpty
                       ? null
                       : _saveNote,
@@ -343,7 +374,11 @@ class _SavedAttachmentState extends State<SavedAttachment> {
     } catch (_) {
       if (mounted)
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Не удалось открыть вложение')),
+          SnackBar(
+            content: Text(
+              AppLanguageService.instance.text('savedAttachmentOpenFailed'),
+            ),
+          ),
         );
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -364,12 +399,23 @@ class _SavedAttachmentState extends State<SavedAttachment> {
         mimeType: widget.item['mimeType']?.toString() ?? '',
       );
       if (mounted)
-        ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text('Сохранено: $result')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              AppLanguageService.instance
+                  .text('savedExportedPath')
+                  .replaceAll('{path}', result.toString()),
+            ),
+          ),
+        );
     } catch (_) {
       if (mounted)
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Не удалось выгрузить файл')),
+          SnackBar(
+            content: Text(
+              AppLanguageService.instance.text('savedExportFailed'),
+            ),
+          ),
         );
     }
   }
@@ -390,7 +436,9 @@ class _SavedAttachmentState extends State<SavedAttachment> {
                     right: 4,
                     top: 4,
                     child: IconButton.filledTonal(
-                      tooltip: 'Закрыть фото',
+                      tooltip: AppLanguageService.instance.text(
+                        'savedClosePhoto',
+                      ),
                       onPressed: () => Navigator.pop(context),
                       icon: const Icon(Icons.close),
                     ),
@@ -405,7 +453,8 @@ class _SavedAttachmentState extends State<SavedAttachment> {
               File(_path),
               height: 240,
               fit: BoxFit.contain,
-              errorBuilder: (_, error, stack) => const Text('Фото недоступно'),
+              errorBuilder: (_, error, stack) =>
+                  Text(AppLanguageService.instance.text('photoUnavailable')),
             ),
           ),
         ),
@@ -418,7 +467,7 @@ class _SavedAttachmentState extends State<SavedAttachment> {
         children: [
           if (_type == 'voice' || _type == 'video')
             IconButton(
-              tooltip: 'Воспроизвести / пауза',
+              tooltip: AppLanguageService.instance.text('savedPlayPause'),
               onPressed: _busy ? null : _play,
               icon: _busy
                   ? const SizedBox(
@@ -437,13 +486,15 @@ class _SavedAttachmentState extends State<SavedAttachment> {
           const SizedBox(width: 8),
           Expanded(
             child: Text(
-              _type == 'voice' ? 'Голосовое сообщение' : _name,
+              _type == 'voice'
+                  ? AppLanguageService.instance.text('savedVoiceMessage')
+                  : _name,
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
             ),
           ),
           IconButton(
-            tooltip: 'Скачать сохранённый файл',
+            tooltip: AppLanguageService.instance.text('savedDownloadFile'),
             onPressed: _download,
             icon: const Icon(Icons.download_rounded),
           ),

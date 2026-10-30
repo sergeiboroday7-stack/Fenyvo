@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import 'app_visibility.dart';
+import 'native_call_notification_language.dart';
 
 class NotificationService {
   NotificationService._();
@@ -123,8 +124,8 @@ class NotificationService {
         id: _messageNotificationId('call:$id'),
         title: from,
         body: video
-            ? 'Входящий видеозвонок — открыть FENYVO'
-            : 'Входящий аудиозвонок — открыть FENYVO',
+            ? NativeCallNotificationLanguage.text('incomingVideoOpen')
+            : NativeCallNotificationLanguage.text('incomingAudioOpen'),
         notificationDetails: NotificationDetails(
           windows: WindowsNotificationDetails(
             duration: WindowsNotificationDuration.short,
@@ -151,7 +152,9 @@ class NotificationService {
     await _notifications.show(
       id: _messageNotificationId('missed:$id'),
       title: from,
-      body: video ? 'Пропущенный видеозвонок' : 'Пропущенный звонок',
+      body: video
+          ? NativeCallNotificationLanguage.text('missedVideo')
+          : NativeCallNotificationLanguage.text('missedAudio'),
       notificationDetails: NotificationDetails(
         windows: WindowsNotificationDetails(
           audio: WindowsNotificationAudio.preset(

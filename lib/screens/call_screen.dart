@@ -9,6 +9,7 @@ import 'dart:io';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 
 import '../services/call_service.dart';
+import '../services/private_call_language.dart';
 import '../widgets/call_controls.dart';
 
 class CallScreen extends StatefulWidget {
@@ -99,7 +100,7 @@ class _CallScreenState extends State<CallScreen> {
     return AnimatedBuilder(
       animation: service,
       builder: (context, _) {
-        final peer = service.peerUser ?? 'Собеседник';
+        final peer = service.peerUser ?? PrivateCallLanguage.text('Собеседник');
         final hasRemoteVideo =
             service.isVideo && service.remoteRenderer.srcObject != null;
         final hasLocalVideo =
@@ -222,8 +223,12 @@ class _CallScreenState extends State<CallScreen> {
     return Semantics(
       button: true,
       label: showLocalVideo
-          ? 'Ваше видео. Перетащите или нажмите, чтобы увеличить.'
-          : 'Видео собеседника. Перетащите или нажмите, чтобы увеличить.',
+          ? PrivateCallLanguage.text(
+              'Ваше видео. Перетащите или нажмите, чтобы увеличить.',
+            )
+          : PrivateCallLanguage.text(
+              'Видео собеседника. Перетащите или нажмите, чтобы увеличить.',
+            ),
       child: Container(
         width: size.width,
         height: size.height,
@@ -235,16 +240,20 @@ class _CallScreenState extends State<CallScreen> {
           boxShadow: const [BoxShadow(color: Colors.black54, blurRadius: 18)],
         ),
         child: cameraIsOff
-            ? const Center(
+            ? Center(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.videocam_off_rounded, color: _gold, size: 32),
+                    const Icon(
+                      Icons.videocam_off_rounded,
+                      color: _gold,
+                      size: 32,
+                    ),
                     SizedBox(height: 8),
                     Text(
-                      'Камера\nвыключена',
+                      PrivateCallLanguage.text('Камера\nвыключена'),
                       textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.white, fontSize: 12),
+                      style: const TextStyle(color: Colors.white, fontSize: 12),
                     ),
                   ],
                 ),
@@ -277,7 +286,7 @@ class _CallScreenState extends State<CallScreen> {
           ),
           const SizedBox(height: 6),
           Text(
-            service.statusText,
+            PrivateCallLanguage.text(service.statusText),
             textAlign: TextAlign.center,
             style: TextStyle(
               color: _gold.withValues(alpha: 0.95),
@@ -307,7 +316,7 @@ class _CallScreenState extends State<CallScreen> {
                   ),
                   const SizedBox(width: 6),
                   Text(
-                    service.connectionQualityText,
+                    PrivateCallLanguage.text(service.connectionQualityText),
                     style: const TextStyle(
                       color: Colors.orangeAccent,
                       fontSize: 12,
@@ -320,18 +329,25 @@ class _CallScreenState extends State<CallScreen> {
           ],
           if (service.callE2ee) ...[
             const SizedBox(height: 6),
-            const Row(
+            Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(Icons.lock_rounded, color: Colors.greenAccent, size: 16),
-                SizedBox(width: 5),
+                const Icon(
+                  Icons.lock_rounded,
+                  color: Colors.greenAccent,
+                  size: 16,
+                ),
+                const SizedBox(width: 5),
                 Flexible(
                   child: Text(
-                    'Защищённый звонок',
+                    PrivateCallLanguage.text('Защищённый звонок'),
                     textAlign: TextAlign.center,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: Colors.greenAccent, fontSize: 12),
+                    style: const TextStyle(
+                      color: Colors.greenAccent,
+                      fontSize: 12,
+                    ),
                   ),
                 ),
               ],
@@ -428,8 +444,8 @@ class _CallScreenState extends State<CallScreen> {
       children: [
         CallActionButton(
           icon: Icons.call_end_rounded,
-          label: 'Отклонить',
-          tooltip: 'Отклонить звонок',
+          label: PrivateCallLanguage.text('Отклонить'),
+          tooltip: PrivateCallLanguage.text('Отклонить звонок'),
           color: const Color(0xFFE53935),
           onPressed: () {
             unawaited(service.declineIncoming());
@@ -437,10 +453,10 @@ class _CallScreenState extends State<CallScreen> {
         ),
         CallActionButton(
           icon: service.isVideo ? Icons.videocam_rounded : Icons.call_rounded,
-          label: 'Принять',
+          label: PrivateCallLanguage.text('Принять'),
           tooltip: service.isVideo
-              ? 'Принять видеозвонок'
-              : 'Принять аудиозвонок',
+              ? PrivateCallLanguage.text('Принять видеозвонок')
+              : PrivateCallLanguage.text('Принять аудиозвонок'),
           color: const Color(0xFF32B768),
           onPressed: () {
             unawaited(service.acceptIncoming());
@@ -530,7 +546,7 @@ class _CallerPortraitState extends State<_CallerPortrait>
       ),
     );
     return Semantics(
-      label: 'Аватар: ${widget.name}',
+      label: '${PrivateCallLanguage.text('Аватар: ')}${widget.name}',
       child: AnimatedBuilder(
         animation: _pulse,
         builder: (context, child) => Container(

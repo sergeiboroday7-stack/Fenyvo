@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:fenyvo/screens/call_screen.dart';
 import 'package:fenyvo/services/call_service.dart';
+import 'package:fenyvo/services/app_language_service.dart';
 
 class _PreviewStream implements MediaStream {
   @override
@@ -18,6 +19,7 @@ void main() {
   testWidgets('camera-off preview cannot cover landscape hang-up control', (
     tester,
   ) async {
+    AppLanguageService.instance.code.value = 'ru';
     tester.view.physicalSize = const Size(640, 360);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);

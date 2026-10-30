@@ -3,6 +3,7 @@ import '../theme/fenyvo_theme.dart';
 import 'package:flutter/material.dart';
 
 import '../services/socket_service.dart';
+import '../services/app_language_service.dart';
 
 class GroupAddMembersScreen extends StatefulWidget {
   final Map<String, dynamic> group;
@@ -39,12 +40,18 @@ class _GroupAddMembersScreenState extends State<GroupAddMembersScreen> {
   void initState() {
     super.initState();
     SocketService.instance.addMessageHandler(_handleMessage);
+    AppLanguageService.instance.code.addListener(_onLanguageChanged);
     SocketService.instance.getRegisteredUsers();
+  }
+
+  void _onLanguageChanged() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
     SocketService.instance.removeMessageHandler(_handleMessage);
+    AppLanguageService.instance.code.removeListener(_onLanguageChanged);
     super.dispose();
   }
 
@@ -118,7 +125,7 @@ class _GroupAddMembersScreenState extends State<GroupAddMembersScreen> {
         SnackBar(
           content: Text(
             reason == null || reason.isEmpty
-                ? 'Не удалось добавить участников'
+                ? AppLanguageService.instance.text('groupAddFailed')
                 : reason,
           ),
           backgroundColor: FenyvoPalette.surface,
@@ -141,7 +148,10 @@ class _GroupAddMembersScreenState extends State<GroupAddMembersScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final groupName = widget.group['name']?.toString().trim() ?? 'Группа';
+    final t = AppLanguageService.instance.text;
+    final groupName =
+        widget.group['name']?.toString().trim() ??
+        AppLanguageService.instance.text('group');
 
     return Scaffold(
       backgroundColor: FenyvoPalette.canvas,
@@ -151,8 +161,8 @@ class _GroupAddMembersScreenState extends State<GroupAddMembersScreen> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
-              'Добавить участников',
+            Text(
+              t('groupAddTitle'),
               style: TextStyle(
                 color: _gold,
                 fontWeight: FontWeight.w800,
@@ -178,8 +188,8 @@ class _GroupAddMembersScreenState extends State<GroupAddMembersScreen> {
               padding: const EdgeInsets.fromLTRB(20, 14, 20, 8),
               child: Row(
                 children: [
-                  const Text(
-                    'Новые участники',
+                  Text(
+                    t('groupAddNewMembers'),
                     style: TextStyle(
                       color: FenyvoPalette.ink,
                       fontWeight: FontWeight.w700,
@@ -188,7 +198,9 @@ class _GroupAddMembersScreenState extends State<GroupAddMembersScreen> {
                   ),
                   const Spacer(),
                   Text(
-                    'Выбрано: ${_selectedUsers.length}',
+                    t(
+                      'groupAddSelected',
+                    ).replaceAll('{count}', _selectedUsers.length.toString()),
                     style: const TextStyle(color: _gold),
                   ),
                 ],
@@ -198,11 +210,11 @@ class _GroupAddMembersScreenState extends State<GroupAddMembersScreen> {
               child: _loadingUsers
                   ? const Center(child: CircularProgressIndicator(color: _gold))
                   : _users.isEmpty
-                  ? const Center(
+                  ? Center(
                       child: Padding(
-                        padding: EdgeInsets.all(24),
+                        padding: const EdgeInsets.all(24),
                         child: Text(
-                          'Все зарегистрированные пользователи уже в группе',
+                          t('groupAddNoAvailableUsers'),
                           textAlign: TextAlign.center,
                           style: TextStyle(
                             color: FenyvoPalette.secondary,
@@ -271,10 +283,13 @@ class _GroupAddMembersScreenState extends State<GroupAddMembersScreen> {
                       : const Icon(Icons.person_add_alt_1_rounded),
                   label: Text(
                     _saving
-                        ? 'Добавление...'
+                        ? t('groupAddSaving')
                         : _selectedUsers.isEmpty
-                        ? 'Выберите участников'
-                        : 'Добавить (${_selectedUsers.length})',
+                        ? t('groupAddSelectMembers')
+                        : t('groupAddCount').replaceAll(
+                            '{count}',
+                            _selectedUsers.length.toString(),
+                          ),
                   ),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: FenyvoPalette.blue,

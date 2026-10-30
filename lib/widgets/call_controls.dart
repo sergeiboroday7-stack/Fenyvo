@@ -2,6 +2,8 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import '../services/private_call_language.dart';
+
 /// Presentation only: media tracks and call lifecycle remain in CallService.
 class CallControls extends StatelessWidget {
   const CallControls({
@@ -38,11 +40,13 @@ class CallControls extends StatelessWidget {
           icon: speakerphoneEnabled
               ? Icons.volume_up_rounded
               : Icons.hearing_rounded,
-          label: 'Громкая связь',
-          status: speakerphoneEnabled ? 'Включена' : 'Выключена',
+          label: PrivateCallLanguage.text('Громкая связь'),
+          status: speakerphoneEnabled
+              ? PrivateCallLanguage.text('Включена')
+              : PrivateCallLanguage.text('Выключена'),
           tooltip: speakerphoneEnabled
-              ? 'Выключить громкую связь'
-              : 'Включить громкую связь',
+              ? PrivateCallLanguage.text('Выключить громкую связь')
+              : PrivateCallLanguage.text('Включить громкую связь'),
           toggled: speakerphoneEnabled,
           highlighted: speakerphoneEnabled,
           onPressed: onSpeakerphone!,
@@ -50,9 +54,13 @@ class CallControls extends StatelessWidget {
       CallActionButton(
         key: const ValueKey('call-microphone-action'),
         icon: microphoneEnabled ? Icons.mic_rounded : Icons.mic_off_rounded,
-        label: 'Микрофон',
-        status: microphoneEnabled ? 'Включён' : 'Выключен',
-        tooltip: microphoneEnabled ? 'Выключить микрофон' : 'Включить микрофон',
+        label: PrivateCallLanguage.text('Микрофон'),
+        status: microphoneEnabled
+            ? PrivateCallLanguage.text('Включён')
+            : PrivateCallLanguage.text('Выключен'),
+        tooltip: microphoneEnabled
+            ? PrivateCallLanguage.text('Выключить микрофон')
+            : PrivateCallLanguage.text('Включить микрофон'),
         toggled: microphoneEnabled,
         highlighted: !microphoneEnabled,
         onPressed: onMicrophone,
@@ -63,9 +71,13 @@ class CallControls extends StatelessWidget {
           icon: cameraEnabled
               ? Icons.videocam_rounded
               : Icons.videocam_off_rounded,
-          label: 'Камера',
-          status: cameraEnabled ? 'Включена' : 'Выключена',
-          tooltip: cameraEnabled ? 'Выключить камеру' : 'Включить камеру',
+          label: PrivateCallLanguage.text('Камера'),
+          status: cameraEnabled
+              ? PrivateCallLanguage.text('Включена')
+              : PrivateCallLanguage.text('Выключена'),
+          tooltip: cameraEnabled
+              ? PrivateCallLanguage.text('Выключить камеру')
+              : PrivateCallLanguage.text('Включить камеру'),
           toggled: cameraEnabled,
           highlighted: !cameraEnabled,
           onPressed: onCamera,
@@ -74,15 +86,15 @@ class CallControls extends StatelessWidget {
         CallActionButton(
           key: const ValueKey('call-switch-camera-action'),
           icon: Icons.cameraswitch_rounded,
-          label: 'Сменить\nкамеру',
-          tooltip: 'Переключить на другую камеру',
+          label: PrivateCallLanguage.text('Сменить\nкамеру'),
+          tooltip: PrivateCallLanguage.text('Переключить на другую камеру'),
           onPressed: onSwitchCamera,
         ),
       CallActionButton(
         key: const ValueKey('call-hang-up-action'),
         icon: Icons.call_end_rounded,
-        label: 'Завершить',
-        tooltip: 'Завершить звонок',
+        label: PrivateCallLanguage.text('Завершить'),
+        tooltip: PrivateCallLanguage.text('Завершить звонок'),
         color: const Color(0xFFE53935),
         onPressed: onHangUp,
       ),

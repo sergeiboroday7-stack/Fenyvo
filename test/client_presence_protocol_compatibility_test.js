@@ -9,6 +9,10 @@ const source = fs.readFileSync(
   path.join(__dirname, '..', 'lib', 'screens', 'chat_list_screen.dart'),
   'utf8'
 );
+const languageSource = fs.readFileSync(
+  path.join(__dirname, '..', 'lib', 'services', 'app_language_service.dart'),
+  'utf8'
+);
 
 const usersStart = source.indexOf("if (type == 'users')");
 const statusStart = source.indexOf("if (type == 'user_status')", usersStart);
@@ -30,4 +34,18 @@ test('point presence updates remain active for old and new servers', () => {
     statusHandler,
     /_presence\.updateUser\(username, online: data\['online'\] == true\)/
   );
+});
+test('command deck shows the real presence count instead of chat totals', () => {
+  assert.match(source, /final onlineCount = _onlineUsers\.length;/);
+  assert.match(source, /'\$onlineCount'/);
+  assert.doesNotMatch(source, /'\$contactCount · \$eventCount'/);
+});
+
+test('online count tooltip describes presence instead of server statistics', () => {
+  assert.match(source, /_tr\('onlinePeopleDetails', \{\s*'people': onlineCount,\s*\}\)/);
+});
+test('Russian and Ukrainian navigation distinguish chats from online presence', () => {
+  assert.match(languageSource, /'connection': 'ЧАТЫ'/);
+  assert.match(languageSource, /'connection': 'ЧАТИ'/);
+  assert.equal((languageSource.match(/'connectedShort': 'ОНЛАЙН'/g) || []).length, 2);
 });
