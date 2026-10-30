@@ -280,7 +280,7 @@ Fenyvo находится в активной разработке.
 
 На текущем этапе подтверждены:
 
-- релиз-кандидат Android и Windows 1.8.2 / 4251;
+- публичные Android и Windows пакеты 1.8.2 / 4254;
 - package `com.fenyvo.app`;
 - постоянная Android release-подпись;
 - Firebase client для `com.fenyvo.app`;
