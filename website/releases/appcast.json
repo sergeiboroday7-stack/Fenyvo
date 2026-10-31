@@ -1,65 +1,62 @@
 {
   "schemaVersion": 1,
-  "publishedAt": "2026-10-29T18:08:30Z",
+  "publishedAt": "2026-10-30T15:22:57Z",
   "platforms": {
     "android": {
       "version": "1.8.2",
-      "build": 4254,
+      "build": 4255,
       "minimumSupportedBuild": 0,
       "downloadUrl": "https://fenyvo.com/download/Fenyvo-1.8.2-arm64.apk",
-      "sha256": "f0b8965a7f792952253940a1b2dc4335ad8fadf4cd4301c779257b1b6e4f72ab",
-      "sizeBytes": 77686145,
-      "publishedAt": "2026-10-29T18:08:29Z",
+      "sha256": "2d95d54b6fe0a9a7d85129deb7c7674ca4621eccb47d80b597fb4c9c5176220a",
+      "sizeBytes": 77751681,
+      "publishedAt": "2026-10-30T15:22:57Z",
       "notes": {
         "ru": [
-          "Возвращены поиск сообщений и защита экрана в личном чате.",
-          "Усилены доставка сообщений, защита от повторов и приватность статуса.",
-          "Добавлено безопасное восстановление доступа через 12 секретных слов.",
-          "Это тестовый релиз: о проблемах можно сообщить через поддержку Fenyvo."
+          "Исправлено отображение статуса онлайн при первом подключении и последующих изменениях в чатах и контактах.",
+          "Индикатор «ОНЛАЙН» теперь показывает фактическое число пользователей в сети.",
+          "После выхода пользователя статус онлайн исчезает примерно через одну секунду без ложного мигания.",
+          "Поиск сообщений, защита экрана и восстановление доступа к аккаунту остаются доступными."
         ],
         "uk": [
-          "Повернено пошук повідомлень і захист екрана в особистому чаті.",
-          "Посилено доставку повідомлень, захист від повторів і приватність статусу.",
-          "Додано безпечне відновлення доступу за 12 секретними словами.",
-          "Це тестовий реліз: про проблеми можна повідомити через підтримку Fenyvo."
+          "Виправлено відображення статусу онлайн під час першого підключення та подальших змін у чатах і контактах.",
+          "Індикатор «ОНЛАЙН» тепер показує фактичну кількість користувачів у мережі.",
+          "Після виходу користувача статус онлайн зникає приблизно через одну секунду без хибного блимання.",
+          "Пошук повідомлень, захист екрана та відновлення доступу до облікового запису залишаються доступними."
         ],
         "en": [
-          "Restored message search and screen protection in private chats.",
-          "Hardened message delivery, deduplication, and presence privacy.",
-          "Added secure 12-word account recovery.",
-          "This is a test release; report issues through Fenyvo Support."
+          "Fixed initial and subsequent online presence in chats and contacts.",
+          "The ONLINE indicator now shows the actual number of present users.",
+          "Presence turns off about one second after exit without false flicker.",
+          "Message search, screen protection, and account recovery remain available."
         ]
       }
     },
     "windows": {
       "version": "1.8.2",
-      "build": 4254,
+      "build": 4255,
       "minimumSupportedBuild": 0,
       "downloadUrl": "https://fenyvo.com/download/Fenyvo-1.8.2-windows-x64.zip",
-      "sha256": "1b7d012c8d8f25db8dc48eacb130b4c3c883d5b3a5273aea5dff772a92d4048f",
-      "sizeBytes": 31490214,
-      "publishedAt": "2026-10-29T18:08:30Z",
+      "sha256": "62bd7926be000ab0a96336044477a235d274e92cab7a6f039443ffc56926f60f",
+      "sizeBytes": 31505939,
+      "publishedAt": "2026-10-30T15:22:57Z",
       "notes": {
         "ru": [
-          "Исправлено автоматическое возвращение ведущего в групповой эфир.",
-          "После возвращения восстанавливаются камера ведущего и звук для участников.",
-          "Добавлено безопасное автоматическое обновление Windows с проверкой SHA-256 и аварийным откатом.",
-          "Установщик обновляет приложение и ярлыки рабочего стола и меню Пуск.",
-          "Это тестовый релиз: о проблемах можно сообщить через поддержку Fenyvo."
+          "Исправлено отображение статуса онлайн при первом подключении и последующих изменениях в чатах и контактах.",
+          "Индикатор «ОНЛАЙН» теперь показывает фактическое число пользователей в сети.",
+          "После выхода пользователя статус онлайн исчезает примерно через одну секунду без ложного мигания.",
+          "Поиск сообщений, защита экрана и восстановление доступа к аккаунту остаются доступными."
         ],
         "uk": [
-          "Виправлено автоматичне повернення ведучого до групового ефіру.",
-          "Після повернення відновлюються камера ведучого та звук для учасників.",
-          "Додано безпечне автоматичне оновлення Windows із перевіркою SHA-256 та аварійним відкатом.",
-          "Інсталятор оновлює застосунок і ярлики робочого столу та меню Пуск.",
-          "Це тестовий реліз: про проблеми можна повідомити через підтримку Fenyvo."
+          "Виправлено відображення статусу онлайн під час першого підключення та подальших змін у чатах і контактах.",
+          "Індикатор «ОНЛАЙН» тепер показує фактичну кількість користувачів у мережі.",
+          "Після виходу користувача статус онлайн зникає приблизно через одну секунду без хибного блимання.",
+          "Пошук повідомлень, захист екрана та відновлення доступу до облікового запису залишаються доступними."
         ],
         "en": [
-          "Fixed automatic host return to a group live session.",
-          "The host camera and participant audio recover after returning.",
-          "Added safe automatic Windows updates with SHA-256 verification and emergency rollback.",
-          "The installer refreshes the app, Desktop, and Start Menu shortcuts.",
-          "This is a test release; report issues through Fenyvo Support."
+          "Fixed initial and subsequent online presence in chats and contacts.",
+          "The ONLINE indicator now shows the actual number of present users.",
+          "Presence turns off about one second after exit without false flicker.",
+          "Message search, screen protection, and account recovery remain available."
         ]
       }
     }

@@ -832,11 +832,15 @@ class _GroupCallScreenState extends State<GroupCallScreen> with RouteAware {
 
     try {
       if (!SocketService.instance.isConnected) {
-        throw Exception('Нет соединения с сервером');
+        throw Exception(
+          AppLanguageService.instance.text('groupCallServerDisconnected'),
+        );
       }
 
       if (!MediaTransferService.isReady) {
-        throw Exception('Медиа-сервер не готов. Перезайдите в аккаунт.');
+        throw Exception(
+          AppLanguageService.instance.text('groupCallMediaServerNotReady'),
+        );
       }
 
       final fileName = path.split(Platform.pathSeparator).last;

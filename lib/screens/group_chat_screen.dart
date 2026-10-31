@@ -94,7 +94,9 @@ class _InlineGroupVideoState extends State<_InlineGroupVideo> {
           final cached = await MediaCacheService.cacheRemoteMedia(mediaMessage);
           final cachedPath = MediaCacheService.existingLocalPath(cached);
           if (cachedPath == null || !File(cachedPath).existsSync()) {
-            throw StateError('Видео не удалось скачать в кэш');
+            throw StateError(
+              AppLanguageService.instance.text('groupChatVideoCacheFailed'),
+            );
           }
           file = File(cachedPath);
           controller = VideoPlayerController.file(file);
@@ -109,7 +111,9 @@ class _InlineGroupVideoState extends State<_InlineGroupVideo> {
           } else {
             final bytes = widget.bytes;
             if (bytes == null || bytes.isEmpty) {
-              throw StateError('Видео недоступно');
+              throw StateError(
+                AppLanguageService.instance.text('groupChatVideoUnavailable'),
+              );
             }
             final temp = await getTemporaryDirectory();
             final safeName = widget.fileName
@@ -1050,7 +1054,9 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
           path = MediaCacheService.existingLocalPath(prepared);
         }
         if (path == null) {
-          throw StateError('Вложение недоступно');
+          throw StateError(
+            AppLanguageService.instance.text('groupChatAttachmentUnavailable'),
+          );
         }
 
         final fileName = _safeFileName(_attachmentName(prepared));
@@ -1147,9 +1153,9 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
         : messageType == 'voice'
         ? AppLanguageService.instance.text('groupCallVoiceMessage')
         : messageType == 'image'
-        ? '📷 Фото'
+        ? AppLanguageService.instance.text('groupChatDisplayPhoto')
         : messageType == 'video'
-        ? '🎥 Видео'
+        ? AppLanguageService.instance.text('groupChatDisplayVideo')
         : messageType == 'file'
         ? '📎 ${_attachmentName(message)}'
         : '';

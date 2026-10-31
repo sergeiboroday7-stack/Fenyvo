@@ -1,3 +1,5 @@
+import '../services/app_language_service.dart';
+
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -17,7 +19,7 @@ class SplashScreen extends StatefulWidget {
 class _SplashScreenState extends State<SplashScreen>
     with SingleTickerProviderStateMixin {
   late final AnimationController _orbitController;
-  String _statusText = 'Подготовка приложения...';
+  String _statusText = AppLanguageService.instance.text('splashPreparing');
 
   bool _isLoading = true;
 
@@ -70,7 +72,7 @@ class _SplashScreenState extends State<SplashScreen>
     }
 
     setState(() {
-      _statusText = 'Подключение к серверу...';
+      _statusText = AppLanguageService.instance.text('splashConnecting');
     });
 
     final url = ServerConfig.websocketUri.toString();
@@ -82,13 +84,15 @@ class _SplashScreenState extends State<SplashScreen>
     }
 
     if (!connected) {
-      await _showErrorAndGoToAuth('Не удалось подключиться к серверу');
+      await _showErrorAndGoToAuth(
+        AppLanguageService.instance.text('splashConnectionFailed'),
+      );
 
       return;
     }
 
     setState(() {
-      _statusText = 'Автоматический вход...';
+      _statusText = AppLanguageService.instance.text('splashAutoLogin');
     });
 
     SocketService.instance.login(username, password);
@@ -116,7 +120,9 @@ class _SplashScreenState extends State<SplashScreen>
     }
 
     if (type == 'login_error') {
-      final reason = data['reason']?.toString() ?? 'Ошибка входа';
+      final reason =
+          data['reason']?.toString() ??
+          AppLanguageService.instance.text('splashLoginFailed');
 
       _showErrorAndGoToAuth(reason);
 
@@ -125,7 +131,8 @@ class _SplashScreenState extends State<SplashScreen>
 
     if (type == 'disconnected') {
       final reason =
-          data['reason']?.toString() ?? 'Соединение с сервером потеряно';
+          data['reason']?.toString() ??
+          AppLanguageService.instance.text('splashDisconnected');
 
       _showErrorAndGoToAuth(reason);
     }
@@ -167,7 +174,7 @@ class _SplashScreenState extends State<SplashScreen>
     _hasNavigated = true;
 
     setState(() {
-      _statusText = 'Вход выполнен!';
+      _statusText = AppLanguageService.instance.text('splashLoginSuccess');
     });
 
     Navigator.pushReplacement(

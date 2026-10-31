@@ -1,3 +1,5 @@
+import '../services/app_language_service.dart';
+
 import 'dart:async';
 
 import 'package:flutter/material.dart';
@@ -28,9 +30,9 @@ class _RecoverySetupScreenState extends State<RecoverySetupScreen> {
     super.initState();
     _registered = _socket.recoveryConfigured == true;
     if (_registered) {
-      _status =
-          'Слова восстановления уже привязаны к этому аккаунту. '
-          'Сохранённые слова повторно не показываются.';
+      _status = AppLanguageService.instance.text(
+        'recoverySetupAlreadyRegisteredMessage',
+      );
     }
     _socket.addMessageHandler(_onMessage);
   }
@@ -72,14 +74,17 @@ class _RecoverySetupScreenState extends State<RecoverySetupScreen> {
     if (type == 'recovery_key_registered') {
       _socket.recoveryConfigured = true;
       _finish(
-        'Ключ привязан к аккаунту. Сохраните все 12 слов: после выхода '
-        'с этого экрана они больше не будут показаны.',
+        AppLanguageService.instance.text('recoverySetupBindingCompleteMessage'),
         registered: true,
       );
     } else if (type == 'recovery_key_error') {
       final data = message['data'];
       final reason = data is Map ? data['reason'] : null;
-      _finish(reason is String ? reason : 'Не удалось привязать ключ.');
+      _finish(
+        reason is String
+            ? reason
+            : AppLanguageService.instance.text('recoverySetupBindFailed'),
+      );
     }
   }
 
@@ -93,13 +98,15 @@ class _RecoverySetupScreenState extends State<RecoverySetupScreen> {
     }
     if (!_socket.isAuthenticated) {
       setState(
-        () => _status = 'Сначала войдите в аккаунт и подключитесь к серверу.',
+        () => _status = AppLanguageService.instance.text(
+          'recoverySetupLoginRequired',
+        ),
       );
       return;
     }
     setState(() {
       _busy = true;
-      _status = 'Подготавливаем публичный ключ...';
+      _status = AppLanguageService.instance.text('recoverySetupPreparingKey');
     });
     try {
       final phrase = _phrase!;
@@ -113,41 +120,45 @@ class _RecoverySetupScreenState extends State<RecoverySetupScreen> {
           .join();
       if (!mounted || !_busy) return;
       if (!_socket.registerRecoveryKey(publicKeyHex: hex, password: password)) {
-        _finish('Не удалось отправить запрос. Проверьте соединение.');
+        _finish(AppLanguageService.instance.text('recoverySetupRequestFailed'));
         return;
       }
-      setState(() => _status = 'Ожидаем подтверждение сервера...');
+      setState(
+        () => _status = AppLanguageService.instance.text(
+          'recoverySetupWaitingForServer',
+        ),
+      );
       _timeout?.cancel();
       _timeout = Timer(const Duration(seconds: 45), () {
-        _finish(
-          'Сервер не ответил. Проверьте состояние привязки перед повторной попыткой.',
-        );
+        _finish(AppLanguageService.instance.text('recoverySetupServerTimeout'));
       });
     } catch (_) {
-      _finish('Не удалось подготовить ключ восстановления.');
+      _finish(AppLanguageService.instance.text('recoverySetupPrepareFailed'));
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('Слова восстановления')),
+      appBar: AppBar(
+        title: Text(AppLanguageService.instance.text('recoverySetupTitle')),
+      ),
       body: SafeArea(
         child: ListView(
           padding: const EdgeInsets.all(20),
           children: [
-            const Text(
-              'Создайте 12 секретных слов и сохраните их в безопасном месте. '
-              'Они понадобятся, если вы забудете пароль. '
-              'Никому не сообщайте эти слова: они не передаются серверу.',
-            ),
+            Text(AppLanguageService.instance.text('recoverySetupIntroduction')),
             const SizedBox(height: 20),
             FilledButton(
               onPressed: _busy || _registered ? null : _generate,
               child: Text(
                 _registered
-                    ? 'Слова уже привязаны'
-                    : 'Создать 12 секретных слов',
+                    ? AppLanguageService.instance.text(
+                        'recoverySetupAlreadyBound',
+                      )
+                    : AppLanguageService.instance.text(
+                        'recoverySetupCreateWords',
+                      ),
               ),
             ),
             if (_phrase != null) ...[
@@ -162,9 +173,13 @@ class _RecoverySetupScreenState extends State<RecoverySetupScreen> {
                 onChanged: _busy || _registered
                     ? null
                     : (value) => setState(() => _confirmed = value ?? false),
-                title: const Text('Я сохранил(а) все 12 слов'),
-                subtitle: const Text(
-                  'Без этих слов восстановить забытый пароль будет невозможно.',
+                title: Text(
+                  AppLanguageService.instance.text(
+                    'recoverySetupSavedConfirmation',
+                  ),
+                ),
+                subtitle: Text(
+                  AppLanguageService.instance.text('recoverySetupWordsWarning'),
                 ),
               ),
               const SizedBox(height: 12),
@@ -175,8 +190,10 @@ class _RecoverySetupScreenState extends State<RecoverySetupScreen> {
                 obscureText: true,
                 autocorrect: false,
                 enableSuggestions: false,
-                decoration: const InputDecoration(
-                  labelText: 'Действующий пароль аккаунта',
+                decoration: InputDecoration(
+                  labelText: AppLanguageService.instance.text(
+                    'recoverySetupCurrentPassword',
+                  ),
                 ),
               ),
               const SizedBox(height: 20),
@@ -190,10 +207,14 @@ class _RecoverySetupScreenState extends State<RecoverySetupScreen> {
                     : null,
                 child: Text(
                   _registered
-                      ? 'Ключ зарегистрирован'
+                      ? AppLanguageService.instance.text(
+                          'recoverySetupKeyRegistered',
+                        )
                       : _busy
-                      ? 'Привязка...'
-                      : 'Привязать слова к аккаунту',
+                      ? AppLanguageService.instance.text('recoverySetupBinding')
+                      : AppLanguageService.instance.text(
+                          'recoverySetupBindWords',
+                        ),
                 ),
               ),
               const SizedBox(height: 12),

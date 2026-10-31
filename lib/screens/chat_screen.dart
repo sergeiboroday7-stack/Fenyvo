@@ -2086,7 +2086,7 @@ class _ChatScreenState extends State<ChatScreen>
           SnackBar(
             content: Text(
               data['reason']?.toString() ??
-                  'Защищённое сообщение не отправлено',
+                  AppLanguageService.instance.text('chatSecureSendFailed'),
             ),
           ),
         );
@@ -2361,11 +2361,15 @@ class _ChatScreenState extends State<ChatScreen>
         ? raw.toInt()
         : int.tryParse(raw?.toString() ?? '') ?? 0;
     if (bytes <= 0) return '';
-    if (bytes < 1024) return '$bytes Б';
+    if (bytes < 1024)
+      return '$bytes ' + AppLanguageService.instance.text('chatSizeBytes');
     final kb = bytes / 1024;
-    if (kb < 1024) return '${kb.toStringAsFixed(kb >= 100 ? 0 : 1)} КБ';
+    if (kb < 1024)
+      return '${kb.toStringAsFixed(kb >= 100 ? 0 : 1)} ' +
+          AppLanguageService.instance.text('chatSizeKilobytes');
     final mb = kb / 1024;
-    return '${mb.toStringAsFixed(mb >= 100 ? 0 : 1)} МБ';
+    return '${mb.toStringAsFixed(mb >= 100 ? 0 : 1)} ' +
+        AppLanguageService.instance.text('chatSizeMegabytes');
   }
 
   void _privateMediaSnack(String text) {
@@ -2427,7 +2431,7 @@ class _ChatScreenState extends State<ChatScreen>
               ),
               item(
                 Icons.person_outline_rounded,
-                'Контакт',
+                AppLanguageService.instance.text('chatContact'),
                 _showShareContactPicker,
               ),
             ],
@@ -2457,7 +2461,9 @@ class _ChatScreenState extends State<ChatScreen>
 
     if (!mounted) return;
     if (users.isEmpty) {
-      _privateMediaSnack('Контакты не найдены');
+      _privateMediaSnack(
+        AppLanguageService.instance.text('chatContactsNotFound'),
+      );
       return;
     }
 
@@ -2470,10 +2476,10 @@ class _ChatScreenState extends State<ChatScreen>
           height: MediaQuery.of(sheetContext).size.height * .65,
           child: Column(
             children: [
-              const Padding(
+              Padding(
                 padding: EdgeInsets.fromLTRB(16, 8, 16, 12),
                 child: Text(
-                  'Поделиться контактом',
+                  AppLanguageService.instance.text('chatShareContact'),
                   style: TextStyle(
                     color: FenyvoPalette.ink,
                     fontSize: 20,
@@ -3309,7 +3315,9 @@ class _ChatScreenState extends State<ChatScreen>
     try {
       final fileSize = await file.length();
       if (fileSize > 20 * 1024 * 1024) {
-        _privateMediaSnack('Голосовое слишком большое');
+        _privateMediaSnack(
+          AppLanguageService.instance.text('chatVoiceTooLarge'),
+        );
         return;
       }
 
@@ -3447,7 +3455,9 @@ class _ChatScreenState extends State<ChatScreen>
         : await MediaCacheService.cacheEmbeddedMedia(message);
     final path = MediaCacheService.existingLocalPath(cached);
     if (path == null) {
-      throw StateError('Голосовое сообщение недоступно');
+      throw StateError(
+        AppLanguageService.instance.text('chatVoiceUnavailable'),
+      );
     }
     return path;
   }
@@ -3758,7 +3768,7 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   Widget _buildVoiceRecordButton() => Tooltip(
-    message: 'Нажмите или удерживайте для записи',
+    message: AppLanguageService.instance.text('chatHoldToRecord'),
     child: GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: () => unawaited(_startLockedVoiceRecording()),
@@ -7728,7 +7738,9 @@ class _ChatScreenState extends State<ChatScreen>
       }
     } else {
       if (!MediaTransferService.isReady) {
-        _privateMediaSnack('Медиа-сервер не готов. Перезайдите в аккаунт.');
+        _privateMediaSnack(
+          AppLanguageService.instance.text('chatMediaServerNotReady'),
+        );
         return;
       }
 
@@ -7746,7 +7758,9 @@ class _ChatScreenState extends State<ChatScreen>
           path = MediaCacheService.existingLocalPath(prepared);
         }
         if (path == null) {
-          throw StateError('Вложение недоступно');
+          throw StateError(
+            AppLanguageService.instance.text('chatAttachmentUnavailable'),
+          );
         }
 
         final fileName = _privateSafeFileName(_privateAttachmentName(prepared));
@@ -7808,7 +7822,10 @@ class _ChatScreenState extends State<ChatScreen>
           }
         }
       } catch (error) {
-        _privateMediaSnack('Не удалось переслать: $error');
+        _privateMediaSnack(
+          AppLanguageService.instance.text('chatForwardFailurePrefix') +
+              error.toString(),
+        );
         return;
       } finally {
         if (mounted) {
@@ -7824,8 +7841,10 @@ class _ChatScreenState extends State<ChatScreen>
       SnackBar(
         content: Text(
           recipients.length == 1
-              ? 'Сообщение переслано'
-              : 'Отправлено получателям: ${recipients.length}',
+              ? AppLanguageService.instance.text('chatMessageForwarded')
+              : AppLanguageService.instance
+                    .text('chatSentToRecipients')
+                    .replaceAll('{count}', recipients.length.toString()),
         ),
         backgroundColor: FenyvoPalette.surface,
       ),
@@ -8121,7 +8140,10 @@ class _ChatScreenState extends State<ChatScreen>
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              '\u21AA \u041F\u0435\u0440\u0435\u0441\u043B\u0430\u043D\u043E \u043E\u0442 $forwardedFrom',
+                              '\u21AA ' +
+                                  AppLanguageService.instance
+                                      .text('chatForwardedFromPeerLabelV2')
+                                      .replaceAll('{user}', forwardedFrom),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
@@ -9384,7 +9406,9 @@ class _ChatScreenState extends State<ChatScreen>
                             const SizedBox(width: 4),
                             Flexible(
                               child: Text(
-                                '\u041F\u0435\u0440\u0435\u0441\u043B\u0430\u043D\u043E \u043E\u0442 $forwardedFrom',
+                                AppLanguageService.instance
+                                    .text('chatForwardedFromPeerLabelV2')
+                                    .replaceAll('{user}', forwardedFrom),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
@@ -9439,7 +9463,11 @@ class _ChatScreenState extends State<ChatScreen>
                             const SizedBox(width: 4),
                             Flexible(
                               child: Text(
-                                from.isNotEmpty ? from : 'Комментарий',
+                                from.isNotEmpty
+                                    ? from
+                                    : AppLanguageService.instance.text(
+                                        'chatCommentFallback',
+                                      ),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: TextStyle(
@@ -9472,7 +9500,9 @@ class _ChatScreenState extends State<ChatScreen>
                           child: Align(
                             alignment: Alignment.centerRight,
                             child: Tooltip(
-                              message: 'Переслать медиа',
+                              message: AppLanguageService.instance.text(
+                                'chatForwardMedia',
+                              ),
                               child: InkWell(
                                 borderRadius: BorderRadius.circular(12),
                                 onTap: () =>
@@ -9507,7 +9537,9 @@ class _ChatScreenState extends State<ChatScreen>
                                       ),
                                       const SizedBox(width: 5),
                                       Text(
-                                        'Переслать',
+                                        AppLanguageService.instance.text(
+                                          'chatForward',
+                                        ),
                                         style: TextStyle(
                                           color: isMe
                                               ? FenyvoPalette.ink
@@ -9596,7 +9628,9 @@ class _ChatScreenState extends State<ChatScreen>
                               (isVoiceMessage || isPrivateMediaMessage)) ...[
                             const SizedBox(width: 5),
                             Tooltip(
-                              message: 'Переслать',
+                              message: AppLanguageService.instance.text(
+                                'chatForward',
+                              ),
                               child: InkWell(
                                 borderRadius: BorderRadius.circular(15),
                                 onTap: () =>
