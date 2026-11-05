@@ -50,7 +50,7 @@ if ($RequireFlutterReady) {
 
     $arguments = @(
         "--fenyvo-update-token=$token",
-        "--fenyvo-update-ready-file=$readyFile"
+        ("`"--fenyvo-update-ready-file=$readyFile`"")
     )
 }
 

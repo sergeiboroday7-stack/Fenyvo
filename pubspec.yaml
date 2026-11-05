@@ -2,7 +2,7 @@ name: fenyvo
 description: Fenyvo messenger for Android and Windows
 publish_to: "none"
 
-version: 1.8.2+4255
+version: 1.8.2+4256
 environment:
   sdk: ">=3.13.0 <4.0.0"
 

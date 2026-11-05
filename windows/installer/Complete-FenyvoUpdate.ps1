@@ -18,6 +18,12 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+# Record controller output independently of the launching process.
+# The transcript is stored beside the detached controller scripts.
+$transcriptPath = Join-Path $PSScriptRoot 'controller.transcript.log'
+Start-Transcript -LiteralPath $transcriptPath -Force -ErrorAction Stop | Out-Null
+
+
 $install = [IO.Path]::GetFullPath($InstallPath).TrimEnd('\')
 $staged = [IO.Path]::GetFullPath($StagedPath).TrimEnd('\')
 
@@ -83,7 +89,7 @@ Write-Host 'UPDATE FILES INSTALLED'
 try {
     & $launch `
         -InstallPath $install `
-        -ObservationSeconds 15
+        -ObservationSeconds 15 -RequireFlutterReady
 }
 catch {
     $launchError = $_
@@ -114,13 +120,59 @@ Write-Host 'UPDATED FENYVO LAUNCH VERIFIED'
 $backup = $install + '.rollback'
 
 if ([IO.Directory]::Exists($backup)) {
-    try {
-        Remove-Item -LiteralPath $backup -Recurse -Force -ErrorAction Stop
-        Write-Host 'ROLLBACK BACKUP CLEANED'
+    # Check the active backup and every parent for reparse points.
+    $current = $backup
+
+    while ($true) {
+        if ([IO.Directory]::Exists($current)) {
+            $item = Get-Item -LiteralPath $current -Force
+
+            if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw "Reparse point rejected during cleanup: $current"
+            }
+        }
+        elseif ([IO.File]::Exists($current)) {
+            throw "File found in cleanup path: $current"
+        }
+
+        $parent = [IO.Path]::GetDirectoryName($current)
+
+        if ([string]::IsNullOrEmpty($parent) -or
+            [string]::Equals(
+                $parent,
+                $current,
+                [StringComparison]::OrdinalIgnoreCase
+            )) {
+            break
+        }
+
+        $current = $parent
     }
-    catch {
-        Write-Warning "Update succeeded but rollback backup could not be removed: $($_.Exception.Message)"
+
+    if (-not [IO.File]::Exists((Join-Path $backup 'fenyvo.exe'))) {
+        throw 'Rollback backup executable missing; cleanup refused'
     }
+
+    # The new build already passed its Flutter first-frame check.
+    # Move the previous build out of the active rollback path first.
+    $archived = $install + '.rollback-completed-' +
+        [guid]::NewGuid().ToString('N')
+
+    if ([IO.Directory]::Exists($archived) -or
+        [IO.File]::Exists($archived)) {
+        throw 'Completed rollback archive destination already exists'
+    }
+
+    [IO.Directory]::Move($backup, $archived)
+
+    Write-Host 'ROLLBACK BACKUP MOVED OUT OF ACTIVE PATH'
+
+    # Keep the completed backup for recovery instead of recursively deleting it.
+    # The active .rollback path is already free for the next update.
+    Write-Host "COMPLETED ROLLBACK BACKUP PRESERVED: $archived"
+}
+elseif ([IO.File]::Exists($backup)) {
+    throw 'Rollback path is a file; cleanup refused'
 }
 
 Write-Host 'UPDATE TRANSACTION COMPLETE' -ForegroundColor Green

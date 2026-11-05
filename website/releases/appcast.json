@@ -1,15 +1,15 @@
 {
   "schemaVersion": 1,
-  "publishedAt": "2026-10-30T15:22:57Z",
+  "publishedAt": "2026-11-04T12:22:01.466904Z",
   "platforms": {
     "android": {
       "version": "1.8.2",
-      "build": 4255,
+      "build": 6259,
       "minimumSupportedBuild": 0,
       "downloadUrl": "https://fenyvo.com/download/Fenyvo-1.8.2-arm64.apk",
-      "sha256": "2d95d54b6fe0a9a7d85129deb7c7674ca4621eccb47d80b597fb4c9c5176220a",
-      "sizeBytes": 77751681,
-      "publishedAt": "2026-10-30T15:22:57Z",
+      "sha256": "20c3d72c70aaf29624b8b63ff308460691da7811444fcb35fe027c34ba6b3abe",
+      "sizeBytes": 77817217,
+      "publishedAt": "2026-11-04T12:22:01.466904Z",
       "notes": {
         "ru": [
           "Исправлено отображение статуса онлайн при первом подключении и последующих изменениях в чатах и контактах.",
@@ -33,11 +33,11 @@
     },
     "windows": {
       "version": "1.8.2",
-      "build": 4255,
+      "build": 4256,
       "minimumSupportedBuild": 0,
       "downloadUrl": "https://fenyvo.com/download/Fenyvo-1.8.2-windows-x64.zip",
-      "sha256": "62bd7926be000ab0a96336044477a235d274e92cab7a6f039443ffc56926f60f",
-      "sizeBytes": 31505939,
+      "sha256": "eab47d944ad369857837adb163e2477d38aa05040aec3a7bc59cb7b6ea26ee28",
+      "sizeBytes": 31519845,
       "publishedAt": "2026-10-30T15:22:57Z",
       "notes": {
         "ru": [

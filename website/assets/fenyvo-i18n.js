@@ -6,7 +6,7 @@
 
   const messages = {
     ru: {
-      galleryKicker: 'FENYVO 1.8.2+4254',
+      galleryKicker: 'FENYVO 1.8.2',
       galleryTitle: 'FENYVO в действии',
       galleryIntro: 'Настоящие скриншоты приложения на Android и Windows. Нажмите на изображение, чтобы открыть его крупнее.',
       galleryNote: 'Реальные экраны приложения с демонстрационными именами.',
@@ -36,7 +36,7 @@
       contactHelp: 'Если Fenyvo уже установлен, откройте карточку пользователя. Если приложения нет — установите его, вернитесь на эту страницу и нажмите «Открыть контакт» ещё раз.',
       openContact: 'Открыть контакт в Fenyvo',
       downloadAndroid: 'Скачать для Android',
-      publicVersion: 'Тестовая версия 1.8.2 · Android 4255 · Windows 4255',
+      publicVersion: 'Тестовая версия 1.8.2 · Android 6259 · Windows 4256',
       heroLeadA: 'Общение без',
       heroLeadB: 'лишнего шума',
       heroDescription: 'Личные и групповые чаты, файлы, голосовые сообщения, аудио- и видеозвонки — в одном приложении Fenyvo.',
@@ -173,7 +173,7 @@
       contactTitle: '@{username} — контакт Fenyvo'
     },
     uk: {
-      galleryKicker: 'FENYVO 1.8.2+4254',
+      galleryKicker: 'FENYVO 1.8.2',
       galleryTitle: 'FENYVO у дії',
       galleryIntro: 'Справжні знімки екрана застосунку для Android і Windows. Натисніть зображення, щоб відкрити його у більшому розмірі.',
       galleryNote: 'Реальні екрани застосунку з демонстраційними іменами.',
@@ -188,7 +188,7 @@
       auto: 'Як на пристрої', languageCaption: 'Мова:', languageLabel: 'Мова сайту', homeLabel: 'Fenyvo — на головну', navLabel: 'Основна навігація', interfaceLabel: 'Приклад інтерфейсу Fenyvo',
       pageTitle: 'Fenyvo — приватне спілкування без зайвого', pageDescription: 'Fenyvo — месенджер для особистих і групових чатів, файлів, голосових та відеодзвінків. Завантажити для Android і Windows.', ogTitle: 'Fenyvo — месенджер', ogDescription: 'Спілкуйтеся, надсилайте файли та здійснюйте голосові й відеодзвінки.',
       features: 'Можливості', interface: 'Інтерфейс', security: 'Безпека', download: 'Завантажити', sharedContact: 'З вами поділилися контактом', contactHelp: 'Якщо Fenyvo вже встановлено, відкрийте картку користувача. Якщо застосунку немає — встановіть його, поверніться на цю сторінку та знову натисніть «Відкрити контакт».', openContact: 'Відкрити контакт у Fenyvo', downloadAndroid: 'Завантажити для Android',
-      publicVersion: 'Тестова версія 1.8.2 · Android 4255 · Windows 4255', heroLeadA: 'Спілкування без', heroLeadB: 'зайвого шуму', heroDescription: 'Особисті та групові чати, файли, голосові повідомлення, аудіо- й відеодзвінки — в одному застосунку Fenyvo.', downloadAndroidArrow: '↓ Завантажити для Android', downloadWindowsArrow: '↓ Завантажити для Windows', viewFeatures: 'Переглянути можливості', hashesPublished: 'SHA-256 опубліковано',
+      publicVersion: 'Тестова версія 1.8.2 · Android 6259 · Windows 4256', heroLeadA: 'Спілкування без', heroLeadB: 'зайвого шуму', heroDescription: 'Особисті та групові чати, файли, голосові повідомлення, аудіо- й відеодзвінки — в одному застосунку Fenyvo.', downloadAndroidArrow: '↓ Завантажити для Android', downloadWindowsArrow: '↓ Завантажити для Windows', viewFeatures: 'Переглянути можливості', hashesPublished: 'SHA-256 опубліковано',
       online: 'у мережі', outgoingAudio: 'Вихідний аудіодзвінок', callQuestion: 'Зідзвонимося у Fenyvo?', alreadyHere: 'Так, я вже тут.', incomingVideo: 'Вхідний відеодзвінок', connected: 'З’єднано', messagePlaceholder: 'Повідомлення…', stableCalls: 'Стабільні дзвінки', wifiMobile: 'Wi‑Fi і мобільна мережа', yourTalks: 'Ваші розмови', underControl: 'Під вашим контролем',
       featuresTitle: 'Усе потрібне для живого спілкування', featuresDescription: 'Fenyvo об’єднує листування, медіа та дзвінки в цілісному інтерфейсі для Android і Windows.', privateGroupChats: 'Особисті та групові чати', privateGroupChatsText: 'Повідомлення, реакції, закріплення та зручна історія спілкування.', audioVideoCalls: 'Аудіо- та відеодзвінки', audioVideoCallsText: 'Зрозумілі статуси виклику, історія дзвінків і відновлення після короткого розриву.', filesMedia: 'Файли й медіа', filesMediaText: 'Надсилайте фотографії, відео, документи та голосові повідомлення.', mobileNetworks: 'Мобільні мережі', mobileNetworksText: 'WebRTC адаптує медіапотік до доступної пропускної здатності з’єднання.', signatureSounds: 'Фірмові сигнали', signatureSoundsText: 'Різні звуки очікування, зайнятої лінії та завершення розмови.', ownProfile: 'Власний профіль', ownProfileText: 'Аватар, ім’я користувача та налаштування інтерфейсу без перевантажених екранів.',
       myContactQr: 'Мій контакт і QR', myContactQrText: 'Поділіться персональним посиланням або QR-кодом через будь-який застосунок.', contactLinkProfile: 'Посилання одразу в профіль', contactLinkProfileText: 'Контактне посилання відкриває картку користувача у встановленому Fenyvo.', supportAssistant: 'Помічник підтримки', supportAssistantText: 'Відповіді на запитання про Fenyvo без автоматичної передачі особистих листувань.',
@@ -200,7 +200,7 @@
       privacy: 'Конфіденційність', terms: 'Умови', rules: 'Правила', support: 'Підтримка', beforeDownload: 'Перед завантаженням Fenyvo', legalIntro: 'Застосунок призначений для користувачів віком від 16 років. Ви відповідаєте за надісланий контент і зобов’язуєтеся використовувати Fenyvo законно.', acceptPrefix: 'Я приймаю', termsOfUse: 'Умови використання', privacyAcknowledgement: 'і підтверджую ознайомлення з', privacyPolicy: 'Політикою конфіденційності', ageConfirm: 'Мені виповнилося 16 років.', cancel: 'Скасувати', acceptDownload: 'Прийняти та завантажити', copied: 'Скопійовано', copyPrompt: 'Скопіюйте SHA‑256:', shareFenyvo: '↗ Поділитися Fenyvo', shareText: 'Fenyvo — безкоштовний месенджер для Android і Windows: чати, дзвінки та групові ефіри.', shareCopied: 'Посилання на Fenyvo скопійовано', sharePrompt: 'Скопіюйте посилання на Fenyvo:', contactTitle: '@{username} — контакт Fenyvo'
     },
     en: {
-      galleryKicker: 'FENYVO 1.8.2+4254',
+      galleryKicker: 'FENYVO 1.8.2',
       galleryTitle: 'FENYVO in action',
       galleryIntro: 'Real screenshots of the Android and Windows apps. Select an image to view it at full size.',
       galleryNote: 'Real application screens with sample usernames.',
@@ -215,7 +215,7 @@
       auto: 'Use device language', languageCaption: 'Language:', languageLabel: 'Website language', homeLabel: 'Fenyvo — home', navLabel: 'Main navigation', interfaceLabel: 'Fenyvo interface preview',
       pageTitle: 'Fenyvo — private communication without the noise', pageDescription: 'Fenyvo is a messenger for private and group chats, files, voice messages, audio calls and video calls. Download for Android and Windows.', ogTitle: 'Fenyvo — messenger', ogDescription: 'Chat, share files, and make voice and video calls.',
       features: 'Features', interface: 'Interface', security: 'Security', download: 'Download', sharedContact: 'Someone shared a contact with you', contactHelp: 'If Fenyvo is already installed, open the user profile. Otherwise install the app, return to this page, and select “Open contact” again.', openContact: 'Open contact in Fenyvo', downloadAndroid: 'Download for Android',
-      publicVersion: 'Test release 1.8.2 · Android 4255 · Windows 4255', heroLeadA: 'Communication without', heroLeadB: 'the extra noise', heroDescription: 'Private and group chats, files, voice messages, audio calls and video calls — all in one Fenyvo app.', downloadAndroidArrow: '↓ Download for Android', downloadWindowsArrow: '↓ Download for Windows', viewFeatures: 'Explore features', hashesPublished: 'SHA-256 published',
+      publicVersion: 'Test release 1.8.2 · Android 6259 · Windows 4256', heroLeadA: 'Communication without', heroLeadB: 'the extra noise', heroDescription: 'Private and group chats, files, voice messages, audio calls and video calls — all in one Fenyvo app.', downloadAndroidArrow: '↓ Download for Android', downloadWindowsArrow: '↓ Download for Windows', viewFeatures: 'Explore features', hashesPublished: 'SHA-256 published',
       online: 'online', outgoingAudio: 'Outgoing audio call', callQuestion: 'Want to talk on Fenyvo?', alreadyHere: 'Yes, I’m already here.', incomingVideo: 'Incoming video call', connected: 'Connected', messagePlaceholder: 'Message…', stableCalls: 'Stable calls', wifiMobile: 'Wi‑Fi and mobile networks', yourTalks: 'Your conversations', underControl: 'Under your control',
       featuresTitle: 'Everything you need for real conversations', featuresDescription: 'Fenyvo brings messages, media and calls together in one coherent interface for Android and Windows.', privateGroupChats: 'Private and group chats', privateGroupChatsText: 'Messages, reactions, pinned items and a clear conversation history.', audioVideoCalls: 'Audio and video calls', audioVideoCallsText: 'Clear call states, call history and recovery after a brief connection loss.', filesMedia: 'Files and media', filesMediaText: 'Send photos, videos, documents and voice messages.', mobileNetworks: 'Mobile networks', mobileNetworksText: 'WebRTC adapts the media stream to the available connection bandwidth.', signatureSounds: 'Signature sounds', signatureSoundsText: 'Different tones for ringing, a busy line and the end of a call.', ownProfile: 'Your profile', ownProfileText: 'Avatar, username and interface settings without cluttered screens.',
       myContactQr: 'My contact and QR', myContactQrText: 'Share your personal link or QR code through any app.', contactLinkProfile: 'A link straight to the profile', contactLinkProfileText: 'A contact link opens the user profile in the installed Fenyvo app.', supportAssistant: 'Support assistant', supportAssistantText: 'Get answers about Fenyvo without automatically sharing private conversations.',

@@ -2,29 +2,21 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('node:fs');
-const path = require('node:path');
-const vm = require('node:vm');
 
-const source = fs.readFileSync(
-  path.join(__dirname, '..', 'server.js'), 'utf8'
-);
-
-const start = source.indexOf('function queueOfflineMessage(');
-const end = source.indexOf('function queueOfflineEvent(', start);
-
-assert.ok(start >= 0 && end > start);
-
-const functionSource = source.slice(start, end);
+const { createOfflineMessageQueue } =
+  require('../server_offline_message_queue');
 
 function setup({ failWrite = false, initial = {} } = {}) {
-  const offlineMessages = structuredClone(initial);
+  const queues = structuredClone(initial);
   const calls = [];
+  const order = [];
 
-  const sandbox = {
-    offlineMessages,
-    saveOfflineMessages(messages) {
-      calls.push(structuredClone(messages));
+  const service = createOfflineMessageQueue({
+    getQueues: () => queues,
+
+    saveQueues(next) {
+      order.push('save');
+      calls.push(structuredClone(next));
 
       if (failWrite) {
         throw new Error('SIMULATED_DISK_FAILURE');
@@ -32,17 +24,16 @@ function setup({ failWrite = false, initial = {} } = {}) {
 
       return true;
     },
-    console: { log() {} },
-  };
 
-  vm.createContext(sandbox);
-  vm.runInContext(functionSource, sandbox);
+    commitRecipientQueue(username, next) {
+      order.push('commit');
+      queues[username] = next;
+    },
 
-  return {
-    sandbox,
-    calls,
-    offlineMessages,
-  };
+    logger: () => {},
+  });
+
+  return { queues, calls, order, service };
 }
 
 const message = {
@@ -52,29 +43,31 @@ const message = {
   text: 'encrypted',
 };
 
-test('new message is persisted before memory commit', () => {
+test('message is persisted before memory commit', () => {
   const h = setup();
 
-  h.sandbox.queueOfflineMessage('bob', message);
+  h.service.queueOfflineMessage('bob', message);
 
   assert.equal(h.calls.length, 1);
   assert.equal(h.calls[0].bob[0].id, 'm1');
-  assert.equal(h.offlineMessages.bob[0].id, 'm1');
+  assert.equal(h.queues.bob[0].id, 'm1');
+  assert.deepEqual(h.order, ['save', 'commit']);
 });
 
-test('failed write never inserts message into RAM queue', () => {
+test('failed write does not insert a message into RAM', () => {
   const h = setup({ failWrite: true });
 
   assert.throws(
-    () => h.sandbox.queueOfflineMessage('bob', message),
+    () => h.service.queueOfflineMessage('bob', message),
     /SIMULATED_DISK_FAILURE/
   );
 
   assert.equal(h.calls.length, 1);
-  assert.equal(h.offlineMessages.bob, undefined);
+  assert.equal(h.queues.bob, undefined);
+  assert.deepEqual(h.order, ['save']);
 });
 
-test('failed write preserves existing recipient messages', () => {
+test('failed write preserves existing messages', () => {
   const oldMessage = {
     id: 'old',
     from: 'charlie',
@@ -86,30 +79,32 @@ test('failed write preserves existing recipient messages', () => {
     initial: { bob: [oldMessage] },
   });
 
-  const priorReference = h.offlineMessages.bob;
+  const previous = h.queues.bob;
 
   assert.throws(
-    () => h.sandbox.queueOfflineMessage('bob', message),
+    () => h.service.queueOfflineMessage('bob', message),
     /SIMULATED_DISK_FAILURE/
   );
 
-  assert.equal(h.offlineMessages.bob, priorReference);
-  assert.equal(h.offlineMessages.bob.length, 1);
-  assert.equal(h.offlineMessages.bob[0].id, 'old');
+  assert.equal(h.queues.bob, previous);
+  assert.equal(h.queues.bob.length, 1);
+  assert.equal(h.queues.bob[0].id, 'old');
+  assert.deepEqual(h.order, ['save']);
 });
 
-test('duplicate ID does not write or duplicate message', () => {
+test('duplicate ID is not saved twice', () => {
   const h = setup({
     initial: { bob: [message] },
   });
 
-  h.sandbox.queueOfflineMessage('bob', message);
+  h.service.queueOfflineMessage('bob', message);
 
   assert.equal(h.calls.length, 0);
-  assert.equal(h.offlineMessages.bob.length, 1);
+  assert.equal(h.queues.bob.length, 1);
+  assert.deepEqual(h.order, []);
 });
 
-test('saving bob does not modify charlie queue', () => {
+test('writing to bob does not change charlie queue', () => {
   const charlieMessage = {
     id: 'c1',
     from: 'alice',
@@ -120,21 +115,19 @@ test('saving bob does not modify charlie queue', () => {
     initial: { charlie: [charlieMessage] },
   });
 
-  const charlieReference = h.offlineMessages.charlie;
+  const previous = h.queues.charlie;
 
-  h.sandbox.queueOfflineMessage('bob', message);
+  h.service.queueOfflineMessage('bob', message);
 
-  assert.equal(h.offlineMessages.charlie, charlieReference);
-  assert.equal(h.offlineMessages.charlie.length, 1);
-  assert.equal(h.offlineMessages.bob.length, 1);
+  assert.equal(h.queues.charlie, previous);
+  assert.equal(h.queues.charlie.length, 1);
+  assert.equal(h.queues.bob.length, 1);
 });
 
-test('source commits RAM only after successful save', () => {
-  const save = functionSource.indexOf('saveOfflineMessages(nextMessages)');
-  const commit = functionSource.indexOf(
-    'offlineMessages[username] = nextRecipientQueue'
-  );
+test('save must complete before RAM commit', () => {
+  const h = setup();
 
-  assert.ok(save >= 0);
-  assert.ok(commit > save);
+  h.service.queueOfflineMessage('bob', message);
+
+  assert.deepEqual(h.order, ['save', 'commit']);
 });

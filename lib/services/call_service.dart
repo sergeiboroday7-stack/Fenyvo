@@ -1029,6 +1029,14 @@ class CallService extends ChangeNotifier {
       notifyListeners();
       if (Platform.isAndroid && endingCallId != null) {
         await _cleanupStep(
+          const MethodChannel('fenyvo/proximity').invokeMethod<void>(
+            'endCall',
+            {'callId': endingCallId},
+          ),
+        );
+      }
+      if (Platform.isAndroid && endingCallId != null) {
+        await _cleanupStep(
           const MethodChannel('spartan_chat/call_window')
               .invokeMethod<void>('hide', {'callId': endingCallId}),
         );

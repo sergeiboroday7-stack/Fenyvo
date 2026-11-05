@@ -33,7 +33,14 @@ function setup({
   const offlineMessageStatus = structuredClone(statuses);
   const saves = [];
 
+  // RETIREMENT_TEST_HARNESS_GUARD: fail if the server gate changes.
+  if (!/^\s*const MEDIA_RECOVERY_RETIREMENT_READY\s*=\s*false\s*;/m.test(source)) {
+    throw new Error('RETIREMENT_TEST_HARNESS_NEEDS_UPDATE');
+  }
+
   const sandbox = {
+    // Server retirement is disabled; model that dependency.
+    retireQueuedMediaProofsBeforeRemoval() {},
     offlineMessages,
     offlineMessageStatus,
 

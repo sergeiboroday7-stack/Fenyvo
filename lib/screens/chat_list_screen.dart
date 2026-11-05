@@ -1,3 +1,4 @@
+import '../services/message_content_gate.dart';
 import 'recovery_setup_screen.dart';
 import '../theme/fenyvo_theme.dart';
 
@@ -707,37 +708,45 @@ class _ChatListScreenState extends State<ChatListScreen> {
         return;
       }
 
-      final messages = StorageService.getMessages(currentUser, otherUser);
+      // Read and edit the latest persisted history inside the shared queue.
+      unawaited(
+        StorageService.mutateMessagesDurably(
+          currentUser,
+          otherUser,
+          (messages) {
+            var changed = false;
 
-      var changed = false;
+            for (final message in messages) {
+              final id = message['id']?.toString().trim() ?? '';
 
-      for (final message in messages) {
-        final id = message['id']?.toString().trim() ?? '';
+              if (id == messageId) {
+                message['text'] = newText;
+                message['isEdited'] = true;
+                message['editedAt'] = editedAt;
+                changed = true;
+              }
 
-        if (id == messageId) {
-          message['text'] = newText;
-          message['isEdited'] = true;
-          message['editedAt'] = editedAt;
-          changed = true;
-        }
+              final rawReply = message['replyTo'];
 
-        final rawReply = message['replyTo'];
+              if (rawReply is Map &&
+                  rawReply['id']?.toString().trim() == messageId) {
+                final reply = Map<String, dynamic>.from(rawReply);
+                reply['text'] = newText;
+                message['replyTo'] = reply;
+                changed = true;
+              }
+            }
 
-        if (rawReply is Map && rawReply['id']?.toString().trim() == messageId) {
-          final reply = Map<String, dynamic>.from(rawReply);
-
-          reply['text'] = newText;
-          message['replyTo'] = reply;
-          changed = true;
-        }
-      }
-
-      if (changed) {
-        StorageService.saveMessages(currentUser, otherUser, messages);
-
-        _loadChats();
-      }
-
+            return changed ? messages : null;
+          },
+        ).then((changed) {
+          if (changed && mounted) {
+            _loadChats();
+          }
+        }).catchError((Object error, StackTrace stack) {
+          debugPrint('Message edit persistence failed: $error');
+        }),
+      );
       return;
     }
 
@@ -762,90 +771,54 @@ class _ChatListScreenState extends State<ChatListScreen> {
         return;
       }
 
-      final messages = StorageService.getMessages(currentUser, otherUser);
+      // Save the deletion marker before modifying the persisted history.
+      // A false result can also mean that the history was already clean.
+      unawaited(
+        StorageService.deleteForEveryoneDurably(
+          currentUser: currentUser,
+          peer: otherUser,
+          messageId: messageId,
+          from: from,
+          to: to,
+        ).then((changed) {
+          // Refresh even if the message did not exist locally: a marker
+          // may still have been committed to prevent future replay.
+          final remaining =
+              StorageService.getMessages(currentUser, otherUser);
 
-      var changed = false;
+          if (remaining.isEmpty) {
+            StorageService.clearUnreadCount(currentUser, otherUser);
+          }
 
-      final before = messages.length;
-
-      messages.removeWhere(
-        (message) => message['id']?.toString().trim() == messageId,
+          if (mounted) {
+            _loadChats();
+          }
+        }).catchError((Object error, StackTrace stack) {
+          debugPrint('Guarded message delete persistence failed: $error');
+        }),
       );
-
-      if (messages.length != before) {
-        changed = true;
-      }
-
-      for (final message in messages) {
-        final rawReply = message['replyTo'];
-
-        if (rawReply is Map && rawReply['id']?.toString().trim() == messageId) {
-          message.remove('replyTo');
-          changed = true;
-        }
-      }
-
-      if (changed) {
-        StorageService.saveMessages(currentUser, otherUser, messages);
-
-        if (messages.isEmpty) {
-          StorageService.clearUnreadCount(currentUser, otherUser);
-        }
-
-        _loadChats();
-      }
-
       return;
     }
-
     if (type == 'message') {
-      final currentUser = SocketService.instance.currentUser ?? '';
-
-      final from = data['from']?.toString() ?? '';
-
-      final to = data['to']?.toString() ?? currentUser;
-
+      final currentUser = SocketService.instance.currentUser?.trim() ?? '';
+      final from = data['from']?.toString().trim() ?? '';
+      final to = data['to']?.toString().trim() ?? currentUser;
       final text = data['text']?.toString() ?? '';
-
       final time = data['time']?.toString() ?? DateTime.now().toIso8601String();
+      final id = data['id']?.toString().trim() ?? '';
 
-      final id = data['id']?.toString() ?? '';
-
-      if (currentUser.isEmpty ||
-          from.isEmpty ||
-          from == currentUser ||
-          text.isEmpty) {
+      // Accept real media without a caption, but reject empty events.
+      // ID-less media remains unsupported by the durable append path.
+      if (currentUser.isEmpty || from.isEmpty || from == currentUser ||
+          to != currentUser ||
+          !hasMessageContent(data) ||
+          (id.isEmpty && text.trim().isEmpty)) {
         return;
       }
 
       _setUserTyping(from, false);
 
-      final messages = StorageService.getMessages(currentUser, from);
-
-      bool alreadyExists = false;
-
-      for (final message in messages) {
-        final oldId = message['id']?.toString() ?? '';
-
-        if (id.isNotEmpty && oldId.isNotEmpty && oldId == id) {
-          alreadyExists = true;
-          break;
-        }
-
-        final oldFrom = message['from']?.toString() ?? '';
-
-        final oldText = message['text']?.toString() ?? '';
-
-        final oldTime = message['time']?.toString() ?? '';
-
-        if (oldFrom == from && oldText == text && oldTime == time) {
-          alreadyExists = true;
-          break;
-        }
-      }
-
-      if (!alreadyExists) {
-        messages.add({
+      final incoming = <String, dynamic>{
           'id': id,
           'from': from,
           'to': to,
@@ -862,6 +835,8 @@ class _ChatListScreenState extends State<ChatListScreen> {
             'mediaId': data['mediaId'].toString(),
           if (data['mediaData'] is String)
             'mediaData': data['mediaData'].toString(),
+          if (data['e2eeMedia'] is Map)
+            'e2eeMedia': Map<String, dynamic>.from(data['e2eeMedia'] as Map),
           if (data['fileName'] != null) 'fileName': data['fileName'].toString(),
           if (data['fileSize'] != null) 'fileSize': data['fileSize'],
           if (data['mimeType'] != null) 'mimeType': data['mimeType'].toString(),
@@ -877,64 +852,96 @@ class _ChatListScreenState extends State<ChatListScreen> {
             'forwardComment': data['forwardComment'].toString(),
           if (data['isEdited'] == true) 'isEdited': true,
           if (data['editedAt'] != null) 'editedAt': data['editedAt'].toString(),
-        });
+      };
 
-        StorageService.saveMessages(currentUser, from, messages);
+      // Check the active owner's block state before a durable append.
+      // This is an ingress guard, not a replacement for a storage-level
+      // atomic replay/block policy.
+      unawaited(() async {
+        try {
+          final blocked = await FenyvoTrustService.isBlocked(
+            from,
+            owner: currentUser,
+          );
 
-        StorageService.incrementUnreadCount(currentUser, from);
-      }
+          // The account could change while SharedPreferences is loading.
+          if (blocked ||
+              SocketService.instance.currentUser?.trim() != currentUser) {
+            return;
+          }
 
-      _loadChats();
+          final appended = await StorageService.appendMessageDurably(
+            currentUser,
+            from,
+            incoming,
+            allowAppend: () async {
+              if (SocketService.instance.currentUser?.trim() != currentUser) {
+                return false;
+              }
 
+              final blockedAtWrite = await FenyvoTrustService.isBlocked(
+                from,
+                owner: currentUser,
+              );
+
+              return !blockedAtWrite &&
+                  SocketService.instance.currentUser?.trim() == currentUser;
+            },
+          );
+
+          final stillSameAccount =
+              SocketService.instance.currentUser?.trim() == currentUser;
+
+          if (!stillSameAccount) return;
+
+          // Blocking may happen while the durable append is queued.
+          // Prevent a stale unread increment and screen refresh.
+          final blockedAfterAppend = await FenyvoTrustService.isBlocked(
+            from,
+            owner: currentUser,
+          );
+
+          if (SocketService.instance.currentUser?.trim() != currentUser) {
+            return;
+          }
+
+          final hiddenForOwner = id.isNotEmpty &&
+              StorageService.isMessageHiddenForMe(
+                currentUser: currentUser,
+                peer: from,
+                messageId: id,
+              );
+
+          if (appended && !blockedAfterAppend && !hiddenForOwner) {
+            StorageService.incrementUnreadCount(currentUser, from);
+          }
+
+          if (mounted && !blockedAfterAppend) {
+            _loadChats();
+          }
+        } catch (error, stack) {
+          debugPrint('Guarded incoming message persistence failed: $error');
+          debugPrint('$stack');
+        }
+      }());
       return;
     }
 
     if (type == 'message_sent') {
-      final currentUser = SocketService.instance.currentUser ?? '';
-
-      final to = data['to']?.toString() ?? '';
-
+      final currentUser = SocketService.instance.currentUser?.trim() ?? '';
+      final to = data['to']?.toString().trim() ?? '';
       final text = data['text']?.toString() ?? '';
-
       final time = data['time']?.toString() ?? DateTime.now().toIso8601String();
+      final id = data['id']?.toString().trim() ?? '';
 
-      final id = data['id']?.toString() ?? '';
-
-      if (currentUser.isEmpty || to.isEmpty || text.isEmpty) {
+      // Media-only messages need a real ID for durable storage.
+      if (currentUser.isEmpty || to.isEmpty ||
+          !hasMessageContent(data) ||
+          (id.isEmpty && text.trim().isEmpty)) {
         return;
       }
 
-      final messages = StorageService.getMessages(currentUser, to);
-
-      bool alreadyExists = false;
-
-      for (final message in messages) {
-        final oldId = message['id']?.toString() ?? '';
-
-        if (id.isNotEmpty && oldId.isNotEmpty && oldId == id) {
-          alreadyExists = true;
-          break;
-        }
-
-        final oldFrom = message['from']?.toString() ?? '';
-
-        final oldTo = message['to']?.toString() ?? '';
-
-        final oldText = message['text']?.toString() ?? '';
-
-        final oldTime = message['time']?.toString() ?? '';
-
-        if (oldFrom == currentUser &&
-            oldTo == to &&
-            oldText == text &&
-            oldTime == time) {
-          alreadyExists = true;
-          break;
-        }
-      }
-
-      if (!alreadyExists) {
-        messages.add({
+      final outgoing = <String, dynamic>{
           'id': id,
           'from': currentUser,
           'to': to,
@@ -951,11 +958,15 @@ class _ChatListScreenState extends State<ChatListScreen> {
             'mediaId': data['mediaId'].toString(),
           if (data['mediaData'] is String)
             'mediaData': data['mediaData'].toString(),
+          if (data['e2eeMedia'] is Map)
+            'e2eeMedia': Map<String, dynamic>.from(data['e2eeMedia'] as Map),
           if (data['fileName'] != null) 'fileName': data['fileName'].toString(),
           if (data['fileSize'] != null) 'fileSize': data['fileSize'],
           if (data['mimeType'] != null) 'mimeType': data['mimeType'].toString(),
           'time': time,
           'status': 'sent',
+          if (data['e2ee'] == true) 'e2ee': true,
+          if (data['e2eeError'] == true) 'e2eeError': true,
           if (data['replyTo'] is Map)
             'replyTo': Map<String, dynamic>.from(data['replyTo'] as Map),
           if (data['forwardedFrom'] != null)
@@ -964,15 +975,23 @@ class _ChatListScreenState extends State<ChatListScreen> {
             'forwardComment': data['forwardComment'].toString(),
           if (data['isEdited'] == true) 'isEdited': true,
           if (data['editedAt'] != null) 'editedAt': data['editedAt'].toString(),
-        });
+      };
 
-        StorageService.saveMessages(currentUser, to, messages);
-      }
-
-      _loadChats();
+      // Persist against the latest Hive state, never a stale list.
+      unawaited(
+        StorageService.appendMessageDurably(currentUser, to, outgoing)
+            .then((appended) {
+          if (mounted) {
+            _loadChats();
+          }
+        }).catchError((Object error, StackTrace stack) {
+          debugPrint('Guarded sent message persistence failed: $error');
+        }),
+      );
 
       return;
     }
+
   }
 
   // ========================================
@@ -1123,7 +1142,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
       return '';
     }
 
-    final messages = StorageService.getMessages(currentUser, user);
+    final messages = StorageService.getMessagesVisibleForOwner(currentUser, user);
 
     if (messages.isEmpty) {
       return '';
@@ -1143,7 +1162,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
       return '';
     }
 
-    final messages = StorageService.getMessages(currentUser, user);
+    final messages = StorageService.getMessagesVisibleForOwner(currentUser, user);
 
     if (messages.isEmpty) {
       return '';
@@ -1700,7 +1719,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
       }
       return DateTime(2000);
     }
-    final messages = StorageService.getMessages(
+    final messages = StorageService.getMessagesVisibleForOwner(
       SocketService.instance.currentUser ?? '',
       user,
     );
@@ -2758,7 +2777,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
     final owner = SocketService.instance.currentUser ?? '';
     final totalMessages = owner.isEmpty
         ? 0
-        : StorageService.getMessages(owner, user).length;
+        : StorageService.getMessagesVisibleForOwner(owner, user).length;
     return Container(
       width: 280,
       decoration: const BoxDecoration(

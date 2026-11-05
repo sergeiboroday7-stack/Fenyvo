@@ -78,6 +78,13 @@ function createOfflineAtomicStore({
 
       // Rename within the same directory avoids replacing
       // the destination before the new data has been written.
+      // Flush the completed temporary file before publishing it.
+      const durabilityFd = fsImpl.openSync(temporary, 'r+');
+      try {
+        fsImpl.fsyncSync(durabilityFd);
+      } finally {
+        fsImpl.closeSync(durabilityFd);
+      }
       fsImpl.renameSync(temporary, destination);
 
       return true;

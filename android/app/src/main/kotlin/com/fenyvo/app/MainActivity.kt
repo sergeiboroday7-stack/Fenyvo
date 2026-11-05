@@ -16,6 +16,8 @@ class MainActivity: FlutterActivity() {
     private var screenSecurityChannel: MethodChannel? = null
     private var ringback: OutgoingRingbackController? = null
     private var visibleCallId: String? = null
+    private var proximityChannel: MethodChannel? = null
+    private var proximityController: ProximityCallController? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -45,6 +47,37 @@ class MainActivity: FlutterActivity() {
                     }
                     result.success(null)
                 } else result.notImplemented()
+            }
+        }
+        proximityController = ProximityCallController(this)
+        proximityChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "fenyvo/proximity"
+        ).also { channel ->
+            channel.setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "endCall" -> {
+                        val id = call.argument<String>("callId")
+                        if (id.isNullOrBlank() || id.length > 100) {
+                            result.error("INVALID_CALL", "Invalid call ID", null)
+                        } else {
+                            proximityController?.endCall(id)
+                            result.success(null)
+                        }
+                    }
+                    "setEnabled" -> {
+                        val id = call.argument<String>("callId")
+                        val enabled = call.argument<Boolean>("enabled")
+                        if (id.isNullOrBlank() || id.length > 100 || enabled == null) {
+                            result.error("INVALID_ARGUMENT", "Invalid call state", null)
+                        } else {
+                            result.success(
+                                proximityController?.setEnabled(id, enabled) ?: false
+                            )
+                        }
+                    }
+                    else -> result.notImplemented()
+                }
             }
         }
         alert = IncomingCallAlertController(this)
@@ -116,12 +149,17 @@ class MainActivity: FlutterActivity() {
         ringbackChannel = null
         ringback?.stop()
         ringback = null
+        proximityController?.stop()
+        proximityChannel?.setMethodCallHandler(null)
+        proximityChannel = null
+        proximityController = null
         super.cleanUpFlutterEngine(flutterEngine)
     }
 
     override fun onDestroy() {
         alert?.stop()
         ringback?.stop()
+        proximityController?.stop()
         super.onDestroy()
     }
 }

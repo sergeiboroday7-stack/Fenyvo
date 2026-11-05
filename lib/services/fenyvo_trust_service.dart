@@ -1,9 +1,12 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'socket_service.dart';
+import 'trust_account_scope.dart';
 
-/// Local trust decisions for a contact. No message text or contact data leave
-/// the device; this is intentionally separate from server-side account state.
+/// Local trust decisions scoped to the authenticated account.
+///
+/// Legacy unscoped preferences are intentionally not read or deleted:
+/// they cannot safely be attributed to one owner on a shared device.
 class FenyvoTrustService {
   FenyvoTrustService._();
 
@@ -12,27 +15,42 @@ class FenyvoTrustService {
   static const _reportedPrefix = 'spartan_trust_reported_';
   static const _explanationSeenKey = 'spartan_trust_explanation_seen';
 
-  static String _key(String prefix, String contact) =>
-      '$prefix${contact.trim().toLowerCase()}';
+  static String _owner(String? owner) =>
+      (owner ?? SocketService.instance.currentUser ?? '').trim();
 
-  static Future<bool> isTrusted(String contact) async {
+  static String? _key(String prefix, String contact, String? owner) =>
+      TrustAccountScope.key(
+        owner: _owner(owner),
+        contact: contact,
+        prefix: prefix,
+      );
+
+  static Future<bool> isTrusted(String contact, {String? owner}) async {
+    final key = _key(_trustedPrefix, contact, owner);
+    if (key == null) return false;
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(_key(_trustedPrefix, contact)) ?? false;
+    return prefs.getBool(key) ?? false;
   }
 
-  static Future<bool> isBlocked(String contact) async {
+  static Future<bool> isBlocked(String contact, {String? owner}) async {
+    final key = _key(_blockedPrefix, contact, owner);
+    if (key == null) return false;
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(_key(_blockedPrefix, contact)) ?? false;
+    return prefs.getBool(key) ?? false;
   }
 
-  static Future<bool> isReported(String contact) async {
+  static Future<bool> isReported(String contact, {String? owner}) async {
+    final key = _key(_reportedPrefix, contact, owner);
+    if (key == null) return false;
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getBool(_key(_reportedPrefix, contact)) ?? false;
+    return prefs.getBool(key) ?? false;
   }
 
-  static Future<String> reportReason(String contact) async {
+  static Future<String> reportReason(String contact, {String? owner}) async {
+    final key = _key(_reportedPrefix, contact, owner);
+    if (key == null) return '';
     final prefs = await SharedPreferences.getInstance();
-    return prefs.getString('${_key(_reportedPrefix, contact)}_reason') ?? '';
+    return prefs.getString('${key}_reason') ?? '';
   }
 
   static Future<bool> shouldShowExplanation() async {
@@ -45,20 +63,38 @@ class FenyvoTrustService {
     await prefs.setBool(_explanationSeenKey, true);
   }
 
-  static Future<void> setTrusted(String contact, bool value) async {
+  static Future<void> setTrusted(
+    String contact,
+    bool value, {
+    String? owner,
+  }) async {
+    final key = _key(_trustedPrefix, contact, owner);
+    if (key == null) return;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_key(_trustedPrefix, contact), value);
+    await prefs.setBool(key, value);
   }
 
-  static Future<void> setBlocked(String contact, bool value) async {
+  static Future<void> setBlocked(
+    String contact,
+    bool value, {
+    String? owner,
+  }) async {
+    final key = _key(_blockedPrefix, contact, owner);
+    if (key == null) return;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_key(_blockedPrefix, contact), value);
+    await prefs.setBool(key, value);
   }
 
-  static Future<void> report(String contact, {String reason = 'Другое'}) async {
+  static Future<void> report(
+    String contact, {
+    String reason = 'Другое',
+    String? owner,
+  }) async {
+    final key = _key(_reportedPrefix, contact, owner);
+    if (key == null) return;
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_key(_reportedPrefix, contact), true);
-    await prefs.setString('${_key(_reportedPrefix, contact)}_reason', reason);
+    await prefs.setBool(key, true);
+    await prefs.setString('${key}_reason', reason);
   }
 
   static Future<void> applyRemote(
@@ -67,12 +103,24 @@ class FenyvoTrustService {
     required bool blocked,
     required bool reported,
     String reportReason = '',
+    String? owner,
   }) async {
+    // Capture the account before awaiting SharedPreferences.
+    final identity = _owner(owner);
+    final trustedKey = _key(_trustedPrefix, contact, identity);
+    final blockedKey = _key(_blockedPrefix, contact, identity);
+    final reportedKey = _key(_reportedPrefix, contact, identity);
+
+    if (trustedKey == null || blockedKey == null || reportedKey == null) {
+      return;
+    }
+
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool(_key(_trustedPrefix, contact), trusted);
-    await prefs.setBool(_key(_blockedPrefix, contact), blocked);
-    await prefs.setBool(_key(_reportedPrefix, contact), reported);
-    final reasonKey = '${_key(_reportedPrefix, contact)}_reason';
+    await prefs.setBool(trustedKey, trusted);
+    await prefs.setBool(blockedKey, blocked);
+    await prefs.setBool(reportedKey, reported);
+
+    final reasonKey = '${reportedKey}_reason';
     if (reported && reportReason.trim().isNotEmpty) {
       await prefs.setString(reasonKey, reportReason.trim());
     } else {
@@ -80,19 +128,30 @@ class FenyvoTrustService {
     }
   }
 
-  /// Sends only the trust decision metadata to the authenticated server.
-  /// Local persistence remains the source of truth while offline.
+  /// Send only the active owner's trust metadata.
   static void sync(String contact) {
-    final user = contact.trim();
-    if (user.isEmpty || !SocketService.instance.isAuthenticated) return;
+    final identity = _owner(null);
+    final peer = contact.trim();
+
+    if (identity.isEmpty ||
+        peer.isEmpty ||
+        identity.toLowerCase() == peer.toLowerCase() ||
+        !SocketService.instance.isAuthenticated) {
+      return;
+    }
+
     Future.wait<dynamic>([
-      isTrusted(user),
-      isBlocked(user),
-      isReported(user),
-      reportReason(user),
+      isTrusted(peer, owner: identity),
+      isBlocked(peer, owner: identity),
+      isReported(peer, owner: identity),
+      reportReason(peer, owner: identity),
     ]).then((values) {
+      if (!SocketService.instance.isAuthenticated || _owner(null) != identity) {
+        return;
+      }
+
       SocketService.instance.sendPulse('trust_update', {
-        'contact': user,
+        'contact': peer,
         'trusted': values[0],
         'blocked': values[1],
         'reported': values[2],
@@ -102,8 +161,16 @@ class FenyvoTrustService {
   }
 
   static void requestRemote(String contact) {
-    final user = contact.trim();
-    if (user.isEmpty || !SocketService.instance.isAuthenticated) return;
-    SocketService.instance.sendPulse('get_trust_state', {'contact': user});
+    final identity = _owner(null);
+    final peer = contact.trim();
+
+    if (identity.isEmpty ||
+        peer.isEmpty ||
+        identity.toLowerCase() == peer.toLowerCase() ||
+        !SocketService.instance.isAuthenticated) {
+      return;
+    }
+
+    SocketService.instance.sendPulse('get_trust_state', {'contact': peer});
   }
 }

@@ -4,6 +4,14 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'media_cache_service.dart';
+import 'message_persistence_service.dart';
+import 'message_write_coordinator.dart';
+import 'message_deletion_guard.dart';
+import 'message_deletion_pipeline.dart';
+import 'message_local_deletion_guard.dart';
+import 'message_local_deletion_pipeline.dart';
+import 'message_status_hive_writer.dart';
+import 'message_status_persistence_service.dart';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -35,6 +43,8 @@ class StorageService {
   static late Box _avatarsBox;
   static late Box _unreadBox;
   static late Box _outboxBox;
+  static late Box _deletedMessagesBox;
+  static late Box _localDeletedMessagesBox;
 
   static Future<void> init() async {
     if (Platform.isWindows) {
@@ -54,10 +64,15 @@ class StorageService {
 
     _outboxBox = await Hive.openBox('spartan_outbox');
 
+    _deletedMessagesBox = await Hive.openBox('fenyvo_deleted_message_ids');
+    _localDeletedMessagesBox = await Hive.openBox('fenyvo_local_deleted_message_ids');
+
     await Hive.openBox('spartan_saved_messages');
     await Hive.openBox('spartan_call_history');
 
     await _migrateEmbeddedMediaToFiles();
+
+    await _reconcileDeletedMessagesOnStartup();
 
     print('📦 StorageService инициализирован');
   }
@@ -98,6 +113,29 @@ class StorageService {
       // A damaged or protected legacy file must not leave the app on a white
       // screen. The new storage can still start and the old file remains intact.
       print('⚠️ Windows: старая база Hive недоступна, запускаем новую: $error');
+    }
+  }
+
+  /// Complete interrupted delete-for-everyone operations before UI startup.
+  ///
+  /// Only chats with existing durable markers are inspected. A persistence
+  /// error propagates so an unclean history is not silently displayed.
+  static Future<void> _reconcileDeletedMessagesOnStartup() async {
+    final guard = MessageDeletionGuard(_deletedMessagesBox);
+    final affectedChats = guard.markedChatKeys();
+
+    if (affectedChats.isEmpty) {
+      return;
+    }
+
+    final pipeline = _deletionPipeline();
+
+    for (final chatKey in affectedChats) {
+      if (!_messagesBox.containsKey(chatKey)) {
+        continue;
+      }
+
+      await pipeline.reconcile(chatKey: chatKey);
     }
   }
 
@@ -201,6 +239,244 @@ class StorageService {
       '💾 Сохранено '
       '${messagesToSave.length} '
       'сообщений для чата $key',
+    );
+  }
+
+  /// Persist chat messages and wait for Hive to finish the write.
+  ///
+  /// Intended for operations that require persistence confirmation,
+  /// such as a future client-side status ACK protocol.
+  static final MessageWriteCoordinator _durableMessageWriteCoordinator =
+      MessageWriteCoordinator();
+
+  static Future<void> saveMessagesDurable(
+    String currentUser,
+    String targetUser,
+    List<Map<String, dynamic>> messages,
+  ) async {
+    final key = _getChatKey(currentUser, targetUser);
+    await _durableMessageWriteCoordinator.run<void>(
+      key,
+      () => persistMessagesToHive(_messagesBox, key, messages),
+    );
+  }
+  /// Persist an outgoing delivery/read status without opening its chat.
+  ///
+  /// Uses the same per-chat write queue as saveMessagesDurable.
+  /// This method does not send a network ACK.
+  static Future<StatusPersistenceOutcome> applyMessageStatusDurable({
+    required String currentUser,
+    required String peer,
+    required String messageId,
+    required String eventType,
+    required String from,
+    required String to,
+  }) async {
+    final owner = currentUser.trim();
+    final contact = peer.trim();
+
+    if (owner.isEmpty || contact.isEmpty || messageId.trim().isEmpty) {
+      return StatusPersistenceOutcome.rejected;
+    }
+
+    final key = _getChatKey(owner, contact);
+
+    final writer = MessageStatusHiveWriter(
+      box: _messagesBox,
+      coordinator: _durableMessageWriteCoordinator,
+    );
+
+    return writer.apply(
+      key: key,
+      currentUser: owner,
+      peer: contact,
+      messageId: messageId,
+      eventType: eventType,
+      from: from,
+      to: to,
+    );
+  }
+  /// Apply a change to the latest persisted chat history.
+  ///
+  /// The read, mutation and write share the durable message queue.
+  /// Callers must supply a mutation rather than a stale full snapshot.
+  static Future<bool> mutateMessagesDurably(
+    String currentUser,
+    String targetUser,
+    List<Map<String, dynamic>>? Function(
+      List<Map<String, dynamic>> current,
+    ) mutate,
+  ) async {
+    final owner = currentUser.trim();
+    final peer = targetUser.trim();
+
+    if (owner.isEmpty || peer.isEmpty || owner == peer) {
+      return false;
+    }
+
+    final key = _getChatKey(owner, peer);
+
+    return _durableMessageWriteCoordinator.run<bool>(
+      key,
+      () => mutateMessagesInHive(_messagesBox, key, mutate),
+    );
+  }
+  /// Append to the latest persisted chat history using the shared queue.
+  ///
+  /// Returns false for duplicate or invalid messages.
+  /// Deleted-message replay protection is handled separately.
+  static MessageDeletionPipeline _deletionPipeline() {
+    return MessageDeletionPipeline(
+      messagesBox: _messagesBox,
+      guard: MessageDeletionGuard(_deletedMessagesBox),
+      coordinator: _durableMessageWriteCoordinator,
+    );
+  }
+
+  /// Persist incoming/outgoing message only if its ID is not deleted.
+  ///
+  /// False means no append occurred, or recovery-only work was performed.
+  /// Do not interpret this result as a server delivery ACK.
+  static Future<bool> appendMessageDurably(
+    String currentUser,
+    String targetUser,
+    Map<String, dynamic> incoming, {
+    Future<bool> Function()? allowAppend,
+  }) async {
+    final owner = currentUser.trim();
+    final peer = targetUser.trim();
+
+    if (owner.isEmpty || peer.isEmpty || owner == peer) {
+      return false;
+    }
+
+    final from = incoming['from']?.toString().trim() ?? '';
+    final to = incoming['to']?.toString().trim() ?? '';
+    final id = incoming['id']?.toString().trim() ?? '';
+    final time = incoming['time']?.toString().trim() ?? '';
+    final text = incoming['text']?.toString() ?? '';
+
+    // Legacy clients may omit the ID. Retain their established
+    // time/from/to/text duplicate identity.
+    if ((id.isEmpty && (time.isEmpty || text.isEmpty)) ||
+        !((from == owner && to == peer) ||
+          (from == peer && to == owner))) {
+      return false;
+    }
+
+    return _deletionPipeline().append(
+      chatKey: _getChatKey(owner, peer),
+      incoming: Map<String, dynamic>.from(incoming),
+      allowAppend: allowAppend,
+    );
+  }
+
+  /// Owner-only message visibility, separate from delete-for-everyone.
+  static MessageLocalDeletionPipeline _localDeletionPipeline() {
+    return MessageLocalDeletionPipeline(
+      messagesBox: _messagesBox,
+      guard: MessageLocalDeletionGuard(_localDeletedMessagesBox),
+      coordinator: _durableMessageWriteCoordinator,
+    );
+  }
+
+  /// Persist a hide marker for an existing message for this owner only.
+  /// The shared chat history is not physically removed.
+  static Future<bool> hideMessageForMeDurably({
+    required String currentUser,
+    required String peer,
+    required String messageId,
+  }) {
+    final owner = currentUser.trim();
+    final contact = peer.trim();
+    final id = messageId.trim();
+
+    if (owner.isEmpty ||
+        contact.isEmpty ||
+        owner == contact ||
+        id.isEmpty) {
+      return Future<bool>.value(false);
+    }
+
+    return _localDeletionPipeline().hideForOwner(
+      chatKey: _getChatKey(owner, contact),
+      owner: owner,
+      peer: contact,
+      messageId: id,
+    );
+  }
+
+  /// Query whether a message is hidden for this account.
+  static bool isMessageHiddenForMe({
+    required String currentUser,
+    required String peer,
+    required String messageId,
+  }) {
+    return _localDeletionPipeline().isHiddenForOwner(
+      owner: currentUser,
+      peer: peer,
+      messageId: messageId,
+    );
+  }
+
+  /// Read chat history while respecting this account's hide markers.
+  /// The existing getMessages API remains unchanged.
+  static List<Map<String, dynamic>> getMessagesVisibleForOwner(
+    String currentUser,
+    String targetUser,
+  ) {
+    return _localDeletionPipeline().visibleForOwner(
+      owner: currentUser,
+      peer: targetUser,
+      messages: getMessages(currentUser, targetUser),
+    );
+  }
+  /// Call only for a validated delete-for-everyone event.
+  ///
+  /// This checks chat identity, not server event authenticity.
+  /// The caller must establish that the server authorized the deletion.
+  static Future<bool> deleteForEveryoneDurably({
+    required String currentUser,
+    required String peer,
+    required String messageId,
+    required String from,
+    required String to,
+  }) async {
+    final owner = currentUser.trim();
+    final contact = peer.trim();
+    final id = messageId.trim();
+    final sender = from.trim();
+    final recipient = to.trim();
+
+    if (owner.isEmpty ||
+        contact.isEmpty ||
+        owner == contact ||
+        id.isEmpty ||
+        !((sender == owner && recipient == contact) ||
+          (sender == contact && recipient == owner))) {
+      return false;
+    }
+
+    return _deletionPipeline().deleteForEveryone(
+      chatKey: _getChatKey(owner, contact),
+      messageId: id,
+    );
+  }
+
+  /// Repair an interruption between marker write and history deletion.
+  static Future<bool> reconcileDeletedMessagesDurably(
+    String currentUser,
+    String targetUser,
+  ) async {
+    final owner = currentUser.trim();
+    final peer = targetUser.trim();
+
+    if (owner.isEmpty || peer.isEmpty || owner == peer) {
+      return false;
+    }
+
+    return _deletionPipeline().reconcile(
+      chatKey: _getChatKey(owner, peer),
     );
   }
 

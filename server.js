@@ -1,4 +1,11 @@
 const WebSocket = require('ws');
+
+// Disabled until recovery lifecycle and crash-safety validation.
+const MEDIA_RECOVERY_PROOF_WRITES_READY = false;
+const { createMediaRecoveryProofIssuer } =
+  require('./server_media_recovery_proof_issuer');
+const { createMediaRecoveryJournal } =
+  require('./server_media_recovery_journal');
 const http = require('http');
 const fs = require('fs');
 const path = require('path');
@@ -8,7 +15,18 @@ const { AuthRateLimiter, getClientAddress } = require('./server_security');
 const { createWsFrameGuard } = require('./server_ws_frame_guard');
 const { createServerSessionIdentity } = require('./server_ws_session_identity');
 const { createOfflineAtomicStore } = require('./server_offline_atomic_store');
+const { createOfflineMessageQueue } = require('./server_offline_message_queue');
+const { createMessageDeliveryService } = require('./server_message_delivery_service');
+const { createGroupMediaCommitService } = require('./server_group_media_commit_service');
 const { verifyMessageAckOwnership } = require('./server_message_ack_ownership');
+const { createPrivateMessageOwnership } =
+  require('./server_private_message_ownership');
+const { createMediaAckRetirementAdapter } =
+  require('./server_media_ack_retirement_adapter');
+
+// ACK retirement is not enabled until the real queue cleanup
+// and independent journal trust requirements are verified.
+const MEDIA_ACK_RETIREMENT_READY = false;
 const { createPresenceState } = require('./server_presence_state');
 const { createPresenceProtocol } = require('./server_presence_protocol');
 const { createPresenceDelivery } = require('./server_presence_delivery');
@@ -278,7 +296,9 @@ const TRUST_DECISIONS_FILE = path.join(
   'trust_decisions.json',
 );
 const COMMUNICATION_REQUESTS_FILE = path.join(
-  __dirname,
+  process.env.SPARTAN_COMMUNICATION_REQUESTS_IN_DATA_DIR === 'true'
+    ? DATA_DIR
+    : __dirname,
   'communication_requests.json',
 );
 
@@ -709,6 +729,33 @@ function loadGroups() {
   );
 }
 
+// STEP_353_GROUPS_CANDIDATE_BEGIN
+function persistGroupsCandidate(nextGroups) {
+  return require('./server_media_index_atomic_store')
+    .saveMediaIndexAtomic({
+      filePath: GROUPS_FILE,
+      index: nextGroups,
+    });
+}
+// STEP_353_GROUPS_CANDIDATE_END
+
+// STEP_360_METADATA_COMMIT_BEGIN
+function persistGroupMetadataAfterHistory(groupId, group, changes) {
+  const nextGroup = { ...group, ...changes };
+  const nextGroups = { ...groups, [groupId]: nextGroup };
+
+  try {
+    persistGroupsCandidate(nextGroups);
+  } catch (error) {
+    console.error('Group metadata persistence failed:', error);
+    return false;
+  }
+
+  Object.assign(group, nextGroup);
+  return true;
+}
+// STEP_360_METADATA_COMMIT_END
+
 function saveGroups() {
   saveJsonObjectFile(
     GROUPS_FILE,
@@ -724,12 +771,15 @@ function loadGroupMessages() {
   );
 }
 
-function saveGroupMessages() {
-  saveJsonObjectFile(
-    GROUP_MESSAGES_FILE,
-    groupMessages,
-    'групповых сообщений',
-  );
+function saveGroupMessages(nextMessages = groupMessages) {
+  // STEP_347_GROUP_ATOMIC_WRITER_BEGIN
+  // Propagate persistence failures instead of swallowing them.
+  return require('./server_media_index_atomic_store')
+    .saveMediaIndexAtomic({
+      filePath: GROUP_MESSAGES_FILE,
+      index: nextMessages,
+    });
+  // STEP_347_GROUP_ATOMIC_WRITER_END
 }
 
 function getGroupById(
@@ -918,33 +968,39 @@ function getGroupHistory(
     .slice(-2000);
 }
 
-function appendGroupMessage(
-  groupId,
-  message,
-) {
-  const id =
-    groupId
-      ?.toString()
-      .trim() ||
-    '';
-
+function appendGroupMessage(groupId, message) {
+  const id = groupId?.toString().trim() || '';
   if (!id) {
-    return;
+    throw new TypeError('Invalid group ID');
   }
 
-  const history =
-    getGroupHistory(
-      id,
-    );
+  const previous = getGroupHistory(id);
+  const next = [...previous, message].slice(-2000);
+  const nextGroups = { ...groupMessages, [id]: next };
 
-  history.push(
-    message,
+  const temporary = path.join(
+    path.dirname(GROUP_MESSAGES_FILE),
+    `.group-history-${crypto.randomUUID()}.tmp`
   );
 
-  groupMessages[id] =
-    history.slice(-2000);
+  try {
+    fs.writeFileSync(
+      temporary,
+      JSON.stringify(nextGroups, null, 2),
+      { flag: 'wx', mode: 0o600 }
+    );
 
-  saveGroupMessages();
+    fs.renameSync(temporary, GROUP_MESSAGES_FILE);
+  } finally {
+    try {
+      fs.unlinkSync(temporary);
+    } catch (_) {
+      // Temporary file may already have been renamed.
+    }
+  }
+
+  // Update RAM only after successful disk persistence.
+  groupMessages[id] = next;
 }
 
 // ========================================
@@ -1087,103 +1143,175 @@ function saveMessageExpirations(expirations) {
   }
 }
 
-function queueOfflineMessage(
-  username,
-  messageData,
-) {
-  const existing = Array.isArray(offlineMessages[username])
-    ? offlineMessages[username]
-    : [];
+const privateMessageOwnership = createPrivateMessageOwnership({
+  filePath: path.join(DATA_DIR, 'private_message_ownership.json'),
+});
 
-  const alreadyQueued = existing.some(
-    (message) => message?.id === messageData.id
-  );
-
-  if (alreadyQueued) {
-    return;
-  }
-
-  // Copy-on-write: do not mutate the active queue before
-  // the complete replacement has been persisted successfully.
-  const nextRecipientQueue = [...existing, messageData];
-
-  const nextMessages = {
-    ...offlineMessages,
-    [username]: nextRecipientQueue,
-  };
-
-  // Throws on a failed write; the existing RAM queue is unchanged.
-  saveOfflineMessages(nextMessages);
-
-  // Commit only after persistence succeeds.
-  offlineMessages[username] = nextRecipientQueue;
-
-  console.log(
-    `💾 Сообщение сохранено в офлайн-очередь для ${username}`
-  );
+function verifyPrivateMessageOperation({
+  messageId,
+  from,
+  to,
+  actor,
+  action,
+}) {
+  return privateMessageOwnership.verify({
+    messageId,
+    from,
+    to,
+    actor,
+    action,
+  }).allowed === true;
 }
+
+const { queueOfflineMessage } = createOfflineMessageQueue({
+  getQueues: () => offlineMessages,
+  saveQueues: saveOfflineMessages,
+  commitRecipientQueue: (username, nextRecipientQueue) => {
+    offlineMessages[username] = nextRecipientQueue;
+  },
+  logger: console.log,
+});
+const groupMediaCommitService = createGroupMediaCommitService({
+  getHistory: (groupId) => getGroupHistory(groupId),
+  appendMessage: (groupId, message) => appendGroupMessage(groupId, message),
+  commitMediaGrant: (message) => {
+    if (!mediaAclInfrastructure) {
+      throw new Error('MEDIA_GRANTS_NOT_INITIALIZED');
+    }
+    mediaAclInfrastructure.commit.commitGroup(message);
+  },
+});
+const messageDeliveryService = createMessageDeliveryService({
+  queueMessage: queueOfflineMessage,
+  getRecipientSocket: (username) => onlineUsers.get(username),
+  sendMessage: (socket, type, message) => send(socket, type, message),
+  isSocketOpen: (socket) => socket?.readyState === WebSocket.OPEN,
+  notifyOffline: () => {},
+  afterPersist: (message, acceptance, context) => {
+    privateMessageOwnership.remember(message);
+    if (!message.mediaId) return;
+    if (!mediaAclInfrastructure) {
+      throw new Error('MEDIA_GRANTS_NOT_INITIALIZED');
+    }
+    mediaAclInfrastructure.commit.commitPrivate(message);
+
+    if (MEDIA_RECOVERY_PROOF_WRITES_READY) {
+      const senderSocket = context?.senderSocket;
+      if (!senderSocket) {
+        throw new Error('AUTHENTICATED_SENDER_SOCKET_REQUIRED');
+      }
+
+      const result = getMediaRecoveryProofIssuer().issue(
+        senderSocket,
+        message
+      );
+
+      if (result.issued !== true) {
+        throw new Error(
+          'TRUSTED_MEDIA_PROOF_REFUSED: ' + result.reason
+        );
+      }
+    }
+  },
+});
 
 function queueOfflineEvent(
   username,
   eventType,
   eventData,
 ) {
-  if (
-    !Array.isArray(
-      offlineMessages[
-        username
-      ],
-    )
-  ) {
-    offlineMessages[
-      username
-    ] = [];
-  }
+  const existing = Array.isArray(offlineMessages[username])
+    ? offlineMessages[username]
+    : [];
 
   const eventId =
     `${eventType}:${eventData.messageId || crypto.randomUUID()}`;
 
   const queuedEvent = {
     ...eventData,
-    __eventType:
-      eventType,
-    __eventId:
-      eventId,
+    __eventType: eventType,
+    __eventId: eventId,
   };
 
-  const oldIndex =
-    offlineMessages[
-      username
-    ].findIndex(
-      (item) =>
-        item?.__eventId ===
-        eventId,
-    );
+  // Copy-on-write: do not mutate the live recipient queue.
+  const nextQueue = [...existing];
 
-  if (
-    oldIndex >= 0
-  ) {
-    offlineMessages[
-      username
-    ][oldIndex] =
-      queuedEvent;
+  const oldIndex = nextQueue.findIndex(
+    (item) => item?.__eventId === eventId,
+  );
+
+  if (oldIndex >= 0) {
+    nextQueue[oldIndex] = queuedEvent;
   } else {
-    offlineMessages[
-      username
-    ].push(
-      queuedEvent,
-    );
+    nextQueue.push(queuedEvent);
   }
 
-  saveOfflineMessages(
-    offlineMessages,
-  );
+  const nextMessages = {
+    ...offlineMessages,
+    [username]: nextQueue,
+  };
+
+  // A failed disk write must leave live RAM unchanged.
+  saveOfflineMessages(nextMessages);
+
+  // Commit only after the complete queue was persisted.
+  offlineMessages[username] = nextQueue;
 
   console.log(
-    `💾 Событие ${eventType} сохранено для ${username}`,
+    `Offline event ${eventType} persisted for ${username}`,
   );
 }
+// Proof retirement remains disabled until all lifecycle and
+// crash-consistency checks are complete.
+const MEDIA_RECOVERY_RETIREMENT_READY = false;
 
+let mediaRecoveryRetirementJournal = null;
+
+function retireQueuedMediaProofsBeforeRemoval(
+  username,
+  messageId,
+  queued
+) {
+  if (!MEDIA_RECOVERY_RETIREMENT_READY) {
+    return;
+  }
+
+  if (!Array.isArray(queued)) {
+    throw new Error('INVALID_RETIREMENT_QUEUE');
+  }
+
+  if (!mediaRecoveryRetirementJournal) {
+    const key = process.env.FENYVO_MEDIA_RECOVERY_JOURNAL_KEY;
+
+    if (typeof key !== 'string' ||
+        !/^[a-f0-9]{64}$/i.test(key)) {
+      throw new Error('MEDIA_RECOVERY_JOURNAL_KEY_REQUIRED');
+    }
+
+    mediaRecoveryRetirementJournal = createMediaRecoveryJournal({
+      filePath: path.join(DATA_DIR, 'media_recovery_proofs_v2.json'),
+      key
+    });
+  }
+
+  for (const item of queued) {
+    if (!item || item.__eventType || item.id !== messageId ||
+        item.mediaId == null) {
+      continue;
+    }
+
+    if (item.to !== username) {
+      throw new Error('RETIREMENT_RECIPIENT_MISMATCH');
+    }
+
+    mediaRecoveryRetirementJournal.retire({
+      id: item.id,
+      mediaId: item.mediaId,
+      from: item.from,
+      to: item.to
+    });
+  }
+}
 function purgeOfflineMessageArtifacts(
   username,
   messageId,
@@ -1303,6 +1431,14 @@ function purgeOfflineMessageArtifacts(
         nextMessages[username] = nextQueue;
       }
 
+      // Retire proofs before the queue can be persisted without
+      // its original media message. Disabled until verified.
+      retireQueuedMediaProofsBeforeRemoval(
+        username,
+        messageId,
+        queued
+      );
+
       // First persist the complete updated queue.
       // A failed save must leave the active RAM queue untouched.
       saveOfflineMessages(nextMessages);
@@ -1316,48 +1452,31 @@ function purgeOfflineMessageArtifacts(
     }
   }
 
-  const queuedStatuses =
-    offlineMessageStatus[
-      username
-    ];
+  const queuedStatuses = offlineMessageStatus[username];
 
-  if (
-    Array.isArray(
-      queuedStatuses,
-    )
-  ) {
-    const nextStatuses =
-      queuedStatuses.filter(
-        (item) =>
-          item?.data?.messageId
-            ?.toString()
-            .trim() !==
-          messageId,
-      );
+  if (Array.isArray(queuedStatuses)) {
+    const nextStatuses = queuedStatuses.filter(
+      item => item?.data?.messageId?.toString().trim() !== messageId
+    );
 
-    if (
-      nextStatuses.length !==
-        queuedStatuses.length
-    ) {
-      if (
-        nextStatuses.length ===
-          0
-      ) {
-        delete offlineMessageStatus[
-          username
-        ];
+    if (nextStatuses.length !== queuedStatuses.length) {
+      const nextMap = { ...offlineMessageStatus };
+
+      if (nextStatuses.length === 0) {
+        delete nextMap[username];
       } else {
-        offlineMessageStatus[
-          username
-        ] = nextStatuses;
+        nextMap[username] = nextStatuses;
       }
 
-      saveOfflineMessageStatus(
-        offlineMessageStatus,
-      );
+      saveOfflineMessageStatus(nextMap);
+
+      if (nextStatuses.length === 0) {
+        delete offlineMessageStatus[username];
+      } else {
+        offlineMessageStatus[username] = nextStatuses;
+      }
     }
   }
-
   return removedQueuedOriginal;
 }
 
@@ -1507,6 +1626,8 @@ function deliverOfflineMessages(
     ...queued,
   ];
 
+  let deliveredCount = 0;
+
   console.log(
     `📦 Офлайн-сообщений для ${username}: ${pending.length}`,
   );
@@ -1526,11 +1647,79 @@ function deliverOfflineMessages(
     delete eventData.__eventType;
     delete eventData.__eventId;
 
+    // STEP_408_OFFLINE_OWNERSHIP_GUARD_BEGIN
+    // The trusted persisted private-message queue is the recovery source.
+    // Other queued event types retain their existing delivery semantics.
+    if (eventType === 'message') {
+      if (
+        !eventData ||
+        typeof eventData.id !== 'string' ||
+        typeof eventData.from !== 'string' ||
+        eventData.to !== username
+      ) {
+        continue;
+      }
+
+      try {
+        // Repair an interrupted queue-first / ownership-second commit.
+        privateMessageOwnership.remember(eventData);
+
+        // Reject unknown, ambiguous or mismatching message identities.
+        if (!verifyPrivateMessageOperation({
+          messageId: eventData.id,
+          from: eventData.from,
+          to: eventData.to,
+          actor: username,
+          action: 'read',
+        })) {
+          continue;
+        }
+      } catch (error) {
+        // Do not deliver when the ownership record cannot be persisted.
+        // Preserve the existing queued message for a later retry.
+        console.error(
+          'Offline message ownership recovery failed:',
+          error?.code || error?.message || 'UNKNOWN',
+        );
+        continue;
+      }
+    }
+    // STEP_408_OFFLINE_OWNERSHIP_GUARD_END
+
+    // Never replay private media without server-side authorization.
+    if (
+      eventType === 'message' &&
+      Object.prototype.hasOwnProperty.call(eventData, 'mediaId') &&
+      eventData.mediaId != null
+    ) {
+      let allowed = false;
+
+      try {
+        allowed = Boolean(
+          eventData.to === username &&
+          mediaAclInfrastructure &&
+          mediaAclInfrastructure.access &&
+          typeof mediaAclInfrastructure.access.canDownload === 'function' &&
+          mediaAclInfrastructure.access.canDownload(
+            eventData.mediaId,
+            username,
+          ) === true
+        );
+      } catch (_) {
+        allowed = false;
+      }
+
+      if (!allowed) {
+        continue;
+      }
+    }
+
     send(
       ws,
       eventType,
       eventData,
     );
+    deliveredCount += 1;
   }
 
   send(
@@ -1538,12 +1727,12 @@ function deliverOfflineMessages(
     'offline_messages_complete',
     {
       count:
-        pending.length,
+        deliveredCount,
     },
   );
 
   console.log(
-    `✅ Офлайн-сообщения переданы ${username}: ${pending.length}`,
+    `✅ Офлайн-сообщения переданы ${username}: ${deliveredCount}`,
   );
 }
 
@@ -1552,74 +1741,17 @@ function deliverOfflineMessages(
 // ========================================
 
 function loadOfflineMessageStatus() {
-  try {
-    if (
-      !fs.existsSync(
-        OFFLINE_MESSAGE_STATUS_FILE,
-      )
-    ) {
-      fs.writeFileSync(
-        OFFLINE_MESSAGE_STATUS_FILE,
-        JSON.stringify(
-          {},
-          null,
-          2,
-        ),
-        'utf8',
-      );
-
-      return {};
-    }
-
-    const data =
-      JSON.parse(
-        fs.readFileSync(
-          OFFLINE_MESSAGE_STATUS_FILE,
-          'utf8',
-        ),
-      );
-
-    if (
-      !data ||
-      typeof data !==
-        'object' ||
-      Array.isArray(
-        data,
-      )
-    ) {
-      return {};
-    }
-
-    return data;
-  } catch (error) {
-    console.error(
-      '❌ Ошибка загрузки офлайн-статусов сообщений:',
-      error,
-    );
-
-    return {};
-  }
+  const store = createOfflineAtomicStore({
+    filePath: OFFLINE_MESSAGE_STATUS_FILE,
+  });
+  return store.load();
 }
 
-function saveOfflineMessageStatus(
-  statuses,
-) {
-  try {
-    fs.writeFileSync(
-      OFFLINE_MESSAGE_STATUS_FILE,
-      JSON.stringify(
-        statuses,
-        null,
-        2,
-      ),
-      'utf8',
-    );
-  } catch (error) {
-    console.error(
-      '❌ Ошибка сохранения офлайн-статусов сообщений:',
-      error,
-    );
-  }
+function saveOfflineMessageStatus(statuses) {
+  const store = createOfflineAtomicStore({
+    filePath: OFFLINE_MESSAGE_STATUS_FILE,
+  });
+  return store.save(statuses);
 }
 
 function queueOfflineMessageStatus(
@@ -1627,86 +1759,45 @@ function queueOfflineMessageStatus(
   type,
   data,
 ) {
-  if (
-    !Array.isArray(
-      offlineMessageStatus[
-        username
-      ],
-    )
-  ) {
-    offlineMessageStatus[
-      username
-    ] = [];
-  }
+  const messageId = data.messageId?.toString().trim();
+  if (!messageId) return;
 
-  const messageId =
-    data.messageId
-      ?.toString()
-      .trim();
+  const existing = Array.isArray(offlineMessageStatus[username])
+    ? offlineMessageStatus[username]
+    : [];
 
-  if (!messageId) {
-    return;
-  }
+  let nextQueue = existing;
 
-  if (
-    type ===
-      'message_read'
-  ) {
-    offlineMessageStatus[
-      username
-    ] = offlineMessageStatus[
-      username
-    ].filter(
-      (item) =>
-        item?.data?.messageId !==
-          messageId,
+  if (type === 'message_read') {
+    nextQueue = existing.filter(
+      item => item?.data?.messageId !== messageId
     );
   } else {
-    const alreadyRead =
-      offlineMessageStatus[
-        username
-      ].some(
-        (item) =>
-          item?.type ===
-            'message_read' &&
-          item?.data?.messageId ===
-            messageId,
-      );
+    const alreadyRead = existing.some(
+      item =>
+        item?.type === 'message_read' &&
+        item?.data?.messageId === messageId
+    );
+    if (alreadyRead) return;
 
-    if (alreadyRead) {
-      return;
-    }
-
-    const alreadyQueued =
-      offlineMessageStatus[
-        username
-      ].some(
-        (item) =>
-          item?.type ===
-            type &&
-          item?.data?.messageId ===
-            messageId,
-      );
-
-    if (alreadyQueued) {
-      return;
-    }
+    const alreadyQueued = existing.some(
+      item =>
+        item?.type === type &&
+        item?.data?.messageId === messageId
+    );
+    if (alreadyQueued) return;
   }
 
-  offlineMessageStatus[
-    username
-  ].push({
-    type,
-    data,
-  });
+  nextQueue = [...nextQueue, { type, data }];
 
-  saveOfflineMessageStatus(
-    offlineMessageStatus,
-  );
+  const nextStatuses = {
+    ...offlineMessageStatus,
+    [username]: nextQueue,
+  };
 
-  console.log(
-    `💾 Статус ${type} сохранён для ${username}: ${messageId}`,
-  );
+  // Persist before committing the new state in memory.
+  saveOfflineMessageStatus(nextStatuses);
+  offlineMessageStatus[username] = nextQueue;
 }
 
 function sendOrQueueMessageStatus(
@@ -1801,13 +1892,11 @@ function deliverOfflineMessageStatus(
     );
   }
 
-  delete offlineMessageStatus[
-    username
-  ];
+  const nextStatuses = { ...offlineMessageStatus };
+  delete nextStatuses[username];
 
-  saveOfflineMessageStatus(
-    offlineMessageStatus,
-  );
+  saveOfflineMessageStatus(nextStatuses);
+  delete offlineMessageStatus[username];
 
   console.log(
     `✅ Офлайн-статусы переданы ${username}: ${pending.length}`,
@@ -2693,8 +2782,10 @@ const mediaTokens = new Map();
 const MAX_CONCURRENT_MEDIA_UPLOADS = 8;
 const MAX_CONCURRENT_MEDIA_UPLOADS_PER_USER = 2;
 const MEDIA_FREE_SPACE_RESERVE_BYTES = 2 * 1024 * 1024 * 1024;
-let activeMediaUploads = 0;
-let mediaUploadBytesInFlight = 0;
+const mediaUploadState = {
+  activeMediaUploads: 0,
+  mediaUploadBytesInFlight: 0,
+};
 const activeMediaUploadsByUser = new Map();
 
 function availableMediaBytes() {
@@ -2702,12 +2793,15 @@ function availableMediaBytes() {
   return Number(stats.bavail) * Number(stats.bsize);
 }
 
-function saveMediaIndex() {
-  saveJsonObjectFile(
-    MEDIA_INDEX_FILE,
-    mediaIndex,
-    'медиа-индекса',
-  );
+function saveMediaIndex(nextIndex = mediaIndex) {
+  // STEP_315_ATOMIC_MEDIA_INDEX_BEGIN
+  // Failures propagate instead of being silently logged.
+  return require('./server_media_index_atomic_store')
+    .saveMediaIndexAtomic({
+      filePath: MEDIA_INDEX_FILE,
+      index: nextIndex,
+    });
+  // STEP_315_ATOMIC_MEDIA_INDEX_END
 }
 
 function safeMediaFileName(value) {
@@ -2759,7 +2853,8 @@ function storeEmbeddedMedia({ encoded, owner, fileName, mimeType, messageType })
   const mediaId = crypto.randomUUID();
   const storedName = `${mediaId}${safeMediaExtension(safeName)}`;
   fs.writeFileSync(path.join(MEDIA_DIR, storedName), bytes);
-  mediaIndex[mediaId] = {
+  /* STEP_316_MEDIA_INDEX_COW_BEGIN */
+const nextRecord = {
     owner: owner || 'legacy',
     storedName,
     fileName: safeName,
@@ -2768,7 +2863,17 @@ function storeEmbeddedMedia({ encoded, owner, fileName, mimeType, messageType })
     messageType: (messageType || 'file').toString().slice(0, 24),
     createdAt: new Date().toISOString(),
   };
-  saveMediaIndex();
+const nextIndex = {
+  ...mediaIndex,
+  [mediaId]: nextRecord,
+};
+
+// Persist the candidate index before changing live RAM.
+saveMediaIndex(nextIndex);
+
+// Commit to RAM only after persistence succeeds.
+mediaIndex[mediaId] = nextRecord;
+/* STEP_316_MEDIA_INDEX_COW_END */
   return mediaRecord(mediaId);
 }
 
@@ -2807,38 +2912,98 @@ function compactEmbeddedMessage(message, ownerHint = 'legacy') {
 }
 
 function migrateServerEmbeddedMedia() {
-  let changedGroups = false;
-  let changedOffline = false;
+  // STEP_327_STAGED_MIGRATION_BEGIN
   let migrated = 0;
 
-  for (const list of Object.values(groupMessages)) {
+  // Group messages: stage copies, persist, then commit RAM.
+  const nextGroups = { ...groupMessages };
+  let changedGroups = false;
+
+  for (const [groupId, list] of Object.entries(groupMessages)) {
     if (!Array.isArray(list)) continue;
-    for (const message of list) {
-      if (compactEmbeddedMessage(message, 'group_legacy')) {
-        changedGroups = true;
-        migrated++;
+
+    let changedList = false;
+    const nextList = list.map((message) => {
+      if (!message || typeof message !== 'object' ||
+          Array.isArray(message)) return message;
+
+      const draft = { ...message };
+      if (!compactEmbeddedMessage(draft, 'group_legacy')) {
+        return message;
+      }
+
+      changedList = true;
+      migrated++;
+      return draft;
+    });
+
+    if (changedList) {
+      nextGroups[groupId] = nextList;
+      changedGroups = true;
+    }
+  }
+
+  if (changedGroups) {
+    // The existing group saver suppresses errors.
+    // Use the tested atomic JSON writer directly here.
+    require('./server_media_index_atomic_store')
+      .saveMediaIndexAtomic({
+        filePath: GROUP_MESSAGES_FILE,
+        index: nextGroups,
+      });
+
+    for (const [groupId, list] of Object.entries(nextGroups)) {
+      if (groupMessages[groupId] !== list) {
+        groupMessages[groupId] = list;
       }
     }
   }
+
+  // Offline messages: independent persistence and RAM commit.
+  const nextOffline = { ...offlineMessages };
+  let changedOffline = false;
 
   for (const [username, list] of Object.entries(offlineMessages)) {
     if (!Array.isArray(list)) continue;
-    for (const message of list) {
-      if (message?.__eventType) continue;
-      if (compactEmbeddedMessage(message, username)) {
-        changedOffline = true;
-        migrated++;
+
+    let changedList = false;
+    const nextList = list.map((message) => {
+      if (!message || typeof message !== 'object' ||
+          Array.isArray(message) || message.__eventType) {
+        return message;
+      }
+
+      const draft = { ...message };
+      if (!compactEmbeddedMessage(draft, username)) {
+        return message;
+      }
+
+      changedList = true;
+      migrated++;
+      return draft;
+    });
+
+    if (changedList) {
+      nextOffline[username] = nextList;
+      changedOffline = true;
+    }
+  }
+
+  if (changedOffline) {
+    saveOfflineMessages(nextOffline);
+
+    for (const [username, list] of Object.entries(nextOffline)) {
+      if (offlineMessages[username] !== list) {
+        offlineMessages[username] = list;
       }
     }
   }
 
-  if (changedGroups) saveGroupMessages();
-  if (changedOffline) saveOfflineMessages(offlineMessages);
   if (migrated > 0) {
-    console.log(`⚡ V621: вынесено старых медиа из JSON: ${migrated}`);
+    console.log(`Media migration staged: ${migrated}`);
   }
+  // STEP_327_STAGED_MIGRATION_END
 }
-
 migrateServerEmbeddedMedia();
 
 function tokenFromRequest(req) {
@@ -2857,216 +3022,162 @@ function jsonResponse(res, statusCode, payload) {
   res.end(body);
 }
 
-const mediaServer = http.createServer((req, res) => {
-  const callUrl = new URL(req.url || '/', 'http://localhost');
-  const callRoute = /^\/calls\/([^/]+)(\/avatar)?$/.exec(callUrl.pathname);
-  if (callRoute) {
-    const id = callRoute[1];
-    const capability = (req.headers.authorization || '').replace(/^Bearer /, '') || callUrl.searchParams.get('t');
-    const pending = callSignaling.authorize(id, capability);
-    if (!pending) { jsonResponse(res, 404, { ringing: false }); return; }
-    if (req.method === 'POST' && !callRoute[2]) {
-      callSignaling.decline(id, capability);
-      jsonResponse(res, 200, { ended: true }); return;
-    }
-    if (req.method === 'GET' && callRoute[2]) {
-      // Capability grants only the caller avatar for this ringing session.
-      const avatarRoot = path.resolve(AVATARS_DIR);
-      const avatarPath = path.resolve(getAvatarPath(pending.from));
-      if (path.dirname(avatarPath) !== avatarRoot || !fs.existsSync(avatarPath)) {
-        jsonResponse(res, 404, {}); return;
-      }
-      res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'no-store' });
-      fs.createReadStream(avatarPath).on('error', () => res.destroy()).pipe(res); return;
-    }
-    if (req.method === 'GET') {
-      jsonResponse(res, 200, { ringing: true, expiresAt: pending.expiresAt }); return;
-    }
-    jsonResponse(res, 405, {}); return;
-  }
-  const token = tokenFromRequest(req);
-  const owner = mediaTokens.get(token);
-  if (!owner) {
-    jsonResponse(res, 401, { error: 'Требуется вход в Fenyvo' });
-    return;
-  }
+const { createMediaGrantStore } = require('./server_media_grant_store');
+const { createMediaAccessService } = require('./server_media_access_service');
+const { createMediaGrantCommitService } = require('./server_media_grant_commit_service');
 
-  const requestUrl = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+// Not ready for activation: historical permissions and delivery atomicity
+// must be addressed before enabling HTTP authorization.
+const MEDIA_ACL_ENFORCEMENT_READY = false;
+const MEDIA_GRANT_WRITES_READY = true;
 
-  if (req.method === 'POST' && requestUrl.pathname === '/media/upload') {
-    const contentLength = Number(req.headers['content-length'] || 0);
-    if (!Number.isFinite(contentLength) || contentLength <= 0) {
-      jsonResponse(res, 411, { error: 'Не указан размер файла' });
-      return;
-    }
-    if (contentLength > MAX_MEDIA_BYTES) {
-      jsonResponse(res, 413, { error: 'Файл слишком большой. Максимум 1 ГБ' });
-      return;
-    }
-    const ownerUploads = activeMediaUploadsByUser.get(owner) || 0;
-    if (
-      activeMediaUploads >= MAX_CONCURRENT_MEDIA_UPLOADS ||
-      ownerUploads >= MAX_CONCURRENT_MEDIA_UPLOADS_PER_USER
-    ) {
-      jsonResponse(res, 429, { error: 'Слишком много одновременных загрузок' });
-      return;
-    }
-    try {
-      const availableBytes = availableMediaBytes() - mediaUploadBytesInFlight;
-      if (availableBytes < contentLength + MEDIA_FREE_SPACE_RESERVE_BYTES) {
-        jsonResponse(res, 507, { error: 'Недостаточно свободного места на сервере' });
-        return;
-      }
-    } catch (error) {
-      console.error('Не удалось проверить свободное место:', error.message);
-      jsonResponse(res, 503, { error: 'Хранилище временно недоступно' });
-      return;
-    }
+function initializeMediaAclInfrastructure() {
+  const grantStore = createMediaGrantStore({
+    filePath: path.join(DATA_DIR, 'media_grants.json'),
+    allowedRoot: DATA_DIR,
+  });
 
-    activeMediaUploads += 1;
-    mediaUploadBytesInFlight += contentLength;
-    activeMediaUploadsByUser.set(owner, ownerUploads + 1);
-    let uploadReservationReleased = false;
-    const releaseUploadReservation = () => {
-      if (uploadReservationReleased) return;
-      uploadReservationReleased = true;
-      activeMediaUploads = Math.max(0, activeMediaUploads - 1);
-      mediaUploadBytesInFlight = Math.max(
-        0,
-        mediaUploadBytesInFlight - contentLength,
+  const access = createMediaAccessService({
+    getMedia: (mediaId) => {
+      const media = mediaRecord(mediaId);
+      return media ? media.record : null;
+    },
+    getGroup: (groupId) => getGroupById(groupId),
+    isGroupMember,
+    getGrant: (mediaId) => grantStore.getGrant(mediaId),
+  });
+
+  const commit = createMediaGrantCommitService({
+    grantStore,
+    mediaForOwner: (mediaId, owner) => {
+      const media = mediaRecord(mediaId);
+      return Boolean(
+        media &&
+        media.record &&
+        media.record.owner === owner
       );
-      const remaining = (activeMediaUploadsByUser.get(owner) || 1) - 1;
-      if (remaining <= 0) activeMediaUploadsByUser.delete(owner);
-      else activeMediaUploadsByUser.set(owner, remaining);
-    };
+    },
+  });
 
-    const fileName = safeMediaFileName(requestUrl.searchParams.get('fileName') || 'file.bin');
-    const mimeType = (requestUrl.searchParams.get('mimeType') || req.headers['content-type'] || 'application/octet-stream')
-      .toString().slice(0, 120);
-    const messageType = (requestUrl.searchParams.get('messageType') || 'file')
-      .toString().slice(0, 24);
-    const mediaId = crypto.randomUUID();
-    const storedName = `${mediaId}${safeMediaExtension(fileName)}`;
-    const target = path.join(MEDIA_DIR, storedName);
-    const output = fs.createWriteStream(target, { flags: 'wx' });
-    let received = 0;
-    let failed = false;
+  return Object.freeze({ grantStore, access, commit });
+}
 
-    const fail = (status, reason) => {
-      if (failed) return;
-      failed = true;
-      releaseUploadReservation();
-      try { output.destroy(); } catch (_) {}
-      try { if (fs.existsSync(target)) fs.unlinkSync(target); } catch (_) {}
-      if (!res.headersSent) jsonResponse(res, status, { error: reason });
-    };
+const mediaAclInfrastructure = MEDIA_GRANT_WRITES_READY
+  ? initializeMediaAclInfrastructure()
+  : null;
 
-    req.on('data', (chunk) => {
-      if (failed) return;
-      received += chunk.length;
-      if (received > MAX_MEDIA_BYTES) {
-        fail(413, 'Файл слишком большой. Максимум 1 ГБ');
-        req.destroy();
-        return;
-      }
-      if (!output.write(chunk)) {
-        req.pause();
-        output.once('drain', () => req.resume());
-      }
-    });
+let mediaRecoveryProofIssuer = null;
 
-    req.on('end', () => {
-      if (failed) return;
-      output.end(() => {
-        if (failed) return;
-        if (received <= 0 || received !== contentLength) {
-          fail(400, 'Файл получен не полностью');
-          return;
-        }
-        mediaIndex[mediaId] = {
-          owner,
-          storedName,
-          fileName,
-          fileSize: received,
-          mimeType,
-          messageType,
-          createdAt: new Date().toISOString(),
-        };
-        saveMediaIndex();
-        releaseUploadReservation();
-        jsonResponse(res, 201, {
+function getMediaRecoveryProofIssuer() {
+  if (!MEDIA_RECOVERY_PROOF_WRITES_READY) {
+    throw new Error('MEDIA_RECOVERY_PROOF_WRITES_DISABLED');
+  }
+
+  if (!mediaAclInfrastructure) {
+    throw new Error('MEDIA_GRANTS_NOT_INITIALIZED');
+  }
+
+  if (mediaRecoveryProofIssuer) {
+    return mediaRecoveryProofIssuer;
+  }
+
+  const key = process.env.FENYVO_MEDIA_RECOVERY_JOURNAL_KEY;
+  if (typeof key !== 'string' ||
+      !/^[a-f0-9]{64}$/i.test(key)) {
+    throw new Error('MEDIA_RECOVERY_JOURNAL_KEY_REQUIRED');
+  }
+
+  const journal = createMediaRecoveryJournal({
+    filePath: path.join(DATA_DIR, 'media_recovery_proofs_v2.json'),
+    key
+  });
+
+  mediaRecoveryProofIssuer = createMediaRecoveryProofIssuer({
+    getAuthenticatedSender: (socket) => {
+      const user = wsSessionIdentity.getAuthenticatedUser(socket);
+      return user && onlineUsers.get(user) === socket
+        ? user : null;
+    },
+    getPending: (recipient) => offlineMessages[recipient],
+    getMedia: (mediaId) => {
+      const media = mediaRecord(mediaId);
+      return media ? media.record : null;
+    },
+    getGrant: (mediaId) =>
+      mediaAclInfrastructure.grantStore.getGrant(mediaId),
+    journal
+  });
+
+  return mediaRecoveryProofIssuer;
+}
+const { createLegacyMediaRegrantProtocol } =
+  require('./server_legacy_media_regrant_protocol');
+const { createLegacyMediaRegrantHandler } =
+  require('./server_legacy_media_regrant_handler');
+
+// Owner-authorized re-sharing of historical private media.
+// Authentication is resolved from the active server-bound socket.
+const legacyMediaRegrantHandler = mediaAclInfrastructure
+  ? createLegacyMediaRegrantHandler({
+      getAuthenticatedUsername: (socket) => {
+        const user = wsSessionIdentity.getAuthenticatedUser(socket);
+        return user && onlineUsers.get(user) === socket ? user : null;
+      },
+      getMedia: (mediaId) => {
+        const media = mediaRecord(mediaId);
+        return media ? media.record : null;
+      },
+      getGrant: (mediaId) =>
+        mediaAclInfrastructure.grantStore.getGrant(mediaId),
+      isRecipientEligible: (owner, recipient) => {
+        const accepted = getAcceptedCommunicationContacts(owner);
+        return Array.isArray(accepted) &&
+          accepted.includes(recipient);
+      },      addRecipient: (mediaId, recipient) =>
+        mediaAclInfrastructure.grantStore.addRecipient(
           mediaId,
-          fileName,
-          fileSize: received,
-          mimeType,
-        });
-        console.log(`📦 Медиа загружено: ${owner} → ${fileName} (${(received / 1024 / 1024).toFixed(1)} МБ)`);
-      });
-    });
-
-    req.on('error', () => fail(400, 'Соединение при загрузке оборвалось'));
-    req.on('aborted', () => fail(400, 'Загрузка отменена'));
-    output.on('error', () => fail(500, 'Не удалось сохранить файл'));
-    return;
-  }
-
-  if (req.method === 'GET' && requestUrl.pathname.startsWith('/media/')) {
-    const mediaId = decodeURIComponent(requestUrl.pathname.slice('/media/'.length)).trim();
-    const item = mediaRecord(mediaId);
-    if (!item) {
-      jsonResponse(res, 404, { error: 'Файл не найден' });
-      return;
-    }
-
-    const stat = fs.statSync(item.filePath);
-    const total = stat.size;
-    const mimeType = item.record.mimeType || 'application/octet-stream';
-    const range = req.headers.range?.toString() || '';
-    let start = 0;
-    let end = total - 1;
-    let status = 200;
-
-    if (range) {
-      const match = range.match(/^bytes=(\d*)-(\d*)$/i);
-      if (!match) {
-        res.writeHead(416, { 'Content-Range': `bytes */${total}` });
-        res.end();
-        return;
-      }
-      if (match[1]) start = Number(match[1]);
-      if (match[2]) end = Number(match[2]);
-      if (!match[1] && match[2]) {
-        const suffix = Number(match[2]);
-        start = Math.max(0, total - suffix);
-        end = total - 1;
-      }
-      if (!Number.isFinite(start) || !Number.isFinite(end) || start < 0 || start > end || start >= total) {
-        res.writeHead(416, { 'Content-Range': `bytes */${total}` });
-        res.end();
-        return;
-      }
-      end = Math.min(end, total - 1);
-      status = 206;
-    }
-
-    const headers = {
-      'Content-Type': mimeType,
-      'Content-Length': end - start + 1,
-      'Accept-Ranges': 'bytes',
-      'Cache-Control': 'private, max-age=86400',
-      'Content-Disposition': `inline; filename*=UTF-8''${encodeURIComponent(item.record.fileName || 'media.bin')}`,
-    };
-    if (status === 206) headers['Content-Range'] = `bytes ${start}-${end}/${total}`;
-    res.writeHead(status, headers);
-    fs.createReadStream(item.filePath, { start, end }).pipe(res);
-    return;
-  }
-
-  jsonResponse(res, 404, { error: 'Не найдено' });
+          recipient
+        ),
+    })
+  : null;
+const legacyMediaRegrantProtocol = createLegacyMediaRegrantProtocol({
+  getAuthenticatedUser: (socket) =>
+    wsSessionIdentity.getAuthenticatedUser(socket),
+  getActiveSocket: (username) => onlineUsers.get(username),
+  regrantHandler: legacyMediaRegrantHandler,
+  send: (socket, type, data) => send(socket, type, data),
 });
+const { createMediaHttpService } = require('./server_media_http_service');
 
-mediaServer.listen(MEDIA_PORT, SERVER_CONFIG.mediaHost, () => {
-  console.log(`📦 Медиа-сервер: ${SERVER_CONFIG.mediaHost}:${MEDIA_PORT}`);
+const mediaServer = createMediaHttpService({
+  http,
+  fs,
+  path,
+  crypto,
+  MEDIA_DIR,
+  AVATARS_DIR,
+  mediaIndex,
+  callSignaling,
+  SERVER_CONFIG,
+  MAX_MEDIA_BYTES,
+  MEDIA_PORT,
+  jsonResponse,
+  tokenFromRequest,
+  mediaTokens,
+  getAvatarPath,
+  activeMediaUploadsByUser,
+  MAX_CONCURRENT_MEDIA_UPLOADS,
+  MAX_CONCURRENT_MEDIA_UPLOADS_PER_USER,
+  availableMediaBytes,
+  MEDIA_FREE_SPACE_RESERVE_BYTES,
+  safeMediaFileName,
+  safeMediaExtension,
+  saveMediaIndex,
+  mediaRecord,
+  canDownloadMedia: MEDIA_ACL_ENFORCEMENT_READY && mediaAclInfrastructure
+    ? mediaAclInfrastructure.access.canDownload
+    : undefined,
+  uploadState: mediaUploadState,
 });
 
 // ========================================
@@ -7509,24 +7620,33 @@ wss.on(
                 validMembers,
             };
 
-            groups[
-              groupId
-            ] = group;
 
-            if (
-              !Array.isArray(
-                groupMessages[
-                  groupId
-                ],
-              )
-            ) {
-              groupMessages[
-                groupId
-              ] = [];
+            // STEP_355_GROUP_CREATION_BEGIN
+            const nextGroupMessages = {
+              ...groupMessages,
+              [groupId]: [],
+            };
+            const nextGroups = {
+              ...groups,
+              [groupId]: group,
+            };
+
+            try {
+              saveGroupMessages(nextGroupMessages);
+              persistGroupsCandidate(nextGroups);
+            } catch (error) {
+              console.error('Group creation persistence failed:', error);
+              send(ws, 'group_error', {
+                reason: 'Не удалось сохранить новую группу',
+                groupId,
+              });
+              return;
             }
 
-            saveGroups();
-            saveGroupMessages();
+            groups[groupId] = group;
+            groupMessages[groupId] = [];
+            // STEP_355_GROUP_CREATION_END
+
 
             sendToGroupMembers(
               group,
@@ -7674,14 +7794,30 @@ wss.on(
               return;
             }
 
-            group.members =
-              members;
+                        // STEP_354_MEMBERS_COMMIT_BEGIN
+            const nextGroup = {
+              ...group,
+              members,
+              updatedAt: new Date().toISOString(),
+            };
+            const nextGroups = {
+              ...groups,
+              [groupId]: nextGroup,
+            };
 
-            group.updatedAt =
-              new Date()
-                .toISOString();
+            try {
+              persistGroupsCandidate(nextGroups);
+            } catch (error) {
+              console.error('Group members persistence failed:', error);
+              send(ws, 'group_error', {
+                reason: 'Не удалось сохранить состав группы',
+                groupId,
+              });
+              return;
+            }
 
-            saveGroups();
+            Object.assign(group, nextGroup);
+            // STEP_354_MEMBERS_COMMIT_END
 
             sendToGroupMembers(
               group,
@@ -8004,7 +8140,20 @@ wss.on(
               reactions: {},
             };
 
-            appendGroupMessage(groupId, messageData);
+            const groupCommitResult = groupMediaCommitService.commit(
+              groupId,
+              messageData
+            );
+            if (groupCommitResult.conflict) {
+              send(ws, 'group_error', {
+                reason: 'Конфликт идентификатора сообщения',
+                groupId,
+              });
+              return;
+            }
+            if (groupCommitResult.duplicate) {
+              return;
+            }
             if (callScoped) {
               for (const member of activeCallUsers) {
                 const socket = onlineUsers.get(member);
@@ -8013,12 +8162,21 @@ wss.on(
                 }
               }
             } else {
-              group.lastMessage = text;
-              group.lastMessageFrom = currentUser;
-              group.lastMessageTime = messageData.time;
-              saveGroups();
-              sendToGroupMembers(group, 'group_message', messageData);
-              sendToGroupMembers(group, 'group_updated', { group });
+              const metadataSaved = persistGroupMetadataAfterHistory(
+                groupId, group, {
+                  lastMessage: text,
+                  lastMessageFrom: currentUser,
+                  lastMessageTime: messageData.time,
+                }
+              );
+              sendToGroupMembers(
+                group, 'group_message', messageData
+              );
+              if (metadataSaved) {
+                sendToGroupMembers(
+                  group, 'group_updated', { group }
+                );
+              }
             }
             console.log(
               LOG_MESSAGE_CONTENT
@@ -8166,19 +8324,34 @@ wss.on(
               return;
             }
 
-            history[index] = {
+
+            // STEP_351_EDIT_BEGIN
+            const nextHistory = history.slice();
+            nextHistory[index] = {
               ...history[index],
               text,
-              editedAt:
-                new Date()
-                  .toISOString(),
+              editedAt: new Date().toISOString(),
             };
 
-            groupMessages[
-              groupId
-            ] = history;
+            const nextGroupMessages = {
+              ...groupMessages,
+              [groupId]: nextHistory,
+            };
 
-            saveGroupMessages();
+            try {
+              saveGroupMessages(nextGroupMessages);
+            } catch (error) {
+              console.error('Group edit persistence failed:', error);
+              send(ws, 'group_error', {
+                reason: 'Не удалось сохранить изменение сообщения',
+                groupId,
+              });
+              return;
+            }
+
+            history[index] = nextHistory[index];
+            groupMessages[groupId] = history;
+            // STEP_351_EDIT_END
 
             const lastMessage =
               history[
@@ -8190,21 +8363,23 @@ wss.on(
               lastMessage.id ===
                 messageId
             ) {
-              group.lastMessage =
-                text;
-              group.lastMessageFrom =
-                currentUser;
-              group.lastMessageTime =
-                lastMessage.time;
-              saveGroups();
+              const metadataSaved = persistGroupMetadataAfterHistory(
+                groupId, group, {
+                  lastMessage: text,
+                  lastMessageFrom: currentUser,
+                  lastMessageTime: lastMessage.time,
+                }
+              );
 
-              sendToGroupMembers(
+              if (metadataSaved) {
+sendToGroupMembers(
                 group,
                 'group_updated',
                 {
                   group,
                 },
               );
+}
             }
 
             sendToGroupMembers(
@@ -8331,36 +8506,44 @@ wss.on(
               return;
             }
 
-            history.splice(
-              index,
-              1,
-            );
 
-            groupMessages[
-              groupId
-            ] = history;
+            // STEP_351_DELETE_BEGIN
+            const nextHistory = history.slice();
+            nextHistory.splice(index, 1);
 
-            saveGroupMessages();
+            const nextGroupMessages = {
+              ...groupMessages,
+              [groupId]: nextHistory,
+            };
+
+            try {
+              saveGroupMessages(nextGroupMessages);
+            } catch (error) {
+              console.error('Group deletion persistence failed:', error);
+              send(ws, 'group_error', {
+                reason: 'Не удалось сохранить удаление сообщения',
+                groupId,
+              });
+              return;
+            }
+
+            history.splice(index, 1);
+            groupMessages[groupId] = history;
+            // STEP_351_DELETE_END
 
             const lastMessage =
               history[
                 history.length - 1
               ];
 
-            group.lastMessage =
-              lastMessage?.text ||
-              '';
-
-            group.lastMessageFrom =
-              lastMessage?.from ||
-              '';
-
-            group.lastMessageTime =
-              lastMessage?.time ||
-              group.createdAt ||
-              '';
-
-            saveGroups();
+            const metadataSaved = persistGroupMetadataAfterHistory(
+              groupId, group, {
+                lastMessage: lastMessage?.text || '',
+                lastMessageFrom: lastMessage?.from || '',
+                lastMessageTime:
+                  lastMessage?.time || group.createdAt || '',
+              }
+            );
 
             sendToGroupMembers(
               group,
@@ -8373,13 +8556,15 @@ wss.on(
               },
             );
 
-            sendToGroupMembers(
+            if (metadataSaved) {
+sendToGroupMembers(
               group,
               'group_updated',
               {
                 group,
               },
             );
+}
 
             console.log(
               `🗑️👥 ${currentUser} удалил сообщение ${messageId} из ${group.name}`,
@@ -8571,16 +8756,33 @@ wss.on(
               ] = reaction;
             }
 
-            history[index] = {
+
+            // STEP_351_REACTION_BEGIN
+            const nextHistory = history.slice();
+            nextHistory[index] = {
               ...history[index],
               reactions,
             };
 
-            groupMessages[
-              groupId
-            ] = history;
+            const nextGroupMessages = {
+              ...groupMessages,
+              [groupId]: nextHistory,
+            };
 
-            saveGroupMessages();
+            try {
+              saveGroupMessages(nextGroupMessages);
+            } catch (error) {
+              console.error('Group reaction persistence failed:', error);
+              send(ws, 'group_error', {
+                reason: 'Не удалось сохранить реакцию',
+                groupId,
+              });
+              return;
+            }
+
+            history[index] = nextHistory[index];
+            groupMessages[groupId] = history;
+            // STEP_351_REACTION_END
 
             sendToGroupMembers(
               group,
@@ -8611,6 +8813,11 @@ wss.on(
           // GET USERS
           // ====================================
 
+          // Delegated to a dedicated authenticated WebSocket module.
+          if (type === 'legacy_media_regrant') {
+            legacyMediaRegrantProtocol.handle(ws, currentUser, data);
+            return;
+          }
           if (
             type ===
             'get_users'
@@ -9208,12 +9415,8 @@ if (
               to,
               users: new Set(),
             });
-            queueOfflineMessage(to, messageData);
-            const receiver = onlineUsers.get(to);
-            if (receiver?.readyState === WebSocket.OPEN) {
-              send(receiver, 'message', messageData);
-            } else {
-              queueOfflineMessage(to, messageData);
+            const deliveryResult = messageDeliveryService.deliver(messageData, { senderSocket: ws });
+            if (!deliveryResult.online) {
               void sendFcmPush({
                 username: to,
                 title: currentUser,
@@ -9331,14 +9534,12 @@ if (
               users: new Set(),
             });
 
-            queueOfflineMessage(to, messageData);
-            const receiver = onlineUsers.get(to);
-            if (receiver?.readyState === WebSocket.OPEN) {
-              send(receiver, 'message', messageData);
+            const mediaDeliveryResult = messageDeliveryService.deliver(messageData, { senderSocket: ws });
+            if (mediaDeliveryResult.online) {
               console.log(`✅ Медиа доставлено ${to}`);
             } else {
               console.log(`⚠️ ${to} сейчас офлайн`);
-              queueOfflineMessage(to, messageData);
+
               void sendFcmPush({
                 username: to,
                 title: currentUser,
@@ -9631,25 +9832,8 @@ if (
                   : `💬 ${currentUser} → ${to}: текстовое сообщение`,
             );
 
-            queueOfflineMessage(
-              to,
-              messageData,
-            );
-
-            const receiver =
-              onlineUsers.get(
-                to,
-              );
-
-            if (
-              receiver?.readyState ===
-                WebSocket.OPEN
-            ) {
-              send(
-                receiver,
-                'message',
-                messageData,
-              );
+            const ordinaryDeliveryResult = messageDeliveryService.deliver(messageData, { senderSocket: ws });
+            if (ordinaryDeliveryResult.online) {
 
               console.log(
                 `✅ Сообщение доставлено ${to}`,
@@ -9659,10 +9843,7 @@ if (
                 `⚠️ ${to} сейчас офлайн`,
               );
 
-              queueOfflineMessage(
-                to,
-                messageData,
-              );
+
 
               void sendFcmPush({
                 username:
@@ -9802,15 +9983,13 @@ if (
                 messageId,
               );
 
-            if (
-              knownMessage &&
-              (
-                knownMessage.from !==
-                  currentUser ||
-                knownMessage.to !==
-                  to
-              )
-            ) {
+            if (!verifyPrivateMessageOperation({
+              messageId,
+              from: currentUser,
+              to,
+              actor: currentUser,
+              action: 'edit',
+            })) {
               send(
                 ws,
                 'error',
@@ -9874,22 +10053,26 @@ if (
               if (
                 queuedIndex >= 0
               ) {
-                queued[
-                  queuedIndex
-                ] = {
-                  ...queued[
-                    queuedIndex
-                  ],
-                  text:
-                    newText,
-                  editedAt,
-                  isEdited:
-                    true,
-                };
+                /* STEP_295_PENDING_EDIT_COPY_ON_WRITE_BEGIN */
+const nextQueued = [...queued];
 
-                saveOfflineMessages(
-                  offlineMessages,
-                );
+nextQueued[queuedIndex] = {
+  ...queued[queuedIndex],
+  text: newText,
+  editedAt,
+  isEdited: true,
+};
+
+const nextMessages = {
+  ...offlineMessages,
+  [to]: nextQueued,
+};
+
+// Persist before changing the active in-memory queue.
+saveOfflineMessages(nextMessages);
+
+offlineMessages[to] = nextQueued;
+/* STEP_295_PENDING_EDIT_COPY_ON_WRITE_END */
               } else {
                 queueOfflineEvent(
                   to,
@@ -9966,15 +10149,13 @@ if (
                 messageId,
               );
 
-            if (
-              knownMessage &&
-              (
-                knownMessage.from !==
-                  currentUser ||
-                knownMessage.to !==
-                  to
-              )
-            ) {
+            if (!verifyPrivateMessageOperation({
+              messageId,
+              from: currentUser,
+              to,
+              actor: currentUser,
+              action: 'delete',
+            })) {
               send(
                 ws,
                 'error',
@@ -10039,6 +10220,38 @@ if (
               });
               return;
             }
+
+            // STEP_399_PIN_ACL_BEGIN
+            const ownershipForPin = privateMessageOwnership.resolve(messageId);
+
+            if (
+              !ownershipForPin ||
+              !verifyPrivateMessageOperation({
+                messageId,
+                from: ownershipForPin.from,
+                to: ownershipForPin.to,
+                actor: currentUser,
+                action: 'pin',
+              }) ||
+              !new Set([
+                ownershipForPin.from,
+                ownershipForPin.to,
+              ]).has(to) ||
+              !new Set([
+                ownershipForPin.from,
+                ownershipForPin.to,
+              ]).has(currentUser) ||
+              (
+                messageFrom &&
+                messageFrom !== ownershipForPin.from
+              )
+            ) {
+              send(ws, 'error', {
+                reason: 'Нет доступа к этому сообщению',
+              });
+              return;
+            }
+            // STEP_399_PIN_ACL_END
 
             const knownMessage = messageReactions.get(messageId);
             if (knownMessage) {
@@ -10172,10 +10385,41 @@ if (
               return;
             }
 
-            purgeOfflineMessageArtifacts(
-              messageTo,
-              messageId,
-            );
+            if (MEDIA_ACK_RETIREMENT_READY) {
+              // This branch is intentionally disabled. Do not
+              // enable before durable journal/queue coordination.
+              const ackRetirementAdapter =
+                createMediaAckRetirementAdapter({
+                  verifyAck: verifyMessageAckOwnership,
+                  getPending: recipient =>
+                    offlineMessages[recipient],
+                  retireMedia: () => {
+                    throw new Error(
+                      'SECURE_MEDIA_ACK_RETIREMENT_NOT_CONFIGURED'
+                    );
+                  },
+                  purgeLegacy: (recipient, id) =>
+                    purgeOfflineMessageArtifacts(recipient, id),
+                });
+
+              const guardedAck =
+                ackRetirementAdapter.acknowledge({
+                  authenticatedRecipient:
+                    wsSessionIdentity.getAuthenticatedUser(ws),
+                  messageId,
+                  from: messageFrom,
+                  to: messageTo,
+                });
+
+              if (!guardedAck.accepted) {
+                return;
+              }
+            } else {
+              purgeOfflineMessageArtifacts(
+                messageTo,
+                messageId,
+              );
+            }
             const statusData = {
               messageId,
               from:
@@ -10256,6 +10500,16 @@ if (
                 messageTo
               ]
             ) {
+              return;
+            }
+
+            if (!verifyPrivateMessageOperation({
+              messageId,
+              from: messageFrom,
+              to: messageTo,
+              actor: currentUser,
+              action: 'read',
+            })) {
               return;
             }
 
@@ -10440,6 +10694,21 @@ if (
 
               return;
             }
+
+            // STEP_399_REACTION_ACL_BEGIN
+            if (!verifyPrivateMessageOperation({
+              messageId,
+              from: messageFrom,
+              to: messageTo,
+              actor: currentUser,
+              action: 'reaction',
+            })) {
+              send(ws, 'error', {
+                reason: 'Нет доступа к этому сообщению',
+              });
+              return;
+            }
+            // STEP_399_REACTION_ACL_END
 
             let reactionData =
               messageReactions.get(

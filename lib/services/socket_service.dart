@@ -1,3 +1,5 @@
+import 'socket_login_continuation_guard.dart';
+import 'socket_event_generation_guard.dart';
 import '../features/messages/domain/message_id_generator.dart';
 
 import 'dart:async';
@@ -95,9 +97,28 @@ class SocketService {
   Future<bool> isE2eeReadyWith(String username) async {
     final user = currentUser?.trim() ?? '';
     final peer = username.trim();
+
     if (user.isEmpty || peer.isEmpty) return false;
     if (_e2eeActivePeers.contains(peer)) return true;
+
+    // Capture the account and the active transport before loading.
+    // Preferences may complete after logout or reconnection.
+    final readGeneration = _connectionGeneration;
+    final readChannel = _channel;
+
     final stored = await E2eeSettingsService.instance.activePeers(user);
+
+    if (currentUser?.trim() != user ||
+        !isAuthenticated ||
+        !SocketEventGenerationGuard.isCurrent(
+          eventGeneration: readGeneration,
+          currentGeneration: _connectionGeneration,
+          eventChannel: readChannel,
+          currentChannel: _channel,
+        )) {
+      return false;
+    }
+
     _e2eeActivePeers = stored;
     return stored.contains(peer);
   }
@@ -210,7 +231,22 @@ class SocketService {
       _channel = channel;
 
       channel.stream.listen(
-        _handleRawMessage,
+        (rawMessage) {
+          if (!SocketEventGenerationGuard.isCurrent(
+            eventGeneration: generation,
+            currentGeneration: _connectionGeneration,
+            eventChannel: channel,
+            currentChannel: _channel,
+          )) {
+            return;
+          }
+
+          unawaited(_handleRawMessage(
+            rawMessage,
+            generation: generation,
+            channel: channel,
+          ));
+        },
         onError: (Object error) {
           print('❌ Ошибка WebSocket: $error');
 
@@ -274,7 +310,20 @@ class SocketService {
   // ПОЛУЧЕНИЕ СООБЩЕНИЙ
   // ========================================
 
-  Future<void> _handleRawMessage(dynamic rawMessage) async {
+  Future<void> _handleRawMessage(
+    dynamic rawMessage, {
+    required int generation,
+    required WebSocketChannel channel,
+  }) async {
+    if (!SocketEventGenerationGuard.isCurrent(
+      eventGeneration: generation,
+      currentGeneration: _connectionGeneration,
+      eventChannel: channel,
+      currentChannel: _channel,
+    )) {
+      return;
+    }
+
     try {
       final decoded = jsonDecode(rawMessage.toString());
 
@@ -308,6 +357,21 @@ class SocketService {
 
         if (username != null && username.isNotEmpty) {
           currentUser = username;
+
+          // Reject an obsolete login continuation after an await.
+          bool loginStillCurrent() {
+            return SocketLoginContinuationGuard.isCurrent(
+              eventGeneration: generation,
+              currentGeneration: _connectionGeneration,
+              eventChannel: channel,
+              currentChannel: _channel,
+              isAuthenticated: _authenticated,
+              expectedOwner: username,
+              activeOwner: currentUser,
+            );
+          }
+
+          if (!loginStillCurrent()) return;
           _syncPresence();
 
           final mediaToken = data['mediaToken']?.toString().trim() ?? '';
@@ -332,18 +396,32 @@ class SocketService {
             '$currentUser',
           );
 
+          if (!loginStillCurrent()) return;
           _sendFcmToken();
+
           await SystemCallService.configure(serverUrl, username, mediaPort);
 
+          // The user might have logged out during call initialization.
+          if (!loginStillCurrent()) return;
+
           if (_e2eeEnabled) {
-            _e2eeActivePeers = await E2eeSettingsService.instance.activePeers(
+            final loginPeers = await E2eeSettingsService.instance.activePeers(
               username,
             );
+
+            if (!loginStillCurrent()) return;
+            _e2eeActivePeers = loginPeers;
+
             await _prepareE2ee(username);
+
+            // Never resynchronize messages for an obsolete login.
+            if (!loginStillCurrent()) return;
           } else {
             _e2eeActivePeers = <String>{};
             _send('e2ee_remove_bundle', const {});
           }
+
+          if (!loginStillCurrent()) return;
 
           if (_needsResyncAfterLogin) {
             _needsResyncAfterLogin = false;
@@ -829,6 +907,17 @@ class SocketService {
       // ======================================
       // ПЕРЕДАЁМ СОБЫТИЕ ЭКРАНАМ
       // ======================================
+
+      // Async E2EE/media work may have run during a reconnect.
+      // Do not deliver a completed event from an obsolete connection.
+      if (!SocketEventGenerationGuard.isCurrent(
+        eventGeneration: generation,
+        currentGeneration: _connectionGeneration,
+        eventChannel: channel,
+        currentChannel: _channel,
+      )) {
+        return;
+      }
 
       _notifyHandlers(message);
     } catch (error) {
@@ -1713,19 +1802,50 @@ class SocketService {
   }
 
   Future<bool> _prepareE2ee(String username) async {
+    final owner = username.trim();
+    final prepareGeneration = _connectionGeneration;
+    final prepareChannel = _channel;
+
+    bool prepareStillCurrent() {
+      return SocketLoginContinuationGuard.isCurrent(
+        eventGeneration: prepareGeneration,
+        currentGeneration: _connectionGeneration,
+        eventChannel: prepareChannel,
+        currentChannel: _channel,
+        isAuthenticated: isAuthenticated,
+        expectedOwner: owner,
+        activeOwner: currentUser,
+      );
+    }
+
+    if (owner.isEmpty || !prepareStillCurrent()) return false;
+
     try {
-      await SignalE2eeService.instance.initializeForUser(username);
+      await SignalE2eeService.instance.initializeForUser(owner);
+
+      // A previous login must not publish keys over a new connection.
+      if (!prepareStillCurrent()) return false;
+
       final bundle = await SignalE2eeService.instance.createPublicBundle();
+
+      // The bundle may have been produced after an account switch.
+      if (!prepareStillCurrent()) return false;
+
       final previous = _e2eePublishRequest;
       if (previous != null && !previous.isCompleted) {
         previous.complete(false);
       }
+
       final request = Completer<bool>();
       _e2eePublishRequest = request;
+
       if (!_send('e2ee_publish_bundle', bundle)) {
-        _e2eePublishRequest = null;
+        if (identical(_e2eePublishRequest, request)) {
+          _e2eePublishRequest = null;
+        }
         throw StateError('E2EE server unavailable');
       }
+
       final accepted = await request.future.timeout(
         const Duration(seconds: 10),
         onTimeout: () {
@@ -1735,10 +1855,18 @@ class SocketService {
           return false;
         },
       );
+
+      // A response to an old publish must not complete new-account setup.
+      if (!prepareStillCurrent()) return false;
+
       if (!accepted) throw StateError('E2EE bundle rejected');
+
       print('🔐 Signal E2EE готов');
       return true;
     } catch (error) {
+      // A cancelled account/connection is not a crypto failure.
+      if (!prepareStillCurrent()) return false;
+
       print('🔒 E2EE не удалось подготовить: $error');
       _notifyHandlers({
         'type': 'e2ee_status',
@@ -1747,7 +1875,6 @@ class SocketService {
       return false;
     }
   }
-
   Future<void> _requestE2eeBundle(String username) async {
     final existing = _e2eeBundleRequests[username];
     if (existing != null) {
@@ -1773,10 +1900,48 @@ class SocketService {
     final user = currentUser?.trim() ?? '';
     final id = localMessage['id']?.toString().trim() ?? '';
     final target = localMessage['to']?.toString().trim() ?? '';
-    if (user.isEmpty || id.isEmpty || target.isEmpty) return;
+    final from = localMessage['from']?.toString().trim() ?? '';
+
+    // Capture the connection that owns this encryption operation.
+    final sendGeneration = _connectionGeneration;
+    final sendChannel = _channel;
+
+    bool sendStillCurrent() {
+      return SocketLoginContinuationGuard.isCurrent(
+        eventGeneration: sendGeneration,
+        currentGeneration: _connectionGeneration,
+        eventChannel: sendChannel,
+        currentChannel: _channel,
+        isAuthenticated: isAuthenticated,
+        expectedOwner: user,
+        activeOwner: currentUser,
+      );
+    }
+
+    if (user.isEmpty ||
+        id.isEmpty ||
+        target.isEmpty ||
+        (from.isNotEmpty && from != user) ||
+        !sendStillCurrent()) {
+      return;
+    }
+
     if (!_e2eeSendingIds.add(id)) return;
+
+    // Preserve the old owner's outbox for a later retry, without sending
+    // its ciphertext through a replacement account or WebSocket.
+    void parkStaleSend() {
+      _e2eeSendingIds.remove(id);
+      StorageService.updateOutboxStatus(user, id, 'queued');
+    }
+
     try {
       await SignalE2eeService.instance.initializeForUser(user);
+      if (!sendStillCurrent()) {
+        parkStaleSend();
+        return;
+      }
+
       Map<String, dynamic> encrypted;
       try {
         encrypted = await SignalE2eeService.instance.encrypt(
@@ -1784,12 +1949,29 @@ class SocketService {
           _privateE2eePayload(localMessage, user),
         );
       } on E2eeSessionMissing {
+        if (!sendStillCurrent()) {
+          parkStaleSend();
+          return;
+        }
+
         await _requestE2eeBundle(target);
+
+        if (!sendStillCurrent()) {
+          parkStaleSend();
+          return;
+        }
+
         encrypted = await SignalE2eeService.instance.encrypt(
           target,
           _privateE2eePayload(localMessage, user),
         );
       }
+      // Encryption can finish after logout or connection replacement.
+      if (!sendStillCurrent()) {
+        parkStaleSend();
+        return;
+      }
+
       final envelope = <String, dynamic>{
         'id': id,
         'to': target,
@@ -1800,6 +1982,12 @@ class SocketService {
         throw StateError('Нет соединения с сервером');
       }
     } catch (error) {
+      // A cancelled session is a retry condition, not a crypto failure.
+      if (!sendStillCurrent()) {
+        parkStaleSend();
+        return;
+      }
+
       _e2eeSendingIds.remove(id);
       StorageService.updateOutboxStatus(user, id, 'failed');
       _notifyHandlers({
@@ -1849,6 +2037,46 @@ class SocketService {
   // STAGE 29 - PRIVATE MEDIA
   // ========================================
 
+  /// Requests an explicit owner-approved regrant for an existing media item.
+  ///
+  /// This is a transport-only API. The UI must obtain informed confirmation,
+  /// and the server must independently verify owner and recipient eligibility.
+  /// No regrant is submitted without ownerConfirmed == true.
+  bool requestLegacyMediaRegrant({
+    required String mediaId,
+    required String recipient,
+    required bool ownerConfirmed,
+    required String requestId,
+  }) {
+    final id = mediaId.trim();
+    final target = recipient.trim();
+    final actor = currentUser?.trim() ?? '';
+    final idRequest = requestId.trim();
+
+    if (!ownerConfirmed ||
+        !_authenticated ||
+        !_isConnected ||
+        _channel == null ||
+        actor.isEmpty ||
+        !RegExp(r'^[A-Za-z0-9_-]{1,64}$').hasMatch(idRequest) ||
+        id.isEmpty ||
+        !RegExp(r'^[a-zA-Z0-9_-]{1,120}$').hasMatch(id) ||
+        target.isEmpty ||
+        target == actor) {
+      return false;
+    }
+
+    _send('legacy_media_regrant', {
+      'mediaId': id,
+      'recipient': target,
+      'confirm': true,
+      'requestId': idRequest,
+    });
+
+    // Indicates only that the request was submitted to the transport.
+    // Server approval must be determined from legacy_media_regrant_result.
+    return true;
+  }
   void sendMediaMessage(
     String to, {
     required String messageType,
@@ -2462,6 +2690,13 @@ class SocketService {
 
   Future<void> disconnect({bool clearUser = true}) async {
     _manualDisconnect = true;
+
+    // Invalidate callbacks from this socket before any asynchronous
+    // account cleanup or channel shutdown can suspend this method.
+    ++_connectionGeneration;
+    _authenticated = false;
+    _isConnected = false;
+
     _notifyHandlers({
       'type': 'disconnected',
       'data': {'reason': 'Выход из приложения'},

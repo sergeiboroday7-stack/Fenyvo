@@ -21,6 +21,51 @@ class CallScreen extends StatefulWidget {
 
 class _CallScreenState extends State<CallScreen> {
   String? _windowCallId;
+  static const MethodChannel _proximityChannel =
+      MethodChannel('fenyvo/proximity');
+
+  Future<void> _proximityQueue = Future<void>.value();
+  bool? _lastProximityEnabled;
+
+  void _setProximity(bool enabled) {
+    if (!Platform.isAndroid || _windowCallId == null) return;
+    if (_lastProximityEnabled == enabled) return;
+
+    _lastProximityEnabled = enabled;
+    final id = _windowCallId!;
+
+    _proximityQueue = _proximityQueue
+        .catchError((Object error) {
+          debugPrint('FENYVO proximity queue error: $error');
+        })
+        .then((_) async {
+          try {
+            await _proximityChannel.invokeMethod<bool>(
+              'setEnabled',
+              <String, Object>{
+                'callId': id,
+                'enabled': enabled,
+              },
+            );
+          } catch (error) {
+            debugPrint('FENYVO proximity unavailable: $error');
+          }
+        });
+  }
+
+  void _syncProximity() {
+    final service = CallService.instance;
+
+    final activeVoiceCall =
+        service.callId == _windowCallId &&
+        (service.phase == CallPhase.active ||
+            service.phase == CallPhase.connecting) &&
+        !service.isVideo &&
+        !service.speakerphoneEnabled;
+
+    _setProximity(activeVoiceCall);
+  }
+
   Offset? _videoPreviewPosition;
   bool _localVideoIsPrimary = false;
   bool _controlsVisible = true;
@@ -29,6 +74,8 @@ class _CallScreenState extends State<CallScreen> {
   void initState() {
     super.initState();
     _windowCallId = CallService.instance.callId;
+    CallService.instance.addListener(_syncProximity);
+    _syncProximity();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted &&
           CallService.instance.callId == _windowCallId &&
@@ -48,6 +95,8 @@ class _CallScreenState extends State<CallScreen> {
 
   @override
   void dispose() {
+    CallService.instance.removeListener(_syncProximity);
+    _setProximity(false);
     unawaited(_callWindow('hide'));
     super.dispose();
   }

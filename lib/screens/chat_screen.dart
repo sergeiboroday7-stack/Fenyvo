@@ -1,3 +1,22 @@
+import '../features/messages/data/private_voice_temp_cleanup_policy.dart';
+import '../features/messages/data/private_voice_temp_path_tracker.dart';
+import '../features/messages/data/private_voice_failed_start_cleanup.dart';
+import '../features/messages/domain/private_voice_recording_operations.dart';
+import '../features/messages/domain/private_voice_recording_ticker.dart';
+import '../features/messages/domain/private_voice_recording_state.dart';
+import '../features/messages/data/private_voice_recorder_shutdown.dart';
+import '../widgets/private_voice_pointer_bridge.dart';
+import '../features/messages/domain/private_voice_recording_gesture_policy.dart';
+import '../features/messages/data/private_voice_recording_files.dart';
+import '../features/messages/domain/private_voice_recording_policy.dart';
+import '../widgets/private_composer_reply_preview.dart';
+import '../widgets/private_voice_record_button.dart';
+import '../widgets/private_voice_recording_composer.dart';
+import '../widgets/private_voice_message_player.dart';
+import '../features/messages/domain/voice_playback_policy.dart';
+import '../features/messages/domain/voice_duration_formatter.dart';
+import '../features/messages/domain/private_attachment_size_formatter.dart';
+import '../features/messages/domain/private_attachment_helpers.dart';
 import '../features/messages/domain/message_identity.dart';
 import '../features/messages/domain/message_reactions.dart';
 import '../features/messages/domain/message_date.dart';
@@ -17,9 +36,15 @@ import 'package:image_picker/image_picker.dart';
 import 'package:video_player/video_player.dart';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:path_provider/path_provider.dart';
-import 'package:record/record.dart';
+
+import '../features/messages/data/private_voice_recorder_device.dart';
+
 import 'package:qr_flutter/qr_flutter.dart';
 
+import '../services/legacy_media_regrant_visibility.dart';
+import '../services/legacy_media_regrant_result.dart';
+import '../services/legacy_media_regrant_client.dart';
+import '../widgets/legacy_media_regrant_dialog.dart';
 import '../services/socket_service.dart';
 import '../services/call_service.dart';
 import '../services/call_history_service.dart';
@@ -89,22 +114,41 @@ class _ChatScreenState extends State<ChatScreen>
   List<String> _registeredUsers = const [];
   Completer<List<String>>? _registeredUsersCompleter;
 
-  final AudioRecorder _voiceRecorder = AudioRecorder();
+  final PrivateVoiceRecorderDevice _voiceRecorder =
+      PrivateVoiceRecorderDevice();
+  final PrivateVoiceRecorderShutdown _voiceShutdown =
+      PrivateVoiceRecorderShutdown();
+  final PrivateVoiceRecordingOperations _voiceOperations =
+      PrivateVoiceRecordingOperations();
+
+  Future<void>? get _voiceStartFuture => _voiceOperations.pendingStart;
+  Future<void>? get _voiceFinishFuture => _voiceOperations.pendingFinish;
+  final PrivateVoiceTempPathTracker _voiceTempPaths =
+      PrivateVoiceTempPathTracker();
+  bool _voiceStopFailed = false;
   final AudioPlayer _voicePlayer = AudioPlayer();
 
-  Timer? _voiceRecordTimer;
+  final PrivateVoiceRecordingTicker _voiceTicker =
+      PrivateVoiceRecordingTicker();
   StreamSubscription<Duration>? _voicePositionSubscription;
   StreamSubscription<Duration>? _voiceDurationSubscription;
   StreamSubscription<PlayerState>? _voiceStateSubscription;
   StreamSubscription<void>? _voiceCompleteSubscription;
 
-  bool _voicePressActive = false;
-  bool _voiceStarting = false;
-  bool _isRecordingVoice = false;
-  bool _voiceRecordingLocked = false;
-  Duration _voiceRecordDuration = Duration.zero;
+  final PrivateVoiceRecordingState _voiceState = PrivateVoiceRecordingState();
+  bool get _voicePressActive => _voiceState.pressActive;
+  set _voicePressActive(bool value) => _voiceState.pressActive = value;
+  bool get _voiceStarting => _voiceState.starting;
+  set _voiceStarting(bool value) => _voiceState.starting = value;
+  bool get _isRecordingVoice => _voiceState.isRecording;
+  set _isRecordingVoice(bool value) => _voiceState.isRecording = value;
+  bool get _voiceRecordingLocked => _voiceState.locked;
+  set _voiceRecordingLocked(bool value) => _voiceState.locked = value;
+  Duration get _voiceRecordDuration => _voiceState.duration;
+  set _voiceRecordDuration(Duration value) => _voiceState.duration = value;
   Offset? _voiceDragStart;
-  String? _voiceRecordingPath;
+  String? get _voiceRecordingPath => _voiceState.recordingPath;
+  set _voiceRecordingPath(String? value) => _voiceState.recordingPath = value;
 
   String? _playingVoiceMessageId;
   Duration _voicePlaybackPosition = Duration.zero;
@@ -404,12 +448,58 @@ class _ChatScreenState extends State<ChatScreen>
     _drafts[_draftKey] = _messageController.text;
     _messageController.dispose();
 
-    _voiceRecordTimer?.cancel();
+    _voiceTicker.stop();
     _voicePositionSubscription?.cancel();
     _voiceDurationSubscription?.cancel();
     _voiceStateSubscription?.cancel();
     _voiceCompleteSubscription?.cancel();
-    unawaited(_voiceRecorder.dispose());
+    _voicePressActive = false;
+
+    String? shutdownStoppedPath;
+    bool shutdownStopSucceeded = false;
+
+    unawaited(
+      _voiceShutdown
+          .close(
+            pendingStart: _voiceStartFuture,
+            pendingFinish: _voiceFinishFuture,
+            stop: () async {
+              try {
+                shutdownStoppedPath = await _voiceRecorder.stop();
+                shutdownStopSucceeded = true;
+              } catch (_) {
+                // The recorder may already be stopped.
+              }
+            },
+            cleanup: () async {
+              final paths = PrivateVoiceTempCleanupPolicy.pathsForShutdown(
+                stopSucceeded: shutdownStopSucceeded,
+                trackedPaths: _voiceTempPaths.paths,
+                recordingPath: _voiceRecordingPath,
+                stoppedPath: shutdownStoppedPath,
+              );
+
+              if (!shutdownStopSucceeded) {
+                debugPrint(
+                  'Voice shutdown: recorder stop failed; '
+                  'temporary file deletion skipped',
+                );
+                return;
+              }
+
+              for (final path in paths) {
+                await _deleteVoiceTemporaryFile(path);
+              }
+
+              _voiceTempPaths.clear();
+              _voiceRecordingPath = null;
+            },
+            dispose: () => _voiceRecorder.dispose(),
+          )
+          .catchError((Object error, StackTrace stack) {
+            debugPrint('Voice recorder shutdown failed: $error');
+          }),
+    );
     unawaited(_voicePlayer.dispose());
 
     super.dispose();
@@ -795,7 +885,7 @@ class _ChatScreenState extends State<ChatScreen>
       return;
     }
 
-    final savedMessages = StorageService.getMessages(
+    final savedMessages = StorageService.getMessagesVisibleForOwner(
       currentUser,
       widget.targetUser,
     );
@@ -876,20 +966,6 @@ class _ChatScreenState extends State<ChatScreen>
   // \u0421\u041E\u0425\u0420\u0410\u041D\u0415\u041D\u0418\u0415 \u0421\u041E\u041E\u0411\u0429\u0415\u041D\u0418\u0419
   // ========================================
 
-  void _saveMessages() {
-    final currentUser = SocketService.instance.currentUser;
-
-    if (currentUser == null || currentUser.isEmpty) {
-      return;
-    }
-
-    StorageService.saveMessages(
-      currentUser,
-      widget.targetUser,
-      _messages.where((message) => message['localCallEntry'] != true).toList(),
-    );
-  }
-
   // ========================================
   // \u041E\u0427\u0418\u0421\u0422\u041A\u0410 \u041D\u0415\u041F\u0420\u041E\u0427\u0418\u0422\u0410\u041D\u041D\u042B\u0425
   // ========================================
@@ -939,7 +1015,28 @@ class _ChatScreenState extends State<ChatScreen>
       _messages[index]['time'] = parsedTime.toUtc().toIso8601String();
       _sortMessagesChronologically();
     });
-    _saveMessages();
+    final owner = SocketService.instance.currentUser?.trim() ?? '';
+    final peer = widget.targetUser;
+    if (owner.isEmpty || peer.isEmpty) return;
+
+    unawaited(
+      StorageService.mutateMessagesDurably(owner, peer, (current) {
+        for (final message in current) {
+          if (message['id']?.toString().trim() != id ||
+              message['from']?.toString().trim() != owner ||
+              message['to']?.toString().trim() != peer) {
+            continue;
+          }
+          final confirmed = parsedTime.toUtc().toIso8601String();
+          if (message['time']?.toString() == confirmed) return null;
+          message['time'] = confirmed;
+          return current;
+        }
+        return null;
+      }).then((_) {}).catchError((Object error, StackTrace stack) {
+        debugPrint('Durable message time update failed: $error');
+      }),
+    );
   }
 
   void _updateMessageStatus(String messageId, String newStatus) {
@@ -977,7 +1074,31 @@ class _ChatScreenState extends State<ChatScreen>
       _messages[messageIndex]['status'] = newStatus;
     });
 
-    _saveMessages();
+    final owner = SocketService.instance.currentUser?.trim() ?? '';
+    final peer = widget.targetUser;
+    if (owner.isEmpty || peer.isEmpty) return;
+
+    unawaited(
+      StorageService.mutateMessagesDurably(owner, peer, (current) {
+        for (final message in current) {
+          if (message['id']?.toString().trim() != id ||
+              message['from']?.toString().trim() != owner ||
+              message['to']?.toString().trim() != peer) {
+            continue;
+          }
+          final storedStatus = message['status']?.toString() ?? '';
+          if (_messageStatusRank(newStatus) <=
+              _messageStatusRank(storedStatus)) {
+            return null;
+          }
+          message['status'] = newStatus;
+          return current;
+        }
+        return null;
+      }).then((_) {}).catchError((Object error, StackTrace stack) {
+        debugPrint('Durable message status update failed: $error');
+      }),
+    );
   }
 
   // ========================================
@@ -992,6 +1113,7 @@ class _ChatScreenState extends State<ChatScreen>
     }
 
     bool changed = false;
+    final newlyReadIds = <String>{};
 
     for (final message in _messages) {
       final from = message['from']?.toString().trim() ?? '';
@@ -1016,12 +1138,41 @@ class _ChatScreenState extends State<ChatScreen>
       );
 
       message['readByMe'] = true;
+      newlyReadIds.add(messageId);
 
       changed = true;
     }
 
     if (changed) {
-      _saveMessages();
+      final owner = currentUser.trim();
+      final peer = widget.targetUser.trim();
+      final idsToMark = Set<String>.from(newlyReadIds);
+
+      if (owner.isNotEmpty && peer.isNotEmpty && idsToMark.isNotEmpty) {
+        unawaited(
+          StorageService.mutateMessagesDurably(owner, peer, (current) {
+            var modified = false;
+
+            for (final stored in current) {
+              final id = stored['id']?.toString().trim() ?? '';
+              if (!idsToMark.contains(id)) continue;
+
+              final sender = stored['from']?.toString().trim() ?? '';
+              final recipient = stored['to']?.toString().trim() ?? '';
+              if (sender != peer || recipient != owner) continue;
+
+              if (stored['readByMe'] != true) {
+                stored['readByMe'] = true;
+                modified = true;
+              }
+            }
+
+            return modified ? current : null;
+          }).then((_) {}).catchError((Object error, StackTrace stack) {
+            debugPrint('Durable incoming read update failed: $error');
+          }),
+        );
+      }
     }
   }
 
@@ -1824,7 +1975,33 @@ class _ChatScreenState extends State<ChatScreen>
       });
 
       if (changed) {
-        _saveMessages();
+        final owner = SocketService.instance.currentUser?.trim() ?? '';
+        final contact = widget.targetUser.trim();
+        if (owner.isNotEmpty && contact.isNotEmpty) {
+          unawaited(
+            StorageService.mutateMessagesDurably(owner, contact, (current) {
+              for (final stored in current) {
+                if (stored['id']?.toString().trim() != messageId) {
+                  continue;
+                }
+                final from = stored['from']?.toString().trim() ?? '';
+                final to = stored['to']?.toString().trim() ?? '';
+                final validParticipants =
+                    (from == owner && to == contact) ||
+                    (from == contact && to == owner);
+                if (!validParticipants) return null;
+                if ((stored['isPinned'] == true) == pinned) {
+                  return null;
+                }
+                stored['isPinned'] = pinned;
+                return current;
+              }
+              return null;
+            }).then((_) {}).catchError((Object error, StackTrace stack) {
+              debugPrint('Durable remote pin update failed: $error');
+            }),
+          );
+        }
       }
       return;
     }
@@ -1879,19 +2056,66 @@ class _ChatScreenState extends State<ChatScreen>
       }
 
       if (changed) {
-        _saveMessages();
+        final owner = SocketService.instance.currentUser?.trim() ?? '';
+        final peer = widget.targetUser.trim();
+
+        if (owner.isNotEmpty && peer.isNotEmpty && owner != peer) {
+          unawaited(
+            StorageService.mutateMessagesDurably(owner, peer, (current) {
+              // Validate the original persisted message first.
+              // Never create a missing or deleted message.
+              final originalExists = current.any((stored) {
+                return stored['id']?.toString().trim() == messageId &&
+                    stored['from']?.toString().trim() == from &&
+                    stored['to']?.toString().trim() == to;
+              });
+
+              if (!originalExists) return null;
+
+              var modified = false;
+              for (final stored in current) {
+                final sender = stored['from']?.toString().trim() ?? '';
+                final recipient = stored['to']?.toString().trim() ?? '';
+                final belongsToStoredChat =
+                    (sender == owner && recipient == peer) ||
+                    (sender == peer && recipient == owner);
+
+                if (!belongsToStoredChat) continue;
+
+                if (stored['id']?.toString().trim() == messageId &&
+                    sender == from &&
+                    recipient == to) {
+                  stored['text'] = newText;
+                  stored['isEdited'] = true;
+                  stored['editedAt'] = editedAt;
+                  modified = true;
+                }
+
+                final rawReply = stored['replyTo'];
+                if (rawReply is Map &&
+                    rawReply['id']?.toString().trim() == messageId) {
+                  final reply = Map<String, dynamic>.from(rawReply);
+                  reply['text'] = newText;
+                  stored['replyTo'] = reply;
+                  modified = true;
+                }
+              }
+
+              return modified ? current : null;
+            }).then((_) {}).catchError((Object error, StackTrace stack) {
+              debugPrint('Durable message edit failed: $error');
+            }),
+          );
+        }
       }
 
       return;
     }
 
     if (type == 'message_deleted') {
-      final currentUser = SocketService.instance.currentUser ?? '';
-
+      final currentUser = SocketService.instance.currentUser?.trim() ?? '';
       final messageId = data['messageId']?.toString().trim() ?? '';
-
       final from = data['from']?.toString().trim() ?? '';
-
       final to = data['to']?.toString().trim() ?? '';
 
       if (currentUser.isEmpty || messageId.isEmpty) {
@@ -1906,60 +2130,60 @@ class _ChatScreenState extends State<ChatScreen>
         return;
       }
 
-      final replyId = _replyToMessage == null
-          ? ''
-          : _getMessageId(_replyToMessage!);
+      // Save the deletion marker and update Hive through the shared
+      // per-chat queue before changing the visible message list.
+      unawaited(
+        StorageService.deleteForEveryoneDurably(
+              currentUser: currentUser,
+              peer: widget.targetUser,
+              messageId: messageId,
+              from: from,
+              to: to,
+            )
+            .then((_) {
+              if (!mounted) {
+                return;
+              }
 
-      var changed = false;
+              setState(() {
+                _messages.removeWhere(
+                  (message) => _getMessageId(message) == messageId,
+                );
 
-      if (!mounted) {
-        return;
-      }
+                for (final message in _messages) {
+                  final rawReply = message['replyTo'];
+                  if (rawReply is Map &&
+                      rawReply['id']?.toString().trim() == messageId) {
+                    message.remove('replyTo');
+                  }
+                }
 
-      setState(() {
-        final before = _messages.length;
+                final selectedReplyId = _replyToMessage == null
+                    ? ''
+                    : _getMessageId(_replyToMessage!);
 
-        _messages.removeWhere((message) => _getMessageId(message) == messageId);
+                if (selectedReplyId == messageId) {
+                  _replyToMessage = null;
+                }
+              });
 
-        if (_messages.length != before) {
-          changed = true;
-        }
-
-        for (final message in _messages) {
-          final rawReply = message['replyTo'];
-
-          if (rawReply is Map &&
-              rawReply['id']?.toString().trim() == messageId) {
-            message.remove('replyTo');
-            changed = true;
-          }
-        }
-
-        if (replyId == messageId) {
-          _replyToMessage = null;
-          changed = true;
-        }
-      });
-
-      if (changed) {
-        _saveMessages();
-      }
-
-      if (from == currentUser && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              '\u0421\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435 \u0443\u0434\u0430\u043B\u0435\u043D\u043E \u0431\u0435\u0437 \u0441\u043B\u0435\u0434\u043E\u0432',
-            ),
-            backgroundColor: FenyvoPalette.surface,
-            duration: Duration(milliseconds: 1100),
-          ),
-        );
-      }
+              if (from == currentUser) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Сообщение удалено без следов'),
+                    backgroundColor: FenyvoPalette.surface,
+                    duration: Duration(milliseconds: 1100),
+                  ),
+                );
+              }
+            })
+            .catchError((Object error, StackTrace stack) {
+              debugPrint('Guarded chat delete persistence failed: $error');
+            }),
+      );
 
       return;
     }
-
     if (type == 'message') {
       final id = data['id']?.toString().trim() ?? '';
 
@@ -2244,7 +2468,33 @@ class _ChatScreenState extends State<ChatScreen>
         _messages[messageIndex].remove('reaction');
       });
 
-      _saveMessages();
+      final owner = SocketService.instance.currentUser?.trim() ?? '';
+      final contact = widget.targetUser.trim();
+      if (owner.isNotEmpty && contact.isNotEmpty) {
+        final persistedReactions = Map<String, String>.from(reactions);
+        unawaited(
+          StorageService.mutateMessagesDurably(owner, contact, (current) {
+            for (final stored in current) {
+              if (stored['id']?.toString().trim() != messageId) {
+                continue;
+              }
+              final sender = stored['from']?.toString().trim() ?? '';
+              final recipient = stored['to']?.toString().trim() ?? '';
+              final validParticipants =
+                  (sender == owner && recipient == contact) ||
+                  (sender == contact && recipient == owner);
+              if (!validParticipants) return null;
+              stored['reactions'] = persistedReactions;
+              stored.remove('reactionUsers');
+              stored.remove('reaction');
+              return current;
+            }
+            return null;
+          }).then((_) {}).catchError((Object error, StackTrace stack) {
+            debugPrint('Durable reaction update failed: $error');
+          }),
+        );
+      }
 
       if (reactionAdded && _supportedReactions.contains(reaction)) {
         _showReactionBurst(reaction);
@@ -2265,34 +2515,125 @@ class _ChatScreenState extends State<ChatScreen>
   void _addMessageIfNotExists(Map<String, dynamic> newMessage) {
     _normalizeReactionUsers(newMessage);
 
-    final exists = _messages.any(
-      (message) => isSameStoredMessage(message, newMessage),
+    if (!mounted) return;
+
+    final owner = SocketService.instance.currentUser?.trim() ?? '';
+    final peer = widget.targetUser.trim();
+    final sender = newMessage['from']?.toString().trim() ?? '';
+    final recipient = newMessage['to']?.toString().trim() ?? '';
+
+    final validParticipants =
+        (sender == owner && recipient == peer) ||
+        (sender == peer && recipient == owner);
+
+    if (owner.isEmpty || peer.isEmpty || owner == peer || !validParticipants) {
+      return;
+    }
+
+    final incomingRealId = newMessage['id']?.toString().trim() ?? '';
+    if (incomingRealId.isNotEmpty &&
+        StorageService.isMessageHiddenForMe(
+          currentUser: owner,
+          peer: peer,
+          messageId: incomingRealId,
+        )) {
+      return;
+    }
+    if (_messages.any((message) => isSameStoredMessage(message, newMessage))) {
+      return;
+    }
+
+    // Preserve all fields, including E2EE and media metadata.
+    final pendingMessage = Map<String, dynamic>.from(newMessage);
+
+    // Persist first. A deleted or duplicate message must not be
+    // inserted into the visible history by this handler.
+    unawaited(
+      StorageService.appendMessageDurably(
+            owner,
+            peer,
+            pendingMessage,
+            allowAppend: () async {
+              // Only the incoming direction is filtered by a block.
+              // Outgoing messages retain their existing write behavior.
+              if (sender == owner) {
+                return SocketService.instance.currentUser?.trim() == owner;
+              }
+
+              if (SocketService.instance.currentUser?.trim() != owner) {
+                return false;
+              }
+
+              final blockedAtWrite = await FenyvoTrustService.isBlocked(
+                peer,
+                owner: owner,
+              );
+
+              return !blockedAtWrite &&
+                  SocketService.instance.currentUser?.trim() == owner;
+            },
+          )
+          .then((_) {
+            if (!mounted) return;
+
+            // The message may have been saved by the chat list first.
+            // Never display an absent or deleted record.
+            Map<String, dynamic>? visibleMessage;
+            final persisted = StorageService.getMessages(owner, peer);
+
+            for (final stored in persisted) {
+              if (isSameStoredMessage(stored, pendingMessage)) {
+                visibleMessage = Map<String, dynamic>.from(stored);
+                break;
+              }
+            }
+
+            final persistedMessage = visibleMessage;
+            if (persistedMessage == null) return;
+            _normalizeReactionUsers(persistedMessage);
+
+            if (SocketService.instance.currentUser?.trim() != owner) {
+              return;
+            }
+
+            // A marker may have been committed while append was pending.
+            if (incomingRealId.isNotEmpty &&
+                StorageService.isMessageHiddenForMe(
+                  currentUser: owner,
+                  peer: peer,
+                  messageId: incomingRealId,
+                )) {
+              return;
+            }
+            if (_contactBlocked && sender == peer) {
+              return;
+            }
+
+            if (_messages.any(
+              (message) => isSameStoredMessage(message, persistedMessage),
+            )) {
+              return;
+            }
+
+            final isIncomingMessage = persistedMessage['isMe'] != true;
+            final shouldCountAsNew =
+                Platform.isWindows && isIncomingMessage && _showScrollToLatest;
+
+            setState(() {
+              _messages.add(persistedMessage);
+              _sortMessagesChronologically();
+
+              if (shouldCountAsNew) {
+                _newMessagesWhileScrolledUp++;
+              }
+            });
+
+            _clearUnread();
+          })
+          .catchError((Object error, StackTrace stack) {
+            debugPrint('Guarded open chat append failed: $error');
+          }),
     );
-
-    if (exists) {
-      return;
-    }
-
-    if (!mounted) {
-      return;
-    }
-
-    final isIncomingMessage = newMessage['isMe'] != true;
-
-    final shouldCountAsNew =
-        Platform.isWindows && isIncomingMessage && _showScrollToLatest;
-
-    setState(() {
-      _messages.add(newMessage);
-      _sortMessagesChronologically();
-
-      if (shouldCountAsNew) {
-        _newMessagesWhileScrolledUp++;
-      }
-    });
-
-    _saveMessages();
-    _clearUnread();
   }
 
   void _focusMessageComposer() {
@@ -2317,59 +2658,12 @@ class _ChatScreenState extends State<ChatScreen>
   // V618 — МЕДИА В ЛИЧНОМ ЧАТЕ
   // ========================================
 
-  String _privateMessageType(Map<String, dynamic> message) {
-    final type = message['messageType']?.toString().trim().toLowerCase() ?? '';
-    return type.isEmpty ? 'text' : type;
-  }
-
   Uint8List? _privateMediaBytes(Map<String, dynamic> message) {
     return MediaCacheService.readBytesSync(message);
   }
 
   String? _privateMediaPath(Map<String, dynamic> message) {
     return MediaCacheService.existingLocalPath(message);
-  }
-
-  String _privateBasename(String path) {
-    final parts = path.replaceAll('\\', '/').split('/');
-    return parts.isEmpty ? path : parts.last;
-  }
-
-  String _privateSafeFileName(String name) {
-    final clean = name.replaceAll(RegExp(r'[<>:"/\\|?*\x00-\x1F]'), '_').trim();
-    return clean.isEmpty
-        ? 'spartan_${DateTime.now().millisecondsSinceEpoch}.bin'
-        : clean;
-  }
-
-  String _privateMimeFromName(String name, String fallback) {
-    final lower = name.toLowerCase();
-    if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
-    if (lower.endsWith('.png')) return 'image/png';
-    if (lower.endsWith('.webp')) return 'image/webp';
-    if (lower.endsWith('.gif')) return 'image/gif';
-    if (lower.endsWith('.mp4')) return 'video/mp4';
-    if (lower.endsWith('.mov')) return 'video/quicktime';
-    if (lower.endsWith('.webm')) return 'video/webm';
-    if (lower.endsWith('.pdf')) return 'application/pdf';
-    if (lower.endsWith('.txt')) return 'text/plain';
-    return fallback;
-  }
-
-  String _privateHumanSize(dynamic raw) {
-    final bytes = raw is num
-        ? raw.toInt()
-        : int.tryParse(raw?.toString() ?? '') ?? 0;
-    if (bytes <= 0) return '';
-    if (bytes < 1024)
-      return '$bytes ' + AppLanguageService.instance.text('chatSizeBytes');
-    final kb = bytes / 1024;
-    if (kb < 1024)
-      return '${kb.toStringAsFixed(kb >= 100 ? 0 : 1)} ' +
-          AppLanguageService.instance.text('chatSizeKilobytes');
-    final mb = kb / 1024;
-    return '${mb.toStringAsFixed(mb >= 100 ? 0 : 1)} ' +
-        AppLanguageService.instance.text('chatSizeMegabytes');
   }
 
   void _privateMediaSnack(String text) {
@@ -2549,7 +2843,10 @@ class _ChatScreenState extends State<ChatScreen>
           messageType: 'image',
           path: path,
           fileName: picked.name,
-          mimeType: _privateMimeFromName(picked.name, 'image/jpeg'),
+          mimeType: PrivateAttachmentHelpers.mimeFromName(
+            picked.name,
+            'image/jpeg',
+          ),
           text: '📷 ${_chatText('photo')}',
           maxBytes: 20 * 1024 * 1024,
         );
@@ -2564,8 +2861,11 @@ class _ChatScreenState extends State<ChatScreen>
       await _sendPrivateMediaFile(
         messageType: 'image',
         path: picked.path,
-        fileName: _privateBasename(picked.path),
-        mimeType: _privateMimeFromName(picked.path, 'image/jpeg'),
+        fileName: PrivateAttachmentHelpers.basename(picked.path),
+        mimeType: PrivateAttachmentHelpers.mimeFromName(
+          picked.path,
+          'image/jpeg',
+        ),
         text: '📷 ${_chatText('photo')}',
         maxBytes: 20 * 1024 * 1024,
       );
@@ -2593,7 +2893,10 @@ class _ChatScreenState extends State<ChatScreen>
           messageType: 'video',
           path: path,
           fileName: picked.name,
-          mimeType: _privateMimeFromName(picked.name, 'video/mp4'),
+          mimeType: PrivateAttachmentHelpers.mimeFromName(
+            picked.name,
+            'video/mp4',
+          ),
           text: '🎥 ${_chatText('video')}',
           maxBytes: 1024 * 1024 * 1024,
         );
@@ -2607,8 +2910,11 @@ class _ChatScreenState extends State<ChatScreen>
       await _sendPrivateMediaFile(
         messageType: 'video',
         path: picked.path,
-        fileName: _privateBasename(picked.path),
-        mimeType: _privateMimeFromName(picked.path, 'video/mp4'),
+        fileName: PrivateAttachmentHelpers.basename(picked.path),
+        mimeType: PrivateAttachmentHelpers.mimeFromName(
+          picked.path,
+          'video/mp4',
+        ),
         text: '🎥 ${_chatText('video')}',
         maxBytes: 1024 * 1024 * 1024,
       );
@@ -2631,7 +2937,10 @@ class _ChatScreenState extends State<ChatScreen>
         return;
       }
       final name = picked.name.trim().isEmpty ? 'file.bin' : picked.name.trim();
-      final mime = _privateMimeFromName(name, 'application/octet-stream');
+      final mime = PrivateAttachmentHelpers.mimeFromName(
+        name,
+        'application/octet-stream',
+      );
       final isVideo = mime.startsWith('video/');
       await _sendPrivateMediaFile(
         messageType: isVideo ? 'video' : 'file',
@@ -2669,7 +2978,7 @@ class _ChatScreenState extends State<ChatScreen>
       );
       final upload = await MediaTransferService.uploadFile(
         path: path,
-        fileName: _privateSafeFileName(fileName),
+        fileName: PrivateAttachmentHelpers.safeFileName(fileName),
         mimeType: mimeType,
         messageType: messageType,
         maxBytes: maxBytes,
@@ -2699,7 +3008,7 @@ class _ChatScreenState extends State<ChatScreen>
   String _privateAttachmentName(Map<String, dynamic> message) {
     final name = message['fileName']?.toString().trim() ?? '';
     if (name.isNotEmpty) return name;
-    switch (_privateMessageType(message)) {
+    switch (PrivateAttachmentHelpers.messageType(message)) {
       case 'image':
         return 'photo.jpg';
       case 'video':
@@ -2716,11 +3025,16 @@ class _ChatScreenState extends State<ChatScreen>
       return;
     }
 
-    final original = _privateSafeFileName(_privateAttachmentName(message));
+    final original = PrivateAttachmentHelpers.safeFileName(
+      _privateAttachmentName(message),
+    );
     final mime =
         message['mimeType']?.toString().trim() ??
         message['voiceMimeType']?.toString().trim() ??
-        _privateMimeFromName(original, 'application/octet-stream');
+        PrivateAttachmentHelpers.mimeFromName(
+          original,
+          'application/octet-stream',
+        );
 
     try {
       final savedPath = await FenyvoDownloadService.saveBytes(
@@ -2834,7 +3148,7 @@ class _ChatScreenState extends State<ChatScreen>
     Map<String, dynamic> message, {
     required bool isMe,
   }) {
-    final type = _privateMessageType(message);
+    final type = PrivateAttachmentHelpers.messageType(message);
     final path = _privateMediaPath(message);
     final bytes = path == null ? _privateMediaBytes(message) : null;
     final networkUrl = MediaCacheService.remoteUrl(message);
@@ -2997,7 +3311,10 @@ class _ChatScreenState extends State<ChatScreen>
     }
 
     final name = _privateAttachmentName(message);
-    final size = _privateHumanSize(message['fileSize']);
+    final size = PrivateAttachmentSizeFormatter.format(
+      message['fileSize'],
+      (key) => AppLanguageService.instance.text(key),
+    );
     return InkWell(
       borderRadius: BorderRadius.circular(12),
       onTap: () => unawaited(_savePrivateAttachment(message)),
@@ -3065,31 +3382,6 @@ class _ChatScreenState extends State<ChatScreen>
     return message['voiceData']?.toString().trim().isNotEmpty ?? false;
   }
 
-  String _formatVoiceDuration(Duration duration) {
-    final seconds = duration.inSeconds.clamp(0, 359999);
-
-    final minutes = seconds ~/ 60;
-
-    final rest = seconds % 60;
-
-    return '${minutes.toString().padLeft(1, '0')}:'
-        '${rest.toString().padLeft(2, '0')}';
-  }
-
-  int _voiceDurationMs(Map<String, dynamic> message) {
-    final raw = message['voiceDurationMs'];
-
-    if (raw is int) {
-      return raw;
-    }
-
-    if (raw is num) {
-      return raw.toInt();
-    }
-
-    return int.tryParse(raw?.toString() ?? '') ?? 0;
-  }
-
   Map<String, dynamic>? _currentReplyPayload() {
     final selectedReply = _replyToMessage;
 
@@ -3110,8 +3402,26 @@ class _ChatScreenState extends State<ChatScreen>
     return {'id': replyId, 'from': replyFrom, 'text': replyText};
   }
 
-  Future<void> _startVoiceRecording() async {
-    if (_voiceStarting || _isRecordingVoice) {
+  Future<void> _deleteVoiceTemporaryFile(String path) async {
+    await PrivateVoiceRecordingFiles.deleteIfExists(path);
+    _voiceTempPaths.release(path);
+  }
+
+  Future<void> _deleteVoiceTemporaryFiles(Iterable<String> paths) async {
+    for (final path in paths) {
+      await _deleteVoiceTemporaryFile(path);
+    }
+  }
+
+  Future<void> _startVoiceRecording() {
+    return _voiceOperations.start(
+      isClosing: _voiceShutdown.isClosing,
+      action: _runStartVoiceRecording,
+    );
+  }
+
+  Future<void> _runStartVoiceRecording() async {
+    if (_voiceStopFailed || _voiceStarting || _isRecordingVoice) {
       return;
     }
 
@@ -3152,40 +3462,39 @@ class _ChatScreenState extends State<ChatScreen>
         return;
       }
 
-      final tempDirectory = await getTemporaryDirectory();
+      final path = await PrivateVoiceRecordingFiles.createPath();
+      _voiceTempPaths.track(path);
 
-      final voiceDirectory = Directory(
-        '${tempDirectory.path}${Platform.pathSeparator}spartan_voice',
-      );
+      try {
+        await _voiceRecorder.start(path: path);
+      } catch (_) {
+        try {
+          final cleaned = await PrivateVoiceFailedStartCleanup.run(
+            path: path,
+            stop: _voiceRecorder.stop,
+            delete: PrivateVoiceRecordingFiles.deleteIfExists,
+          );
 
-      if (!voiceDirectory.existsSync()) {
-        await voiceDirectory.create(recursive: true);
+          if (cleaned) {
+            _voiceTempPaths.release(path);
+          }
+        } catch (cleanupError) {
+          debugPrint('Voice startup cleanup failed: $cleanupError');
+        }
+
+        rethrow;
       }
-
-      final path =
-          '${voiceDirectory.path}${Platform.pathSeparator}'
-          'voice_${DateTime.now().microsecondsSinceEpoch}.m4a';
-
-      await _voiceRecorder.start(
-        const RecordConfig(
-          encoder: AudioEncoder.aacLc,
-          bitRate: 64000,
-          sampleRate: 44100,
-          numChannels: 1,
-        ),
-        path: path,
-      );
 
       if (!mounted || !_voicePressActive) {
         final stoppedPath = await _voiceRecorder.stop();
 
-        final abandonedPath = stoppedPath ?? path;
+        final abandonedPaths = PrivateVoiceTempCleanupPolicy.pathsAfterStop(
+          stopSucceeded: true,
+          originalPath: path,
+          stoppedPath: stoppedPath,
+        );
 
-        final abandonedFile = File(abandonedPath);
-
-        if (await abandonedFile.exists()) {
-          await abandonedFile.delete();
-        }
+        await _deleteVoiceTemporaryFiles(abandonedPaths);
 
         return;
       }
@@ -3201,25 +3510,25 @@ class _ChatScreenState extends State<ChatScreen>
         _voiceRecordingPath = path;
       });
 
-      _voiceRecordTimer?.cancel();
+      _voiceTicker.stop();
 
-      _voiceRecordTimer = Timer.periodic(const Duration(milliseconds: 250), (
-        _,
-      ) {
-        if (!mounted || !_isRecordingVoice) {
-          return;
-        }
+      _voiceTicker.start(
+        onTick: (delta) {
+          if (!mounted || !_isRecordingVoice) {
+            return;
+          }
 
-        final next = _voiceRecordDuration + const Duration(milliseconds: 250);
+          final next = _voiceRecordDuration + delta;
 
-        setState(() {
-          _voiceRecordDuration = next;
-        });
+          setState(() {
+            _voiceRecordDuration = next;
+          });
 
-        if (next >= const Duration(minutes: 5)) {
-          unawaited(_finishVoiceRecording(send: true));
-        }
-      });
+          if (PrivateVoiceRecordingPolicy.shouldAutoFinish(next)) {
+            unawaited(_finishVoiceRecording(send: true));
+          }
+        },
+      );
     } catch (error) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -3236,13 +3545,19 @@ class _ChatScreenState extends State<ChatScreen>
     }
   }
 
-  Future<void> _finishVoiceRecording({required bool send}) async {
+  Future<void> _finishVoiceRecording({required bool send}) {
+    return _voiceOperations.finish(
+      isClosing: _voiceShutdown.isClosing,
+      action: () => _runFinishVoiceRecording(send: send),
+    );
+  }
+
+  Future<void> _runFinishVoiceRecording({required bool send}) async {
     if (!_isRecordingVoice) {
       return;
     }
 
-    _voiceRecordTimer?.cancel();
-    _voiceRecordTimer = null;
+    _voiceTicker.stop();
 
     final duration = _voiceRecordDuration;
 
@@ -3255,17 +3570,11 @@ class _ChatScreenState extends State<ChatScreen>
 
     if (mounted) {
       setState(() {
-        _isRecordingVoice = false;
-        _voiceRecordingLocked = false;
-        _voiceRecordDuration = Duration.zero;
-        _voiceRecordingPath = null;
+        _voiceState.resetAfterFinish();
         _voiceDragStart = null;
       });
     } else {
-      _isRecordingVoice = false;
-      _voiceRecordingLocked = false;
-      _voiceRecordDuration = Duration.zero;
-      _voiceRecordingPath = null;
+      _voiceState.resetAfterFinish();
       _voiceDragStart = null;
     }
 
@@ -3273,11 +3582,20 @@ class _ChatScreenState extends State<ChatScreen>
 
     try {
       stoppedPath = await _voiceRecorder.stop();
-    } catch (_) {
-      stoppedPath = fallbackPath;
+    } catch (error) {
+      // A failed native stop does not prove the microphone was released.
+      // Keep the tracked path for the shutdown coordinator.
+      _voiceStopFailed = true;
+      debugPrint('Voice recorder stop failed: $error');
+      return;
     }
 
     final path = stoppedPath ?? fallbackPath;
+    final cleanupPaths = PrivateVoiceTempCleanupPolicy.pathsAfterStop(
+      stopSucceeded: true,
+      originalPath: fallbackPath,
+      stoppedPath: stoppedPath,
+    );
 
     if (path == null || path.isEmpty) {
       return;
@@ -3285,18 +3603,17 @@ class _ChatScreenState extends State<ChatScreen>
 
     final file = File(path);
 
-    if (!send || duration < const Duration(milliseconds: 650)) {
-      if (await file.exists()) {
-        await file.delete();
-      }
+    if (PrivateVoiceRecordingPolicy.shouldDiscard(
+      send: send,
+      duration: duration,
+    )) {
+      await _deleteVoiceTemporaryFiles(cleanupPaths);
 
       return;
     }
 
     if (!SocketService.instance.isConnected) {
-      if (await file.exists()) {
-        await file.delete();
-      }
+      await _deleteVoiceTemporaryFiles(cleanupPaths);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -3314,7 +3631,7 @@ class _ChatScreenState extends State<ChatScreen>
 
     try {
       final fileSize = await file.length();
-      if (fileSize > 20 * 1024 * 1024) {
+      if (PrivateVoiceRecordingPolicy.isTooLarge(fileSize)) {
         _privateMediaSnack(
           AppLanguageService.instance.text('chatVoiceTooLarge'),
         );
@@ -3326,10 +3643,10 @@ class _ChatScreenState extends State<ChatScreen>
       );
       final upload = await MediaTransferService.uploadFile(
         path: file.path,
-        fileName: _privateBasename(file.path),
+        fileName: PrivateAttachmentHelpers.basename(file.path),
         mimeType: 'audio/mp4',
         messageType: 'voice',
-        maxBytes: 20 * 1024 * 1024,
+        maxBytes: PrivateVoiceRecordingPolicy.maximumFileBytes,
         encryptForE2ee: protectWithE2ee,
       );
 
@@ -3361,9 +3678,7 @@ class _ChatScreenState extends State<ChatScreen>
         );
       }
     } finally {
-      if (await file.exists()) {
-        await file.delete();
-      }
+      await _deleteVoiceTemporaryFiles(cleanupPaths);
     }
   }
 
@@ -3392,7 +3707,7 @@ class _ChatScreenState extends State<ChatScreen>
 
     final delta = globalPosition - start;
 
-    if (delta.dx <= -105) {
+    if (PrivateVoiceRecordingGesturePolicy.shouldCancel(delta.dx)) {
       _voicePressActive = false;
 
       unawaited(_finishVoiceRecording(send: false));
@@ -3400,7 +3715,7 @@ class _ChatScreenState extends State<ChatScreen>
       return;
     }
 
-    if (delta.dy <= -90) {
+    if (PrivateVoiceRecordingGesturePolicy.shouldLock(delta.dy)) {
       _voicePressActive = false;
 
       setState(() {
@@ -3427,21 +3742,11 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   Widget _withVoicePointerBridge(Widget child) {
-    if (Platform.isWindows) {
-      return child;
-    }
-
-    return Listener(
-      behavior: HitTestBehavior.translucent,
-      onPointerMove: (event) {
-        _handleVoiceDragPosition(event.position);
-      },
-      onPointerUp: (_) {
-        _finishVoicePointerGesture(send: true);
-      },
-      onPointerCancel: (_) {
-        _finishVoicePointerGesture(send: false);
-      },
+    return PrivateVoicePointerBridge(
+      enabled: !Platform.isWindows,
+      onMove: _handleVoiceDragPosition,
+      onPointerUp: () => _finishVoicePointerGesture(send: true),
+      onPointerCancel: () => _finishVoicePointerGesture(send: false),
       child: child,
     );
   }
@@ -3492,7 +3797,7 @@ class _ChatScreenState extends State<ChatScreen>
         _playingVoiceMessageId = id;
         _voicePlaybackPosition = Duration.zero;
         _voicePlaybackDuration = Duration(
-          milliseconds: _voiceDurationMs(message),
+          milliseconds: VoiceDurationFormatter.milliseconds(message),
         );
         _voiceIsPlaying = true;
       });
@@ -3530,13 +3835,13 @@ class _ChatScreenState extends State<ChatScreen>
 
     final duration = _voicePlaybackDuration.inMilliseconds > 0
         ? _voicePlaybackDuration
-        : Duration(milliseconds: _voiceDurationMs(message));
+        : Duration(milliseconds: VoiceDurationFormatter.milliseconds(message));
 
     if (duration.inMilliseconds <= 0) {
       return;
     }
 
-    final safeFraction = fraction.clamp(0.0, 1.0);
+    final safeFraction = VoicePlaybackPolicy.clampSeekFraction(fraction);
 
     await _voicePlayer.seek(
       Duration(milliseconds: (duration.inMilliseconds * safeFraction).round()),
@@ -3544,11 +3849,7 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   Future<void> _cycleVoicePlaybackRate(Map<String, dynamic> message) async {
-    final next = _voicePlaybackRate < 1.25
-        ? 1.5
-        : _voicePlaybackRate < 1.75
-        ? 2.0
-        : 1.0;
+    final next = VoicePlaybackPolicy.nextRate(_voicePlaybackRate);
 
     if (mounted) {
       setState(() {
@@ -3559,187 +3860,6 @@ class _ChatScreenState extends State<ChatScreen>
     if (_playingVoiceMessageId == _getMessageId(message)) {
       await _voicePlayer.setPlaybackRate(next);
     }
-  }
-
-  Widget _buildVoiceMessagePlayer(
-    Map<String, dynamic> message, {
-    required bool isMe,
-  }) {
-    final messageId = _getMessageId(message);
-
-    final selected = _playingVoiceMessageId == messageId;
-
-    final rawDuration = Duration(milliseconds: _voiceDurationMs(message));
-
-    final duration = selected && _voicePlaybackDuration.inMilliseconds > 0
-        ? _voicePlaybackDuration
-        : rawDuration;
-
-    final position = selected ? _voicePlaybackPosition : Duration.zero;
-
-    final progress = duration.inMilliseconds <= 0
-        ? 0.0
-        : (position.inMilliseconds / duration.inMilliseconds).clamp(0.0, 1.0);
-
-    final foreground = isMe ? FenyvoPalette.ink : _gold;
-
-    final inactive = isMe
-        ? FenyvoPalette.ink.withValues(alpha: 0.24)
-        : FenyvoPalette.ink.withValues(alpha: 0.23);
-
-    final secondaryText = isMe
-        ? FenyvoPalette.ink.withValues(alpha: 0.58)
-        : FenyvoPalette.ink.withValues(alpha: 0.62);
-
-    final waveformSeed = messageId.hashCode.abs();
-
-    const barCount = 36;
-
-    return SizedBox(
-      width: 272,
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          InkWell(
-            borderRadius: BorderRadius.circular(25),
-            onTap: () {
-              unawaited(_toggleVoicePlayback(message));
-            },
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 160),
-              width: 46,
-              height: 46,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: selected && _voiceIsPlaying
-                    ? foreground.withValues(alpha: 0.18)
-                    : foreground.withValues(alpha: 0.10),
-                border: Border.all(
-                  color: foreground.withValues(alpha: selected ? 0.88 : 0.55),
-                  width: selected ? 1.4 : 1.0,
-                ),
-              ),
-              child: Icon(
-                selected && _voiceIsPlaying
-                    ? Icons.pause_rounded
-                    : Icons.play_arrow_rounded,
-                color: foreground,
-                size: 28,
-              ),
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                SizedBox(
-                  height: 36,
-                  child: LayoutBuilder(
-                    builder: (context, constraints) {
-                      void seekAt(double x) {
-                        final width = constraints.maxWidth;
-
-                        if (width <= 0) {
-                          return;
-                        }
-
-                        final fraction = (x / width).clamp(0.0, 1.0);
-
-                        unawaited(_seekVoiceMessage(message, fraction));
-                      }
-
-                      return GestureDetector(
-                        behavior: HitTestBehavior.opaque,
-                        onTapDown: (details) {
-                          seekAt(details.localPosition.dx);
-                        },
-                        onHorizontalDragUpdate: (details) {
-                          seekAt(details.localPosition.dx);
-                        },
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.center,
-                          children: List.generate(barCount, (index) {
-                            final mixed =
-                                (waveformSeed + index * 31 + index * index * 7)
-                                    .abs();
-
-                            final height = 7.0 + (mixed % 25).toDouble();
-
-                            final active = ((index + 1) / barCount) <= progress;
-
-                            return Expanded(
-                              child: Align(
-                                alignment: Alignment.center,
-                                child: AnimatedContainer(
-                                  duration: const Duration(milliseconds: 90),
-                                  curve: Curves.easeOut,
-                                  margin: const EdgeInsets.symmetric(
-                                    horizontal: 0.55,
-                                  ),
-                                  height: height,
-                                  decoration: BoxDecoration(
-                                    color: active ? foreground : inactive,
-                                    borderRadius: BorderRadius.circular(3),
-                                  ),
-                                ),
-                              ),
-                            );
-                          }),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Row(
-                  children: [
-                    Text(
-                      '${_formatVoiceDuration(position)} / ${_formatVoiceDuration(duration)}',
-                      style: TextStyle(
-                        color: secondaryText,
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                    const Spacer(),
-                    InkWell(
-                      borderRadius: BorderRadius.circular(10),
-                      onTap: () {
-                        unawaited(_cycleVoicePlaybackRate(message));
-                      },
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 7,
-                          vertical: 3,
-                        ),
-                        decoration: BoxDecoration(
-                          color: foreground.withValues(alpha: 0.10),
-                          borderRadius: BorderRadius.circular(10),
-                          border: Border.all(
-                            color: foreground.withValues(alpha: 0.34),
-                          ),
-                        ),
-                        child: Text(
-                          '${_voicePlaybackRate.toStringAsFixed(_voicePlaybackRate == 1.0 ? 0 : 1)}x',
-                          style: TextStyle(
-                            color: foreground,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w900,
-                            height: 1,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
   }
 
   Future<void> _startLockedVoiceRecording() async {
@@ -3765,130 +3885,6 @@ class _ChatScreenState extends State<ChatScreen>
     }
 
     _voicePressActive = false;
-  }
-
-  Widget _buildVoiceRecordButton() => Tooltip(
-    message: AppLanguageService.instance.text('chatHoldToRecord'),
-    child: GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: () => unawaited(_startLockedVoiceRecording()),
-      onLongPressStart: _handleVoiceLongPressStart,
-      onLongPressMoveUpdate: _handleVoiceLongPressMove,
-      onLongPressEnd: _handleVoiceLongPressEnd,
-      child: Container(
-        width: 48,
-        height: 48,
-        decoration: const BoxDecoration(
-          shape: BoxShape.circle,
-          color: FenyvoPalette.gold,
-        ),
-        child: const Icon(
-          Icons.mic_rounded,
-          color: FenyvoPalette.onGold,
-          size: 24,
-        ),
-      ),
-    ),
-  );
-
-  Widget _buildVoiceRecordingComposer() {
-    final tick = _voiceRecordDuration.inMilliseconds ~/ 250;
-
-    return Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        _buildComposerReplyPreview(),
-        Container(
-          padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
-          decoration: const BoxDecoration(color: FenyvoPalette.surface),
-          child: SafeArea(
-            top: false,
-            child: Row(
-              children: [
-                Container(
-                  width: 10,
-                  height: 10,
-                  decoration: const BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: Color(0xFFFF5252),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                SizedBox(
-                  width: 48,
-                  child: Text(
-                    _formatVoiceDuration(_voiceRecordDuration),
-                    style: const TextStyle(
-                      color: FenyvoPalette.ink,
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: SizedBox(
-                    height: 34,
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.center,
-                      children: List.generate(18, (index) {
-                        final height =
-                            7.0 + ((index * 11 + tick * 3) % 24).toDouble();
-
-                        return Expanded(
-                          child: Align(
-                            child: AnimatedContainer(
-                              duration: const Duration(milliseconds: 140),
-                              margin: const EdgeInsets.symmetric(horizontal: 1),
-                              height: height,
-                              decoration: BoxDecoration(
-                                color: FenyvoPalette.blue,
-                                borderRadius: BorderRadius.circular(2),
-                              ),
-                            ),
-                          ),
-                        );
-                      }),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 8),
-                IconButton(
-                  tooltip: '\u041e\u0442\u043c\u0435\u043d\u0438\u0442\u044c',
-                  onPressed: () {
-                    unawaited(_finishVoiceRecording(send: false));
-                  },
-                  icon: const Icon(
-                    Icons.delete_outline_rounded,
-                    color: Color(0xFFFF6B6B),
-                  ),
-                ),
-                Container(
-                  width: 46,
-                  height: 46,
-                  decoration: const BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: LinearGradient(
-                      colors: [FenyvoPalette.blue, FenyvoPalette.blueDeep],
-                    ),
-                  ),
-                  child: IconButton(
-                    tooltip: '\u041e\u0442\u043f\u0440\u0430\u0432\u0438\u0442\u044c',
-                    onPressed: () {
-                      unawaited(_finishVoiceRecording(send: true));
-                    },
-                    icon: const Icon(
-                      Icons.send_rounded,
-                      color: FenyvoPalette.ink,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ],
-    );
   }
 
   // ========================================
@@ -4038,104 +4034,6 @@ class _ChatScreenState extends State<ChatScreen>
     );
   }
 
-  Widget _buildComposerReplyPreview() {
-    final reply = _replyToMessage;
-
-    if (reply == null) {
-      return const SizedBox.shrink();
-    }
-
-    final currentUser = SocketService.instance.currentUser ?? '';
-
-    final from = reply['from']?.toString().trim() ?? '';
-
-    final text = reply['text']?.toString().trim() ?? '';
-
-    final author = from == currentUser ? '\u0412\u044B' : from;
-
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(14, 8, 8, 8),
-      decoration: BoxDecoration(
-        color: FenyvoPalette.surface,
-        border: Border(
-          top: BorderSide(color: _gold.withValues(alpha: 0.22), width: 0.8),
-        ),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 3,
-            height: 38,
-            decoration: BoxDecoration(
-              color: FenyvoPalette.blue,
-              borderRadius: BorderRadius.circular(3),
-              boxShadow: [
-                BoxShadow(color: _gold.withValues(alpha: 0.06), blurRadius: 6),
-              ],
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  author.isEmpty ? '\u041E\u0442\u0432\u0435\u0442' : author,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: _gold,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  text,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: FenyvoPalette.secondary,
-                    fontSize: 12,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          if (Platform.isWindows) ...[
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
-              decoration: BoxDecoration(
-                color: FenyvoPalette.blue.withValues(alpha: 0.08),
-                borderRadius: BorderRadius.circular(5),
-                border: Border.all(
-                  color: _gold.withValues(alpha: 0.18),
-                  width: 0.7,
-                ),
-              ),
-              child: const Text(
-                'ESC',
-                style: TextStyle(
-                  color: FenyvoPalette.secondary,
-                  fontSize: 9,
-                  fontWeight: FontWeight.w600,
-                  letterSpacing: 0.5,
-                ),
-              ),
-            ),
-            const SizedBox(width: 2),
-          ],
-          IconButton(
-            onPressed: _cancelReply,
-            visualDensity: VisualDensity.compact,
-            icon: const Icon(Icons.close_rounded, color: _gold, size: 21),
-          ),
-        ],
-      ),
-    );
-  }
-
   // ========================================
   // \u041E\u0422\u041F\u0420\u0410\u0412\u041A\u0410 \u0420\u0415\u0410\u041A\u0426\u0418\u0418
   // ========================================
@@ -4187,7 +4085,51 @@ class _ChatScreenState extends State<ChatScreen>
         _messages[messageIndex].remove('reactionUsers');
         _messages[messageIndex].remove('reaction');
       });
-      _saveMessages();
+      final owner = currentUser.trim();
+      final peer = widget.targetUser.trim();
+      final validParticipants =
+          (from == owner && to == peer) || (from == peer && to == owner);
+
+      if (owner.isNotEmpty && peer.isNotEmpty && validParticipants) {
+        final selectedReaction = reactions[owner];
+        unawaited(
+          StorageService.mutateMessagesDurably(owner, peer, (current) {
+            for (final stored in current) {
+              if (stored['id']?.toString().trim() != messageId) {
+                continue;
+              }
+
+              final sender = stored['from']?.toString().trim() ?? '';
+              final recipient = stored['to']?.toString().trim() ?? '';
+              final belongsToChat =
+                  (sender == owner && recipient == peer) ||
+                  (sender == peer && recipient == owner);
+              if (!belongsToChat) return null;
+
+              final latestReactions = _getMessageReactions(stored);
+              final currentReaction = latestReactions[owner];
+
+              if (currentReaction == selectedReaction) {
+                return null;
+              }
+
+              if (selectedReaction == null) {
+                latestReactions.remove(owner);
+              } else {
+                latestReactions[owner] = selectedReaction;
+              }
+
+              stored['reactions'] = latestReactions;
+              stored.remove('reactionUsers');
+              stored.remove('reaction');
+              return current;
+            }
+            return null;
+          }).then((_) {}).catchError((Object error, StackTrace stack) {
+            debugPrint('Durable local reaction update failed: $error');
+          }),
+        );
+      }
     }
 
     SocketService.instance.sendMessageReaction(
@@ -4641,7 +4583,38 @@ class _ChatScreenState extends State<ChatScreen>
       }
     });
 
-    _saveMessages();
+    final owner = SocketService.instance.currentUser?.trim() ?? '';
+    final peer = widget.targetUser.trim();
+    final nextPinned = !wasPinned;
+
+    if (owner.isNotEmpty && peer.isNotEmpty && owner != peer) {
+      unawaited(
+        StorageService.mutateMessagesDurably(owner, peer, (current) {
+          for (final stored in current) {
+            if (stored['id']?.toString().trim() != targetId) {
+              continue;
+            }
+
+            final sender = stored['from']?.toString().trim() ?? '';
+            final recipient = stored['to']?.toString().trim() ?? '';
+            final belongsToChat =
+                (sender == owner && recipient == peer) ||
+                (sender == peer && recipient == owner);
+            if (!belongsToChat) return null;
+
+            if ((stored['isPinned'] == true) == nextPinned) {
+              return null;
+            }
+
+            stored['isPinned'] = nextPinned;
+            return current;
+          }
+          return null;
+        }).then((_) {}).catchError((Object error, StackTrace stack) {
+          debugPrint('Durable local pin update failed: $error');
+        }),
+      );
+    }
 
     final currentUser = SocketService.instance.currentUser?.trim() ?? '';
     if (currentUser.isNotEmpty) {
@@ -7538,29 +7511,68 @@ class _ChatScreenState extends State<ChatScreen>
       return;
     }
 
+    final owner = SocketService.instance.currentUser?.trim() ?? '';
+    final peer = widget.targetUser.trim();
+    final sender = message['from']?.toString().trim() ?? '';
+    final recipient = message['to']?.toString().trim() ?? '';
+    final realId = message['id']?.toString().trim() ?? '';
+
+    final validParticipants =
+        (sender == owner && recipient == peer) ||
+        (sender == peer && recipient == owner);
+    if (owner.isEmpty || peer.isEmpty || owner == peer || !validParticipants)
+      return;
+
+    bool removedDurably;
+    try {
+      if (realId.isNotEmpty) {
+        // Owner-only durable marker. Shared history is preserved.
+        removedDurably = await StorageService.hideMessageForMeDurably(
+          currentUser: owner,
+          peer: peer,
+          messageId: realId,
+        );
+      } else {
+        // Compatibility path for legacy records without a real ID.
+        removedDurably = await StorageService.mutateMessagesDurably(
+          owner,
+          peer,
+          (current) {
+            final index = current.indexWhere((stored) {
+              if (stored['from']?.toString().trim() != sender ||
+                  stored['to']?.toString().trim() != recipient) {
+                return false;
+              }
+              return (stored['id']?.toString().trim() ?? '').isEmpty &&
+                  isSameStoredMessage(stored, message);
+            });
+            if (index < 0) return null;
+            current.removeAt(index);
+            return current;
+          },
+        );
+      }
+    } catch (error) {
+      debugPrint('Delete for me persistence failed: $error');
+      return;
+    }
+
+    if (!removedDurably ||
+        !mounted ||
+        SocketService.instance.currentUser?.trim() != owner) {
+      return;
+    }
+
     final replyId = _replyToMessage == null
         ? ''
         : _getMessageId(_replyToMessage!);
 
-    var removed = false;
-
     setState(() {
-      final before = _messages.length;
-
       _messages.removeWhere((item) => _getMessageId(item) == messageId);
-
-      removed = _messages.length != before;
-
       if (replyId == messageId) {
         _replyToMessage = null;
       }
     });
-
-    if (!removed) {
-      return;
-    }
-
-    _saveMessages();
 
     if (!mounted) {
       return;
@@ -7724,7 +7736,7 @@ class _ChatScreenState extends State<ChatScreen>
     required String forwardedFrom,
     required String comment,
   }) async {
-    final type = _privateMessageType(message);
+    final type = PrivateAttachmentHelpers.messageType(message);
     final text = message['text']?.toString().trim() ?? '';
 
     if (type == 'text') {
@@ -7763,7 +7775,9 @@ class _ChatScreenState extends State<ChatScreen>
           );
         }
 
-        final fileName = _privateSafeFileName(_privateAttachmentName(prepared));
+        final fileName = PrivateAttachmentHelpers.safeFileName(
+          _privateAttachmentName(prepared),
+        );
         final fallbackMime = type == 'image'
             ? 'image/jpeg'
             : type == 'video'
@@ -7776,7 +7790,10 @@ class _ChatScreenState extends State<ChatScreen>
             ? prepared['mimeType'].toString().trim()
             : (prepared['voiceMimeType']?.toString().trim().isNotEmpty == true
                   ? prepared['voiceMimeType'].toString().trim()
-                  : _privateMimeFromName(fileName, fallbackMime));
+                  : PrivateAttachmentHelpers.mimeFromName(
+                      fileName,
+                      fallbackMime,
+                    ));
         final maxBytes = type == 'video'
             ? 1024 * 1024 * 1024
             : type == 'file'
@@ -7854,7 +7871,7 @@ class _ChatScreenState extends State<ChatScreen>
   Future<void> _forwardMessage(Map<String, dynamic> message) async {
     final currentUser = SocketService.instance.currentUser ?? '';
 
-    final messageType = _privateMessageType(message);
+    final messageType = PrivateAttachmentHelpers.messageType(message);
     final rawText = message['text']?.toString().trim() ?? '';
     final text = rawText.isNotEmpty
         ? rawText
@@ -8483,6 +8500,64 @@ class _ChatScreenState extends State<ChatScreen>
     );
   }
 
+  // LEGACY_MEDIA_REGRANT_UI_V1
+  bool _canOfferLegacyMediaAccess(Map<String, dynamic> message) {
+    final socket = SocketService.instance;
+    final me = socket.currentUser ?? '';
+    final peer = widget.targetUser;
+
+    return socket.isAuthenticated &&
+        LegacyMediaRegrantVisibility.canOffer(
+          message: message,
+          currentUser: me,
+          recipient: peer,
+          communicationAccepted: socket.isCommunicationAccepted(peer),
+        );
+  }
+
+  String _legacyMediaAccessText(String ru, String uk, String en) {
+    final language = AppLanguageService.instance.code.value
+        .toLowerCase()
+        .split('-')
+        .first;
+
+    if (language == 'uk') return uk;
+    if (language == 'en') return en;
+    return ru;
+  }
+
+  Future<void> _showLegacyMediaAccess(Map<String, dynamic> message) async {
+    // Revalidate after the message menu has closed.
+    if (!mounted || !_canOfferLegacyMediaAccess(message)) return;
+
+    final mediaId = message['mediaId']?.toString().trim() ?? '';
+    final recipient = widget.targetUser;
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => LegacyMediaRegrantDialog(
+        recipient: recipient,
+        languageCode: AppLanguageService.instance.code.value,
+        onConfirm: () async {
+          // Revalidate the authenticated account and recipient.
+          if (!_canOfferLegacyMediaAccess(message)) {
+            return const LegacyMediaRegrantResult(
+              approved: false,
+              reason: 'RECIPIENT_NOT_ELIGIBLE',
+            );
+          }
+
+          return LegacyMediaRegrantClient.instance.request(
+            mediaId: mediaId,
+            recipient: recipient,
+            ownerConfirmed: true,
+          );
+        },
+      ),
+    );
+  }
+
   Future<void> _showDesktopMessageContextMenu(
     Map<String, dynamic> message,
     Offset globalPosition,
@@ -8545,6 +8620,16 @@ class _ChatScreenState extends State<ChatScreen>
           icon: Icons.forward_rounded,
           label: _chatText('forward'),
         ),
+        if (_canOfferLegacyMediaAccess(message))
+          _buildDesktopMessageContextItem(
+            value: 'legacy_media_access',
+            icon: Icons.lock_open_rounded,
+            label: _legacyMediaAccessText(
+              'Открыть доступ',
+              'Надати доступ',
+              'Grant access',
+            ),
+          ),
         if (isMe && forwardedFrom.isEmpty && !isE2ee)
           _buildDesktopMessageContextItem(
             value: 'edit',
@@ -8611,6 +8696,9 @@ class _ChatScreenState extends State<ChatScreen>
         unawaited(_forwardMessage(message));
         break;
 
+      case 'legacy_media_access':
+        unawaited(_showLegacyMediaAccess(message));
+        break;
       case 'edit':
         unawaited(_editMessage(message));
         break;
@@ -8649,7 +8737,7 @@ class _ChatScreenState extends State<ChatScreen>
           ...message,
           'messageType': _isVoiceMessage(message)
               ? 'voice'
-              : _privateMessageType(message),
+              : PrivateAttachmentHelpers.messageType(message),
         },
         origin: widget.targetUser,
       );
@@ -8874,6 +8962,31 @@ class _ChatScreenState extends State<ChatScreen>
                               },
                             ),
 
+                            if (_canOfferLegacyMediaAccess(message)) ...[
+                              Divider(
+                                height: 1,
+                                thickness: 0.6,
+                                color: _gold.withValues(alpha: 0.15),
+                              ),
+                              _buildMessageMenuItem(
+                                icon: Icons.lock_open_rounded,
+                                title: _legacyMediaAccessText(
+                                  'Открыть доступ',
+                                  'Надати доступ',
+                                  'Grant access',
+                                ),
+                                subtitle: _legacyMediaAccessText(
+                                  'Только для подтверждённого контакта',
+                                  'Лише для підтвердженого контакту',
+                                  'Accepted contacts only',
+                                ),
+                                onTap: () {
+                                  closeAndRun(() {
+                                    unawaited(_showLegacyMediaAccess(message));
+                                  });
+                                },
+                              ),
+                            ],
                             if (isMe &&
                                 !isE2ee &&
                                 (message['forwardedFrom']
@@ -9176,7 +9289,7 @@ class _ChatScreenState extends State<ChatScreen>
 
     final isVoiceMessage = _isVoiceMessage(message);
 
-    final privateMessageType = _privateMessageType(message);
+    final privateMessageType = PrivateAttachmentHelpers.messageType(message);
 
     final isPrivateMediaMessage =
         privateMessageType == 'image' ||
@@ -9428,7 +9541,21 @@ class _ChatScreenState extends State<ChatScreen>
                       if (sharedContact != null)
                         _buildSharedContactCard(sharedContact, isMe: isMe)
                       else if (isVoiceMessage)
-                        _buildVoiceMessagePlayer(message, isMe: isMe)
+                        PrivateVoiceMessagePlayer(
+                          message: message,
+                          isMe: isMe,
+                          messageId: _getMessageId(message),
+                          playingVoiceMessageId: _playingVoiceMessageId,
+                          playbackPosition: _voicePlaybackPosition,
+                          playbackDuration: _voicePlaybackDuration,
+                          playbackRate: _voicePlaybackRate,
+                          isPlaying: _voiceIsPlaying,
+                          gold: _gold,
+                          onToggle: () => _toggleVoicePlayback(message),
+                          onSeek: (fraction) =>
+                              _seekVoiceMessage(message, fraction),
+                          onCycleRate: () => _cycleVoicePlaybackRate(message),
+                        )
                       else if (isPrivateMediaMessage)
                         _buildPrivateMediaBody(message, isMe: isMe)
                       else
@@ -10074,21 +10201,102 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   Future<void> _loadTrustState() async {
+    // Capture the owner before asynchronous preference reads.
+    // Never apply a previous account's result to the current screen.
+    final owner = SocketService.instance.currentUser?.trim() ?? '';
+    final peer = widget.targetUser.trim();
+
+    if (owner.isEmpty || peer.isEmpty || owner == peer) {
+      return;
+    }
+
     final results = await Future.wait<bool>([
-      FenyvoTrustService.isTrusted(widget.targetUser),
-      FenyvoTrustService.isBlocked(widget.targetUser),
-      FenyvoTrustService.isReported(widget.targetUser),
+      FenyvoTrustService.isTrusted(peer, owner: owner),
+      FenyvoTrustService.isBlocked(peer, owner: owner),
+      FenyvoTrustService.isReported(peer, owner: owner),
     ]);
-    if (!mounted) return;
+
+    if (!mounted || SocketService.instance.currentUser?.trim() != owner) {
+      return;
+    }
+
     setState(() {
       _contactTrusted = results[0];
       _contactBlocked = results[1];
       _contactReported = results[2];
+      if (_contactBlocked) {
+        _messages.removeWhere((message) => message['isMe'] != true);
+      }
     });
-    FenyvoTrustService.requestRemote(widget.targetUser);
+
+    // Request remote state only while the original owner is active.
+    if (SocketService.instance.currentUser?.trim() == owner) {
+      FenyvoTrustService.requestRemote(peer);
+    }
+  }
+
+  Future<void> _removeBlockedIncomingMessagesDurably() async {
+    final owner = SocketService.instance.currentUser?.trim() ?? '';
+    final peer = widget.targetUser.trim();
+
+    if (owner.isEmpty || peer.isEmpty || owner == peer) return;
+
+    try {
+      // Preserve shared history. Blocked messages are hidden only for
+      // the currently authenticated owner, using durable ID markers.
+      if (!await FenyvoTrustService.isBlocked(peer, owner: owner)) {
+        return;
+      }
+
+      final stored = StorageService.getMessages(owner, peer);
+      final incomingIds = stored
+          .where((message) {
+            return message['from']?.toString().trim() == peer &&
+                message['to']?.toString().trim() == owner;
+          })
+          .map((message) => message['id']?.toString().trim() ?? '')
+          .where((id) => id.isNotEmpty)
+          .toSet();
+
+      for (final messageId in incomingIds) {
+        // A queued operation must not act after account switching or
+        // after the contact was unblocked.
+        if (SocketService.instance.currentUser?.trim() != owner) {
+          return;
+        }
+
+        if (!await FenyvoTrustService.isBlocked(peer, owner: owner)) {
+          return;
+        }
+
+        await StorageService.hideMessageForMeDurably(
+          currentUser: owner,
+          peer: peer,
+          messageId: messageId,
+        );
+      }
+
+      // Legacy messages without IDs are deliberately left untouched.
+      // They need a separate account-safe visibility strategy.
+    } catch (error) {
+      debugPrint('Blocked incoming owner-only hide failed: $error');
+    }
   }
 
   Future<void> _applyRemoteTrustState(Map<String, dynamic> data) async {
+    // Capture the authenticated owner before any asynchronous work.
+    final socket = SocketService.instance;
+    final owner = socket.currentUser?.trim() ?? '';
+    final peer = widget.targetUser.trim();
+
+    if (!mounted ||
+        !socket.isAuthenticated ||
+        owner.isEmpty ||
+        peer.isEmpty ||
+        owner == peer) {
+      return;
+    }
+
     final trusted = data['trusted'] == true;
     final blocked = data['blocked'] == true;
     final reported = data['reported'] == true;
@@ -10098,14 +10306,27 @@ class _ChatScreenState extends State<ChatScreen>
         blocked != _contactBlocked ||
         reported != _contactReported;
 
+    // A socket or account transition can occur during preference writes.
+    // Never use an implicit, potentially different account for the keys.
+    if (!socket.isAuthenticated || socket.currentUser?.trim() != owner) {
+      return;
+    }
+
     await FenyvoTrustService.applyRemote(
-      widget.targetUser,
+      peer,
       trusted: trusted,
       blocked: blocked,
       reported: reported,
       reportReason: reason,
+      owner: owner,
     );
-    if (!mounted) return;
+
+    // Never update the UI or start follow-up cleanup for another owner.
+    if (!mounted ||
+        !socket.isAuthenticated ||
+        socket.currentUser?.trim() != owner) {
+      return;
+    }
     setState(() {
       _contactTrusted = trusted;
       _contactBlocked = blocked;
@@ -10114,7 +10335,7 @@ class _ChatScreenState extends State<ChatScreen>
         _messages.removeWhere((message) => message['isMe'] != true);
       }
     });
-    if (blocked) _saveMessages();
+    if (blocked) unawaited(_removeBlockedIncomingMessagesDurably());
     if (changed) {
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text(_chatText('trustSynced'))));
@@ -10271,7 +10492,7 @@ class _ChatScreenState extends State<ChatScreen>
             _messages.removeWhere((message) => message['isMe'] != true);
           }
         });
-        if (next) _saveMessages();
+        if (next) unawaited(_removeBlockedIncomingMessagesDurably());
       }
     } else if (action == 'report') {
       final reason = await showDialog<String>(
@@ -10564,13 +10785,31 @@ class _ChatScreenState extends State<ChatScreen>
 
   Widget _buildMessageInput() {
     if (_isRecordingVoice)
-      return _withVoicePointerBridge(_buildVoiceRecordingComposer());
+      return _withVoicePointerBridge(
+        PrivateVoiceRecordingComposer(
+          replyPreview: PrivateComposerReplyPreview(
+            replyMessage: _replyToMessage,
+            currentUser: SocketService.instance.currentUser ?? '',
+            languageCode: AppLanguageService.instance.code.value,
+            onCancel: _cancelReply,
+          ),
+          duration: _voiceRecordDuration,
+          languageCode: AppLanguageService.instance.code.value,
+          onCancel: () => _finishVoiceRecording(send: false),
+          onSend: () => _finishVoiceRecording(send: true),
+        ),
+      );
     return _withVoicePointerBridge(
       Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           _buildTypingIndicator(),
-          _buildComposerReplyPreview(),
+          PrivateComposerReplyPreview(
+            replyMessage: _replyToMessage,
+            currentUser: SocketService.instance.currentUser ?? '',
+            languageCode: AppLanguageService.instance.code.value,
+            onCancel: _cancelReply,
+          ),
           Container(
             margin: const EdgeInsets.fromLTRB(10, 5, 10, 9),
             decoration: BoxDecoration(
@@ -10697,7 +10936,15 @@ class _ChatScreenState extends State<ChatScreen>
                       ),
                       const SizedBox(width: 8),
                       if (_messageController.text.trim().isEmpty)
-                        _buildVoiceRecordButton()
+                        PrivateVoiceRecordButton(
+                          tooltip: AppLanguageService.instance.text(
+                            'chatHoldToRecord',
+                          ),
+                          onTap: () => unawaited(_startLockedVoiceRecording()),
+                          onLongPressStart: _handleVoiceLongPressStart,
+                          onLongPressMoveUpdate: _handleVoiceLongPressMove,
+                          onLongPressEnd: _handleVoiceLongPressEnd,
+                        )
                       else
                         SizedBox(
                           width: 48,

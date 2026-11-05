@@ -49,6 +49,7 @@ function setup({
   const offlineMessages = { bob: state.queue };
 
   const sandbox = {
+    MEDIA_ACK_RETIREMENT_READY: false,
     type: 'message_delivered',
     data: {
       messageId: requestId,

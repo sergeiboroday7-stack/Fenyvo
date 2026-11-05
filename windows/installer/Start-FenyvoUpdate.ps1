@@ -162,9 +162,7 @@ try {
     $process = Start-Process `
         -FilePath $powershellExe `
         -ArgumentList $arguments `
-        -PassThru -WindowStyle Hidden `
-        -RedirectStandardOutput $standardOutputLog `
-        -RedirectStandardError $standardErrorLog
+        -PassThru -WindowStyle Hidden
 
     $readyDeadline = [DateTime]::UtcNow.AddSeconds(20)
 
