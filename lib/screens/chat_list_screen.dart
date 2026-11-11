@@ -710,42 +710,42 @@ class _ChatListScreenState extends State<ChatListScreen> {
 
       // Read and edit the latest persisted history inside the shared queue.
       unawaited(
-        StorageService.mutateMessagesDurably(
-          currentUser,
-          otherUser,
-          (messages) {
-            var changed = false;
+        StorageService.mutateMessagesDurably(currentUser, otherUser, (
+              messages,
+            ) {
+              var changed = false;
 
-            for (final message in messages) {
-              final id = message['id']?.toString().trim() ?? '';
+              for (final message in messages) {
+                final id = message['id']?.toString().trim() ?? '';
 
-              if (id == messageId) {
-                message['text'] = newText;
-                message['isEdited'] = true;
-                message['editedAt'] = editedAt;
-                changed = true;
+                if (id == messageId) {
+                  message['text'] = newText;
+                  message['isEdited'] = true;
+                  message['editedAt'] = editedAt;
+                  changed = true;
+                }
+
+                final rawReply = message['replyTo'];
+
+                if (rawReply is Map &&
+                    rawReply['id']?.toString().trim() == messageId) {
+                  final reply = Map<String, dynamic>.from(rawReply);
+                  reply['text'] = newText;
+                  message['replyTo'] = reply;
+                  changed = true;
+                }
               }
 
-              final rawReply = message['replyTo'];
-
-              if (rawReply is Map &&
-                  rawReply['id']?.toString().trim() == messageId) {
-                final reply = Map<String, dynamic>.from(rawReply);
-                reply['text'] = newText;
-                message['replyTo'] = reply;
-                changed = true;
+              return changed ? messages : null;
+            })
+            .then((changed) {
+              if (changed && mounted) {
+                _loadChats();
               }
-            }
-
-            return changed ? messages : null;
-          },
-        ).then((changed) {
-          if (changed && mounted) {
-            _loadChats();
-          }
-        }).catchError((Object error, StackTrace stack) {
-          debugPrint('Message edit persistence failed: $error');
-        }),
+            })
+            .catchError((Object error, StackTrace stack) {
+              debugPrint('Message edit persistence failed: $error');
+            }),
       );
       return;
     }
@@ -775,27 +775,31 @@ class _ChatListScreenState extends State<ChatListScreen> {
       // A false result can also mean that the history was already clean.
       unawaited(
         StorageService.deleteForEveryoneDurably(
-          currentUser: currentUser,
-          peer: otherUser,
-          messageId: messageId,
-          from: from,
-          to: to,
-        ).then((changed) {
-          // Refresh even if the message did not exist locally: a marker
-          // may still have been committed to prevent future replay.
-          final remaining =
-              StorageService.getMessages(currentUser, otherUser);
+              currentUser: currentUser,
+              peer: otherUser,
+              messageId: messageId,
+              from: from,
+              to: to,
+            )
+            .then((changed) {
+              // Refresh even if the message did not exist locally: a marker
+              // may still have been committed to prevent future replay.
+              final remaining = StorageService.getMessages(
+                currentUser,
+                otherUser,
+              );
 
-          if (remaining.isEmpty) {
-            StorageService.clearUnreadCount(currentUser, otherUser);
-          }
+              if (remaining.isEmpty) {
+                StorageService.clearUnreadCount(currentUser, otherUser);
+              }
 
-          if (mounted) {
-            _loadChats();
-          }
-        }).catchError((Object error, StackTrace stack) {
-          debugPrint('Guarded message delete persistence failed: $error');
-        }),
+              if (mounted) {
+                _loadChats();
+              }
+            })
+            .catchError((Object error, StackTrace stack) {
+              debugPrint('Guarded message delete persistence failed: $error');
+            }),
       );
       return;
     }
@@ -809,7 +813,9 @@ class _ChatListScreenState extends State<ChatListScreen> {
 
       // Accept real media without a caption, but reject empty events.
       // ID-less media remains unsupported by the durable append path.
-      if (currentUser.isEmpty || from.isEmpty || from == currentUser ||
+      if (currentUser.isEmpty ||
+          from.isEmpty ||
+          from == currentUser ||
           to != currentUser ||
           !hasMessageContent(data) ||
           (id.isEmpty && text.trim().isEmpty)) {
@@ -819,39 +825,39 @@ class _ChatListScreenState extends State<ChatListScreen> {
       _setUserTyping(from, false);
 
       final incoming = <String, dynamic>{
-          'id': id,
-          'from': from,
-          'to': to,
-          'text': text,
-          'messageType': data['messageType']?.toString().trim() ?? 'text',
-          if (data['voiceData'] is String)
-            'voiceData': data['voiceData'].toString(),
-          if (data['voiceDurationMs'] != null)
-            'voiceDurationMs': data['voiceDurationMs'],
-          if (data['voiceMimeType'] != null)
-            'voiceMimeType': data['voiceMimeType'].toString(),
-          if (data['mediaId'] != null &&
-              data['mediaId'].toString().trim().isNotEmpty)
-            'mediaId': data['mediaId'].toString(),
-          if (data['mediaData'] is String)
-            'mediaData': data['mediaData'].toString(),
-          if (data['e2eeMedia'] is Map)
-            'e2eeMedia': Map<String, dynamic>.from(data['e2eeMedia'] as Map),
-          if (data['fileName'] != null) 'fileName': data['fileName'].toString(),
-          if (data['fileSize'] != null) 'fileSize': data['fileSize'],
-          if (data['mimeType'] != null) 'mimeType': data['mimeType'].toString(),
-          'time': time,
-          'status': 'delivered',
-          if (data['e2ee'] == true) 'e2ee': true,
-          if (data['e2eeError'] == true) 'e2eeError': true,
-          if (data['replyTo'] is Map)
-            'replyTo': Map<String, dynamic>.from(data['replyTo'] as Map),
-          if (data['forwardedFrom'] != null)
-            'forwardedFrom': data['forwardedFrom'].toString(),
-          if (data['forwardComment'] != null)
-            'forwardComment': data['forwardComment'].toString(),
-          if (data['isEdited'] == true) 'isEdited': true,
-          if (data['editedAt'] != null) 'editedAt': data['editedAt'].toString(),
+        'id': id,
+        'from': from,
+        'to': to,
+        'text': text,
+        'messageType': data['messageType']?.toString().trim() ?? 'text',
+        if (data['voiceData'] is String)
+          'voiceData': data['voiceData'].toString(),
+        if (data['voiceDurationMs'] != null)
+          'voiceDurationMs': data['voiceDurationMs'],
+        if (data['voiceMimeType'] != null)
+          'voiceMimeType': data['voiceMimeType'].toString(),
+        if (data['mediaId'] != null &&
+            data['mediaId'].toString().trim().isNotEmpty)
+          'mediaId': data['mediaId'].toString(),
+        if (data['mediaData'] is String)
+          'mediaData': data['mediaData'].toString(),
+        if (data['e2eeMedia'] is Map)
+          'e2eeMedia': Map<String, dynamic>.from(data['e2eeMedia'] as Map),
+        if (data['fileName'] != null) 'fileName': data['fileName'].toString(),
+        if (data['fileSize'] != null) 'fileSize': data['fileSize'],
+        if (data['mimeType'] != null) 'mimeType': data['mimeType'].toString(),
+        'time': time,
+        'status': 'delivered',
+        if (data['e2ee'] == true) 'e2ee': true,
+        if (data['e2eeError'] == true) 'e2eeError': true,
+        if (data['replyTo'] is Map)
+          'replyTo': Map<String, dynamic>.from(data['replyTo'] as Map),
+        if (data['forwardedFrom'] != null)
+          'forwardedFrom': data['forwardedFrom'].toString(),
+        if (data['forwardComment'] != null)
+          'forwardComment': data['forwardComment'].toString(),
+        if (data['isEdited'] == true) 'isEdited': true,
+        if (data['editedAt'] != null) 'editedAt': data['editedAt'].toString(),
       };
 
       // Check the active owner's block state before a durable append.
@@ -905,12 +911,36 @@ class _ChatListScreenState extends State<ChatListScreen> {
             return;
           }
 
-          final hiddenForOwner = id.isNotEmpty &&
+          final hiddenForOwner =
+              id.isNotEmpty &&
               StorageService.isMessageHiddenForMe(
                 currentUser: currentUser,
                 peer: from,
                 messageId: id,
               );
+
+          // ACK only after successful durable persistence.
+          // Duplicates require an already stored verified record.
+          if (!blockedAfterAppend &&
+              !hiddenForOwner &&
+              id.isNotEmpty &&
+              incoming['e2ee'] == true &&
+              SocketService.instance.currentUser?.trim() == currentUser) {
+            final persistedForAck = StorageService
+                .getMessagesVisibleForOwner(currentUser, from)
+                .any((stored) =>
+                    stored['id']?.toString().trim() == id &&
+                    stored['from']?.toString().trim() == from &&
+                    stored['to']?.toString().trim() == currentUser &&
+                    stored['e2ee'] == true);
+            if (persistedForAck) {
+              SocketService.instance.sendMessageDelivered(
+                messageId: id,
+                from: from,
+                to: currentUser,
+              );
+            }
+          }
 
           if (appended && !blockedAfterAppend && !hiddenForOwner) {
             StorageService.incrementUnreadCount(currentUser, from);
@@ -935,63 +965,64 @@ class _ChatListScreenState extends State<ChatListScreen> {
       final id = data['id']?.toString().trim() ?? '';
 
       // Media-only messages need a real ID for durable storage.
-      if (currentUser.isEmpty || to.isEmpty ||
+      if (currentUser.isEmpty ||
+          to.isEmpty ||
           !hasMessageContent(data) ||
           (id.isEmpty && text.trim().isEmpty)) {
         return;
       }
 
       final outgoing = <String, dynamic>{
-          'id': id,
-          'from': currentUser,
-          'to': to,
-          'text': text,
-          'messageType': data['messageType']?.toString().trim() ?? 'text',
-          if (data['voiceData'] is String)
-            'voiceData': data['voiceData'].toString(),
-          if (data['voiceDurationMs'] != null)
-            'voiceDurationMs': data['voiceDurationMs'],
-          if (data['voiceMimeType'] != null)
-            'voiceMimeType': data['voiceMimeType'].toString(),
-          if (data['mediaId'] != null &&
-              data['mediaId'].toString().trim().isNotEmpty)
-            'mediaId': data['mediaId'].toString(),
-          if (data['mediaData'] is String)
-            'mediaData': data['mediaData'].toString(),
-          if (data['e2eeMedia'] is Map)
-            'e2eeMedia': Map<String, dynamic>.from(data['e2eeMedia'] as Map),
-          if (data['fileName'] != null) 'fileName': data['fileName'].toString(),
-          if (data['fileSize'] != null) 'fileSize': data['fileSize'],
-          if (data['mimeType'] != null) 'mimeType': data['mimeType'].toString(),
-          'time': time,
-          'status': 'sent',
-          if (data['e2ee'] == true) 'e2ee': true,
-          if (data['e2eeError'] == true) 'e2eeError': true,
-          if (data['replyTo'] is Map)
-            'replyTo': Map<String, dynamic>.from(data['replyTo'] as Map),
-          if (data['forwardedFrom'] != null)
-            'forwardedFrom': data['forwardedFrom'].toString(),
-          if (data['forwardComment'] != null)
-            'forwardComment': data['forwardComment'].toString(),
-          if (data['isEdited'] == true) 'isEdited': true,
-          if (data['editedAt'] != null) 'editedAt': data['editedAt'].toString(),
+        'id': id,
+        'from': currentUser,
+        'to': to,
+        'text': text,
+        'messageType': data['messageType']?.toString().trim() ?? 'text',
+        if (data['voiceData'] is String)
+          'voiceData': data['voiceData'].toString(),
+        if (data['voiceDurationMs'] != null)
+          'voiceDurationMs': data['voiceDurationMs'],
+        if (data['voiceMimeType'] != null)
+          'voiceMimeType': data['voiceMimeType'].toString(),
+        if (data['mediaId'] != null &&
+            data['mediaId'].toString().trim().isNotEmpty)
+          'mediaId': data['mediaId'].toString(),
+        if (data['mediaData'] is String)
+          'mediaData': data['mediaData'].toString(),
+        if (data['e2eeMedia'] is Map)
+          'e2eeMedia': Map<String, dynamic>.from(data['e2eeMedia'] as Map),
+        if (data['fileName'] != null) 'fileName': data['fileName'].toString(),
+        if (data['fileSize'] != null) 'fileSize': data['fileSize'],
+        if (data['mimeType'] != null) 'mimeType': data['mimeType'].toString(),
+        'time': time,
+        'status': 'sent',
+        if (data['e2ee'] == true) 'e2ee': true,
+        if (data['e2eeError'] == true) 'e2eeError': true,
+        if (data['replyTo'] is Map)
+          'replyTo': Map<String, dynamic>.from(data['replyTo'] as Map),
+        if (data['forwardedFrom'] != null)
+          'forwardedFrom': data['forwardedFrom'].toString(),
+        if (data['forwardComment'] != null)
+          'forwardComment': data['forwardComment'].toString(),
+        if (data['isEdited'] == true) 'isEdited': true,
+        if (data['editedAt'] != null) 'editedAt': data['editedAt'].toString(),
       };
 
       // Persist against the latest Hive state, never a stale list.
       unawaited(
         StorageService.appendMessageDurably(currentUser, to, outgoing)
             .then((appended) {
-          if (mounted) {
-            _loadChats();
-          }
-        }).catchError((Object error, StackTrace stack) {
-          debugPrint('Guarded sent message persistence failed: $error');
-        }),
+              if (mounted) {
+                _loadChats();
+              }
+            })
+            .catchError((Object error, StackTrace stack) {
+              debugPrint('Guarded sent message persistence failed: $error');
+            }),
       );
 
       return;
     }
-
   }
 
   // ========================================
@@ -1142,7 +1173,10 @@ class _ChatListScreenState extends State<ChatListScreen> {
       return '';
     }
 
-    final messages = StorageService.getMessagesVisibleForOwner(currentUser, user);
+    final messages = StorageService.getMessagesVisibleForOwner(
+      currentUser,
+      user,
+    );
 
     if (messages.isEmpty) {
       return '';
@@ -1162,7 +1196,10 @@ class _ChatListScreenState extends State<ChatListScreen> {
       return '';
     }
 
-    final messages = StorageService.getMessagesVisibleForOwner(currentUser, user);
+    final messages = StorageService.getMessagesVisibleForOwner(
+      currentUser,
+      user,
+    );
 
     if (messages.isEmpty) {
       return '';
@@ -2094,59 +2131,10 @@ class _ChatListScreenState extends State<ChatListScreen> {
         child: Column(
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 14, 12, 4),
+              padding: const EdgeInsets.fromLTRB(20, 14, 12, 12),
               child: Row(
                 children: [
                   const Expanded(child: FenyvoBrand()),
-                  IconButton(
-                    tooltip: _tr('refreshContacts'),
-                    onPressed: _refreshChats,
-                    icon: const Icon(Icons.refresh_rounded),
-                  ),
-                  if (MediaQuery.sizeOf(context).width < 900)
-                    IconButton(
-                      tooltip: _tr('system'),
-                      onPressed: () => _selectSection(2),
-                      icon: const Icon(Icons.tune_rounded),
-                    ),
-                ],
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 5, 20, 16),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          MediaQuery.sizeOf(context).width >= 900
-                              ? 'FENYVO'
-                              : 'COMMAND DECK',
-                          style: const TextStyle(
-                            color: FenyvoPalette.gold,
-                            fontSize: 25,
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: 2.2,
-                          ),
-                        ),
-                        const SizedBox(height: 3),
-                        Text(
-                          MediaQuery.sizeOf(context).width >= 900
-                              ? _tr('brandBeyondCommunication')
-                              : _tr('commandCenter'),
-                          style: const TextStyle(
-                            color: FenyvoPalette.gold,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 2.1,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
                   ValueListenableBuilder<FenyvoConnectionPhase>(
                     valueListenable: SocketService.instance.connectionPhase,
                     builder: (context, phase, _) {
@@ -2174,13 +2162,14 @@ class _ChatListScreenState extends State<ChatListScreen> {
                             ? _tr('serverReconnecting')
                             : _tr('serverUnavailable'),
                         child: Container(
+                          margin: const EdgeInsets.only(right: 2),
                           padding: const EdgeInsets.symmetric(
                             horizontal: 9,
                             vertical: 7,
                           ),
                           decoration: BoxDecoration(
                             color: FenyvoPalette.surfaceSoft,
-                            borderRadius: BorderRadius.circular(12),
+                            borderRadius: BorderRadius.circular(14),
                             border: Border.all(
                               color: color.withValues(alpha: .62),
                             ),
@@ -2213,7 +2202,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                                 ),
                               ),
                               if (connected) ...[
-                                const SizedBox(width: 6),
+                                const SizedBox(width: 5),
                                 Text(
                                   '$onlineCount',
                                   style: const TextStyle(
@@ -2228,6 +2217,17 @@ class _ChatListScreenState extends State<ChatListScreen> {
                       );
                     },
                   ),
+                  IconButton(
+                    tooltip: _tr('refreshContacts'),
+                    onPressed: _refreshChats,
+                    icon: const Icon(Icons.refresh_rounded),
+                  ),
+                  if (MediaQuery.sizeOf(context).width < 900)
+                    IconButton(
+                      tooltip: _tr('system'),
+                      onPressed: () => _selectSection(2),
+                      icon: const Icon(Icons.tune_rounded),
+                    ),
                 ],
               ),
             ),

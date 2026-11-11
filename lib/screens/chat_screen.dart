@@ -1,3 +1,6 @@
+import '../services/app_visibility.dart';
+import 'package:fenyvo/services/crypto/private_e2ee_edit_protocol.dart';
+import '../features/messages/domain/private_external_text_policy.dart';
 import '../features/messages/data/private_voice_temp_cleanup_policy.dart';
 import '../features/messages/data/private_voice_temp_path_tracker.dart';
 import '../features/messages/data/private_voice_failed_start_cleanup.dart';
@@ -11,6 +14,9 @@ import '../features/messages/data/private_voice_recording_files.dart';
 import '../features/messages/domain/private_voice_recording_policy.dart';
 import '../widgets/private_composer_reply_preview.dart';
 import '../widgets/private_voice_record_button.dart';
+import '../widgets/fenyvo_hex_video_camera.dart';
+import '../widgets/fenyvo_hex_audio_border.dart';
+import '../features/messages/data/hex_video_audio_levels.dart';
 import '../widgets/private_voice_recording_composer.dart';
 import '../widgets/private_voice_message_player.dart';
 import '../features/messages/domain/voice_playback_policy.dart';
@@ -34,9 +40,13 @@ import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:video_player/video_player.dart';
+
+import '../features/messages/data/private_video_note_speed_settings.dart';
+
 import 'package:audioplayers/audioplayers.dart';
 import 'package:path_provider/path_provider.dart';
 
+import '../features/messages/data/private_video_note_capture.dart';
 import '../features/messages/data/private_voice_recorder_device.dart';
 
 import 'package:qr_flutter/qr_flutter.dart';
@@ -61,7 +71,21 @@ import '../services/message_search_service.dart';
 import '../services/presence_tracker.dart';
 import '../services/e2ee_settings_service.dart';
 import '../services/crypto/signal_e2ee_service.dart';
+part '../widgets/private_forward_message_sheet.dart';
+part '../widgets/private_auto_reply_settings.dart';
+part '../widgets/private_share_contact_picker.dart';
+part '../widgets/private_chatgpt_sheet.dart';
+part '../widgets/private_translation_sheet.dart';
 part '../widgets/private_video_widgets.dart';
+part '../widgets/private_message_search.dart';
+part '../widgets/private_pinned_messages.dart';
+part '../widgets/private_reaction_widgets.dart';
+part '../widgets/private_message_menu_widgets.dart';
+part '../widgets/private_message_display_widgets.dart';
+part '../widgets/private_message_bubble.dart';
+part '../widgets/private_message_list.dart';
+part '../widgets/private_message_composer.dart';
+part '../widgets/private_desktop_message_context_menu.dart';
 
 String _chatText(String key, [Map<String, Object> values = const {}]) {
   var result = AppLanguageService.instance.text(key);
@@ -103,14 +127,213 @@ class _ChatScreenState extends State<ChatScreen>
   String? _backgroundPath;
   double _backgroundOpacity = 0.35;
   String? _contactAvatarBase64;
+
+  // Cache the decoded avatar across frequent chat rebuilds.
+  String? _contactAvatarCachedSource;
+  MemoryImage? _contactAvatarCachedImage;
   late final PresenceTracker _presence;
   bool get _contactOnline => _presence.isOnline(widget.targetUser);
   DateTime? _contactLastSeen;
   bool _contactIsTyping = false;
+  String? _contactRecordingKind;
+  Timer? _contactRecordingTimeoutTimer;
+  Timer? _localVoiceActivityTimer;
   bool _typingSent = false;
 
   final ImagePicker _privateImagePicker = ImagePicker();
   bool _sendingPrivateMedia = false;
+  bool _videoNoteMode = false;
+  bool? _voiceHoldPendingFinish;
+
+  OverlayEntry? _hexCameraOverlay;
+  FenyvoHexCameraControl? _hexCameraControl;
+  bool _hexVideoPressHeld = false;
+  bool _hexVideoCancelled = false;
+  bool _hexVideoLocked = false;
+  bool _localHexRecordingActivityActive = false;
+  Timer? _localHexRecordingActivityTimer;
+
+  void _setLocalHexRecordingActivity(bool active) {
+    _localHexRecordingActivityTimer?.cancel();
+    _localHexRecordingActivityTimer = null;
+
+    if (active && !mounted) return;
+    if (!active && !_localHexRecordingActivityActive) return;
+
+    _localHexRecordingActivityActive = active;
+
+    SocketService.instance.sendRecordingActivity(
+      widget.targetUser,
+      kind: 'video',
+      active: active,
+    );
+
+    if (!active) return;
+
+    _localHexRecordingActivityTimer = Timer.periodic(
+      const Duration(seconds: 5),
+      (timer) {
+        if (!mounted || !_localHexRecordingActivityActive) {
+          timer.cancel();
+          _localHexRecordingActivityTimer = null;
+          return;
+        }
+
+        SocketService.instance.sendRecordingActivity(
+          widget.targetUser,
+          kind: 'video',
+          active: true,
+        );
+      },
+    );
+  }
+
+  void _closeHexCameraOverlay() {
+    _setLocalHexRecordingActivity(false);
+    final entry = _hexCameraOverlay;
+    _hexCameraOverlay = null;
+
+    final control = _hexCameraControl;
+    _hexCameraControl = null;
+
+    entry?.remove();
+    entry?.dispose();
+    control?.dispose();
+  }
+
+  void _showHexCameraPreview() {
+    if (!mounted ||
+        !_videoNoteMode ||
+        _hexCameraOverlay != null ||
+        _sendingPrivateMedia ||
+        (!Platform.isAndroid && !Platform.isIOS && !Platform.isWindows)) {
+      return;
+    }
+    final control = FenyvoHexCameraControl();
+    _hexCameraControl = control;
+
+    final entry = OverlayEntry(
+      builder: (overlayContext) => Positioned(
+        left: 0,
+        right: 0,
+        bottom: 106,
+        child: Center(
+          child: FenyvoHexVideoCamera(
+            control: control,
+            onRecordingChanged: _setLocalHexRecordingActivity,
+            languageCode: AppLanguageService.instance.code.value,
+            onCancel: () {
+              _hexVideoPressHeld = false;
+              _closeHexCameraOverlay();
+            },
+            onCaptured: (path) async {
+              _hexVideoPressHeld = false;
+              final overlayForThisVideo = _hexCameraOverlay;
+              if (!mounted) return;
+
+              // Recording has stopped. Close the camera
+              // immediately; sending continues independently.
+              if (identical(_hexCameraOverlay, overlayForThisVideo)) {
+                _closeHexCameraOverlay();
+              }
+
+              final extension = path.toLowerCase().endsWith('.mov')
+                  ? 'mov'
+                  : 'mp4';
+
+              await _sendPrivateMediaFile(
+                messageType: 'video',
+                path: path,
+                fileName:
+                    'fenyvo_hex_note_${DateTime.now().millisecondsSinceEpoch}.$extension',
+                mimeType: extension == 'mov' ? 'video/quicktime' : 'video/mp4',
+                text: _videoNoteText(
+                  'Видеосообщение',
+                  'Відеоповідомлення',
+                  'Video message',
+                ),
+                maxBytes: PrivateVideoNoteCapture.maximumBytes,
+              );
+            },
+          ),
+        ),
+      ),
+    );
+
+    _hexCameraOverlay = entry;
+    Overlay.of(context).insert(entry);
+  }
+
+  void _beginHexVideoHold(LongPressStartDetails details) {
+    if (!mounted ||
+        !_videoNoteMode ||
+        _sendingPrivateMedia ||
+        _isRecordingVoice ||
+        _hexVideoPressHeld) {
+      return;
+    }
+
+    _hexVideoPressHeld = true;
+    _hexVideoCancelled = false;
+    _hexVideoLocked = false;
+
+    // Reuse the already initialized preview when possible.
+    if (_hexCameraControl == null) {
+      _showHexCameraPreview();
+    }
+
+    // Camera initialization may still be asynchronous.
+    _hexCameraControl?.startRecording();
+  }
+
+  void _moveHexVideoHold(LongPressMoveUpdateDetails details) {
+    if (!_hexVideoPressHeld || _hexVideoCancelled || _hexVideoLocked) {
+      return;
+    }
+
+    // Cancel takes priority if both gesture thresholds are met.
+    if (details.offsetFromOrigin.dx <= -70) {
+      _hexVideoCancelled = true;
+      _hexVideoPressHeld = false;
+      _hexCameraControl?.cancelRecording();
+      return;
+    }
+
+    if (details.offsetFromOrigin.dy <= -80) {
+      _hexVideoLocked = true;
+      _hexVideoPressHeld = false;
+      _hexCameraControl?.lockRecording();
+    }
+  }
+
+  void _endHexVideoHold() {
+    if (!_hexVideoPressHeld || _hexVideoCancelled || _hexVideoLocked) return;
+    _hexVideoPressHeld = false;
+    _hexCameraControl?.sendRecording();
+  }
+
+  void _togglePrivateVideoNoteMode() {
+    if (!mounted ||
+        _sendingPrivateMedia ||
+        _isRecordingVoice ||
+        _hexVideoPressHeld) {
+      return;
+    }
+    if (!Platform.isAndroid && !Platform.isIOS && !Platform.isWindows) return;
+
+    final enableVideo = !_videoNoteMode;
+    setState(() => _videoNoteMode = enableVideo);
+
+    if (enableVideo) {
+      // Preview is shown immediately, without recording anything.
+      _showHexCameraPreview();
+    } else {
+      _hexVideoCancelled = true;
+      _hexVideoPressHeld = false;
+      _closeHexCameraOverlay();
+    }
+  }
+
   List<String> _registeredUsers = const [];
   Completer<List<String>>? _registeredUsersCompleter;
 
@@ -194,6 +417,7 @@ class _ChatScreenState extends State<ChatScreen>
   bool _e2eeVerified = false;
   bool _e2eeKeyChanged = false;
   bool _e2eeKeyChangeWarningShown = false;
+  bool _e2eeDecryptWarningShown = false;
   bool _changingE2ee = false;
   bool _screenSecurityEnabled = false;
 
@@ -332,6 +556,13 @@ class _ChatScreenState extends State<ChatScreen>
         return;
       }
 
+      if (position.inMilliseconds % 1000 < 220) {
+        debugPrint(
+          'FENYVO_VOICE_TIMING event=position '
+          'position_ms=${position.inMilliseconds} '
+          'duration_ms=${_voicePlaybackDuration.inMilliseconds}',
+        );
+      }
       setState(() {
         _voicePlaybackPosition = position;
       });
@@ -344,12 +575,17 @@ class _ChatScreenState extends State<ChatScreen>
         return;
       }
 
+      debugPrint(
+        'FENYVO_VOICE_TIMING event=duration '
+        'duration_ms=${duration.inMilliseconds}',
+      );
       setState(() {
         _voicePlaybackDuration = duration;
       });
     });
 
     _voiceStateSubscription = _voicePlayer.onPlayerStateChanged.listen((state) {
+      debugPrint('FENYVO_VOICE_TRACE event=state value=${state.name}');
       if (!mounted) {
         return;
       }
@@ -360,6 +596,15 @@ class _ChatScreenState extends State<ChatScreen>
     });
 
     _voiceCompleteSubscription = _voicePlayer.onPlayerComplete.listen((_) {
+      unawaited(HexInlineVoiceCoordinator.setVoiceActive(false));
+      // FENYVO_VOICE_COMPLETION_TRACE_983
+      // Only timing metadata; no paths, IDs, message text or encryption data.
+      debugPrint(
+        'FENYVO_VOICE_TIMING event=complete '
+        'position_ms=${_voicePlaybackPosition.inMilliseconds} '
+        'duration_ms=${_voicePlaybackDuration.inMilliseconds} '
+        'active=${_playingVoiceMessageId != null}',
+      );
       if (!mounted) {
         return;
       }
@@ -396,6 +641,7 @@ class _ChatScreenState extends State<ChatScreen>
 
   @override
   void dispose() {
+    _closeHexCameraOverlay();
     if (Platform.isWindows) {
       HardwareKeyboard.instance.removeHandler(_handleWindowsTypeToPrivateChat);
     }
@@ -412,6 +658,7 @@ class _ChatScreenState extends State<ChatScreen>
 
     _typingStopTimer?.cancel();
     _remoteTypingTimeoutTimer?.cancel();
+    _contactRecordingTimeoutTimer?.cancel();
     _pinnedHighlightTimer?.cancel();
 
     for (final completer in _chatGptCompleters.values) {
@@ -448,6 +695,7 @@ class _ChatScreenState extends State<ChatScreen>
     _drafts[_draftKey] = _messageController.text;
     _messageController.dispose();
 
+    _setLocalVoiceRecordingActivity(false);
     _voiceTicker.stop();
     _voicePositionSubscription?.cancel();
     _voiceDurationSubscription?.cancel();
@@ -499,6 +747,9 @@ class _ChatScreenState extends State<ChatScreen>
           .catchError((Object error, StackTrace stack) {
             debugPrint('Voice recorder shutdown failed: $error');
           }),
+    );
+    unawaited(
+      HexInlineVoiceCoordinator.setVoiceRecordingActive(false),
     );
     unawaited(_voicePlayer.dispose());
 
@@ -561,15 +812,22 @@ class _ChatScreenState extends State<ChatScreen>
   Widget _buildContactAvatar() {
     final avatar = _contactAvatarBase64;
 
-    ImageProvider? imageProvider;
+    // A new MemoryImage on every setState can cause repeated decoding
+    // and visible flicker during typing and voice playback.
+    if (_contactAvatarCachedSource != avatar) {
+      _contactAvatarCachedSource = avatar;
+      _contactAvatarCachedImage = null;
 
-    if (avatar != null && avatar.isNotEmpty) {
-      try {
-        imageProvider = MemoryImage(base64Decode(avatar));
-      } catch (_) {
-        imageProvider = null;
+      if (avatar != null && avatar.isNotEmpty) {
+        try {
+          _contactAvatarCachedImage = MemoryImage(base64Decode(avatar));
+        } catch (_) {
+          _contactAvatarCachedImage = null;
+        }
       }
     }
+
+    final ImageProvider? imageProvider = _contactAvatarCachedImage;
 
     final ringColor = _contactTrusted
         ? FenyvoPalette.gold
@@ -771,7 +1029,40 @@ class _ChatScreenState extends State<ChatScreen>
   // TYPING \u2014 \u041F\u041E\u041B\u0423\u0427\u0415\u041D\u0418\u0415
   // ========================================
 
+  void _setContactRecordingActivity(String kind, bool active) {
+    if (!mounted || (kind != 'voice' && kind != 'video')) return;
+
+    if (!active) {
+      if (_contactRecordingKind != kind) return;
+      _contactRecordingTimeoutTimer?.cancel();
+      _contactRecordingTimeoutTimer = null;
+      setState(() => _contactRecordingKind = null);
+      return;
+    }
+
+    _contactRecordingTimeoutTimer?.cancel();
+    _remoteTypingTimeoutTimer?.cancel();
+
+    // Recording takes priority over a delayed typing event.
+    if (_contactRecordingKind != kind || _contactIsTyping) {
+      setState(() {
+        _contactRecordingKind = kind;
+        _contactIsTyping = false;
+      });
+    }
+
+    // A missing stop packet must not leave an endless status.
+    _contactRecordingTimeoutTimer = Timer(const Duration(seconds: 15), () {
+      if (!mounted) return;
+      setState(() => _contactRecordingKind = null);
+      _contactRecordingTimeoutTimer = null;
+    });
+  }
+
   void _setContactTyping(bool isTyping) {
+    // A late typing event must not override an active recording.
+    if (isTyping && _contactRecordingKind != null) return;
+
     _remoteTypingTimeoutTimer?.cancel();
 
     if (!mounted) {
@@ -843,7 +1134,7 @@ class _ChatScreenState extends State<ChatScreen>
   Widget _buildTypingIndicator() {
     return AnimatedSwitcher(
       duration: const Duration(milliseconds: 180),
-      child: !_contactIsTyping
+      child: !_contactIsTyping && _contactRecordingKind == null
           ? const SizedBox.shrink()
           : Container(
               key: const ValueKey('typing_indicator'),
@@ -852,11 +1143,40 @@ class _ChatScreenState extends State<ChatScreen>
               color: FenyvoPalette.surface,
               child: Row(
                 children: [
-                  const Icon(Icons.edit_outlined, size: 14, color: _gold),
+                  if (_contactRecordingKind == null)
+                    const Icon(Icons.edit_outlined, size: 14, color: _gold)
+                  else
+                    AnimatedBuilder(
+                      animation: _typingAnimationController,
+                      builder: (context, child) {
+                        final phase = _typingAnimationController.value;
+                        final pulse = phase < 0.5
+                            ? phase * 2.0
+                            : (1.0 - phase) * 2.0;
+
+                        return Opacity(
+                          opacity: 0.35 + 0.65 * pulse,
+                          child: child,
+                        );
+                      },
+                      child: Icon(
+                        _contactRecordingKind == 'voice'
+                            ? Icons.mic_rounded
+                            : Icons.videocam_rounded,
+                        size: 14,
+                        color: _contactRecordingKind == 'voice'
+                            ? Colors.redAccent
+                            : _gold,
+                      ),
+                    ),
                   const SizedBox(width: 7),
                   Flexible(
                     child: Text(
-                      '${widget.targetUser} \u043F\u0435\u0447\u0430\u0442\u0430\u0435\u0442',
+                      '${widget.targetUser} ${_contactRecordingKind == 'voice'
+                          ? _videoNoteText('записывает голосовое…', 'записує голосове…', 'is recording a voice message…')
+                          : _contactRecordingKind == 'video'
+                          ? _videoNoteText('записывает видео…', 'записує відео…', 'is recording a video message…')
+                          : _videoNoteText('печатает…', 'друкує…', 'is typing…')}',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
@@ -867,7 +1187,7 @@ class _ChatScreenState extends State<ChatScreen>
                     ),
                   ),
                   const SizedBox(width: 7),
-                  _buildTypingDots(),
+                  if (_contactRecordingKind == null) _buildTypingDots(),
                 ],
               ),
             ),
@@ -1281,75 +1601,8 @@ class _ChatScreenState extends State<ChatScreen>
     });
   }
 
-  Future<void> _toggleChatE2ee() async {
-    if (_changingE2ee) return;
-    if (_e2eeActive) {
-      final disable = await showDialog<bool>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: Text(_chatText('e2eeChatDisable')),
-          content: Text(
-            '${widget.targetUser}: ${_chatText('e2eeChatDisable')}?',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: Text(_chatText('cancel')),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: Text(_chatText('e2eeDisableAction')),
-            ),
-          ],
-        ),
-      );
-      if (disable != true || !mounted) return;
-      setState(() => _changingE2ee = true);
-      final sent = await SocketService.instance.respondToE2eeInvite(
-        widget.targetUser,
-        false,
-      );
-      if (!mounted) return;
-      setState(() {
-        _changingE2ee = false;
-        if (sent) _e2eeActive = false;
-      });
-      if (!sent) _showE2eeNotice(_chatText('noServerConnection'));
-      return;
-    }
-
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        icon: const Icon(Icons.lock_rounded, color: _gold, size: 42),
-        title: Text(_chatText('e2eeBeforeTitle')),
-        content: SingleChildScrollView(
-          child: Text(_chatText('e2eeBeforeText')),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text(_chatText('e2eeNotNow')),
-          ),
-          FilledButton.icon(
-            onPressed: () => Navigator.pop(context, true),
-            icon: const Icon(Icons.lock_rounded),
-            label: Text(_chatText('e2eeEnable')),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
-    setState(() => _changingE2ee = true);
-    final sent = await SocketService.instance.inviteE2ee(widget.targetUser);
-    if (!mounted) return;
-    setState(() => _changingE2ee = false);
-    _showE2eeNotice(
-      sent ? _chatText('e2eeInviteSent') : _chatText('e2eeEnableError'),
-    );
-  }
-
   Future<void> _showIncomingE2eeInvite(String from) async {
+    if (_changingE2ee) return;
     final accepted = await showDialog<bool>(
       context: context,
       barrierDismissible: false,
@@ -1423,6 +1676,51 @@ class _ChatScreenState extends State<ChatScreen>
     }
   }
 
+  Future<void> _showE2eeDecryptWarning() async {
+    if (!mounted || !SocketService.instance.isAuthenticated) return;
+    final verifyNow = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => AlertDialog(
+        icon: const Icon(Icons.warning_amber_rounded, color: Colors.orange),
+        title: Text(_videoNoteText(
+          'Ошибка защищённого сообщения',
+          'Помилка захищеного повідомлення',
+          'Encrypted message error',
+        )),
+        content: Text(_videoNoteText(
+          'Сообщение не удалось расшифровать. Причиной может быть смена ключа '
+          'или несовместимая Signal-сессия. Проверьте новый номер безопасности '
+          'с собеседником по независимому каналу. Не подтверждайте несовпадающий номер.',
+          'Не вдалося розшифрувати повідомлення. Причиною може бути зміна ключа '
+          'або несумісна Signal-сесія. Перевірте новий номер безпеки '
+          'із співрозмовником через незалежний канал. Не підтверджуйте різні номери.',
+          'The message could not be decrypted. The key may have changed or '
+          'the Signal session may be incompatible. Verify the new safety number '
+          'with your contact over an independent channel. Do not approve a mismatch.',
+        )),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: Text(_chatText('close')),
+          ),
+          FilledButton.icon(
+            onPressed: () => Navigator.pop(dialogContext, true),
+            icon: const Icon(Icons.verified_user_outlined),
+            label: Text(_videoNoteText(
+              'Проверить новый ключ',
+              'Перевірити новий ключ',
+              'Verify new key',
+            )),
+          ),
+        ],
+      ),
+    );
+    if (verifyNow == true && mounted) {
+      await _showVerifiedE2eeRecovery();
+    }
+  }
+
   Future<void> _showE2eeKeyChangedWarning() async {
     if (!mounted) return;
     final verifyNow = await showDialog<bool>(
@@ -1452,7 +1750,117 @@ class _ChatScreenState extends State<ChatScreen>
       ),
     );
     if (verifyNow == true && mounted) {
-      await _showE2eeSafetyNumber();
+      await _showVerifiedE2eeRecovery();
+    }
+  }
+
+  Future<void> _showVerifiedE2eeRecovery() async {
+    if (!mounted || !SocketService.instance.isAuthenticated) return;
+    final owner = SocketService.instance.currentUser?.trim() ?? '';
+    final peer = widget.targetUser.trim();
+    if (owner.isEmpty || peer.isEmpty || owner == peer) return;
+    try {
+      final bundle = await SocketService.instance.previewE2eeCandidate(peer);
+      if (!mounted || SocketService.instance.currentUser?.trim() != owner) {
+        return;
+      }
+      final candidate = await SignalE2eeService.instance.candidateSafetyNumber(
+        peer,
+        bundle['identityKey']?.toString() ?? '',
+      );
+      if (!mounted || SocketService.instance.currentUser?.trim() != owner) {
+        return;
+      }
+      var compared = false;
+      final approved = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) => StatefulBuilder(
+          builder: (dialogContext, updateDialog) => AlertDialog(
+            title: Text(_videoNoteText(
+              'Проверка нового ключа', 'Перевірка нового ключа',
+              'Verify new key',
+            )),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(_videoNoteText(
+                    'Сравните этот номер с номером контакта по независимому каналу. '
+                    'Если номера не совпадают, отмените восстановление.',
+                    'Порівняйте цей номер із номером контакту через незалежний канал. '
+                    'Якщо номери не збігаються, скасуйте відновлення.',
+                    'Compare this number with your contact using an independent channel. '
+                    'Cancel if the numbers do not match.',
+                  )),
+                  const SizedBox(height: 12),
+                  QrImageView(
+                    data: candidate.scannable,
+                    version: QrVersions.auto,
+                    size: 160,
+                    backgroundColor: Colors.white,
+                  ),
+                  const SizedBox(height: 12),
+                  SelectableText(candidate.display, textAlign: TextAlign.center),
+                  CheckboxListTile(
+                    value: compared,
+                    onChanged: (value) => updateDialog(() => compared = value == true),
+                    title: Text(_videoNoteText(
+                      'Я лично проверил совпадение номеров',
+                      'Я особисто перевірив збіг номерів',
+                      'I independently verified the numbers match',
+                    )),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: Text(_chatText('close')),
+              ),
+              FilledButton(
+                onPressed: compared
+                    ? () => Navigator.pop(dialogContext, true)
+                    : null,
+                child: Text(_videoNoteText(
+                  'Подтвердить ключ', 'Підтвердити ключ', 'Confirm key',
+                )),
+              ),
+            ],
+          ),
+        ),
+      );
+      if (approved != true || !mounted ||
+          SocketService.instance.currentUser?.trim() != owner ||
+          !SocketService.instance.isAuthenticated) return;
+
+      await SignalE2eeService.instance.acceptVerifiedRemoteBundle(
+        peer, bundle, candidate.display,
+      );
+      await E2eeSettingsService.instance.setFingerprintVerified(
+        owner, peer, candidate.display,
+      );
+      if (!mounted || SocketService.instance.currentUser?.trim() != owner) {
+        return;
+      }
+      setState(() {
+        _e2eeVerified = true;
+        _e2eeKeyChanged = false;
+      });
+      _showE2eeNotice(_videoNoteText(
+        'Новая защищённая сессия создана',
+        'Нову захищену сесію створено',
+        'New encrypted session established',
+      ));
+    } catch (_) {
+      if (mounted) {
+        _showE2eeNotice(_videoNoteText(
+          'Восстановление E2EE не удалось. Ключи не подтверждены.',
+          'Не вдалося відновити E2EE. Ключі не підтверджено.',
+          'E2EE recovery failed. Keys were not verified.',
+        ));
+      }
     }
   }
 
@@ -1525,6 +1933,15 @@ class _ChatScreenState extends State<ChatScreen>
               },
               icon: const Icon(Icons.copy_rounded),
               label: Text(_chatText('copy')),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.pop(context, false);
+                unawaited(_showVerifiedE2eeRecovery());
+              },
+              child: Text(_videoNoteText(
+                'Новый ключ', 'Новий ключ', 'New key',
+              )),
             ),
             TextButton(
               onPressed: () => Navigator.pop(context, false),
@@ -1611,6 +2028,18 @@ class _ChatScreenState extends State<ChatScreen>
           completer.complete(users);
         }
       }
+      return;
+    }
+
+    // Local-only Signal decrypt failure. Never change trust based on this event.
+    if (type == 'e2ee_local_decrypt_failure' &&
+        data['peer']?.toString().trim() == widget.targetUser &&
+        !_e2eeDecryptWarningShown && mounted) {
+      _e2eeDecryptWarningShown = true;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        unawaited(_showE2eeDecryptWarning());
+      });
       return;
     }
 
@@ -1933,6 +2362,21 @@ class _ChatScreenState extends State<ChatScreen>
       return;
     }
 
+    if (type == 'chat_recording_activity') {
+      final from = data['from']?.toString().trim() ?? '';
+      final to = data['to']?.toString().trim() ?? '';
+      final kind = data['kind']?.toString().trim() ?? '';
+      final active = data['active'];
+
+      if (from == widget.targetUser &&
+          to == currentUser &&
+          (kind == 'voice' || kind == 'video') &&
+          active is bool) {
+        _setContactRecordingActivity(kind, active);
+      }
+      return;
+    }
+
     if (type == 'typing') {
       final from = data['from']?.toString().trim() ?? '';
 
@@ -2006,109 +2450,271 @@ class _ChatScreenState extends State<ChatScreen>
       return;
     }
 
-    if (type == 'message_edited') {
-      final messageId = data['messageId']?.toString().trim() ?? '';
+    if (type == 'private_e2ee_edit_sent') {
+      // This is an internal ACK emitted only by SocketService after
+      // matching the server response to the local encrypted edit outbox.
+      final operationValue = data['operation'];
+      if (operationValue is! Map) return;
 
-      final from = data['from']?.toString().trim() ?? '';
+      final operation = Map<String, dynamic>.from(operationValue);
+      final owner = SocketService.instance.currentUser?.trim() ?? '';
+      final peer = widget.targetUser.trim();
+      final eventId = operation['id']?.toString().trim() ?? '';
+      final targetId = operation['targetMessageId']?.toString().trim() ?? '';
 
-      final to = data['to']?.toString().trim() ?? '';
-
-      final newText = data['newText']?.toString().trim() ?? '';
-
-      final editedAt =
-          data['editedAt']?.toString().trim() ??
-          DateTime.now().toIso8601String();
-
-      final belongsToThisChat =
-          (from == widget.targetUser && to == currentUser) ||
-          (from == currentUser && to == widget.targetUser);
-
-      if (!belongsToThisChat || messageId.isEmpty || newText.isEmpty) {
+      if (!mounted ||
+          owner.isEmpty ||
+          peer.isEmpty ||
+          owner == peer ||
+          eventId.isEmpty ||
+          targetId.isEmpty ||
+          data['id']?.toString().trim() != eventId ||
+          data['to']?.toString().trim() != peer ||
+          operation['from']?.toString().trim() != owner ||
+          operation['to']?.toString().trim() != peer) {
         return;
       }
 
-      var changed = false;
+      unawaited(() async {
+        try {
+          final saved = await StorageService.mutateMessagesDurably(
+            owner,
+            peer,
+            (current) {
+              Map<String, dynamic>? originalMessage;
 
-      if (mounted) {
-        setState(() {
-          for (final message in _messages) {
-            final id = message['id']?.toString().trim() ?? '';
-
-            if (id == messageId) {
-              message['text'] = newText;
-              message['isEdited'] = true;
-              message['editedAt'] = editedAt;
-              changed = true;
-            }
-
-            final rawReply = message['replyTo'];
-
-            if (rawReply is Map &&
-                rawReply['id']?.toString().trim() == messageId) {
-              final reply = Map<String, dynamic>.from(rawReply);
-
-              reply['text'] = newText;
-              message['replyTo'] = reply;
-              changed = true;
-            }
-          }
-        });
-      }
-
-      if (changed) {
-        final owner = SocketService.instance.currentUser?.trim() ?? '';
-        final peer = widget.targetUser.trim();
-
-        if (owner.isNotEmpty && peer.isNotEmpty && owner != peer) {
-          unawaited(
-            StorageService.mutateMessagesDurably(owner, peer, (current) {
-              // Validate the original persisted message first.
-              // Never create a missing or deleted message.
-              final originalExists = current.any((stored) {
-                return stored['id']?.toString().trim() == messageId &&
-                    stored['from']?.toString().trim() == from &&
-                    stored['to']?.toString().trim() == to;
-              });
-
-              if (!originalExists) return null;
-
-              var modified = false;
-              for (final stored in current) {
-                final sender = stored['from']?.toString().trim() ?? '';
-                final recipient = stored['to']?.toString().trim() ?? '';
-                final belongsToStoredChat =
-                    (sender == owner && recipient == peer) ||
-                    (sender == peer && recipient == owner);
-
-                if (!belongsToStoredChat) continue;
-
-                if (stored['id']?.toString().trim() == messageId &&
-                    sender == from &&
-                    recipient == to) {
-                  stored['text'] = newText;
-                  stored['isEdited'] = true;
-                  stored['editedAt'] = editedAt;
-                  modified = true;
-                }
-
-                final rawReply = stored['replyTo'];
-                if (rawReply is Map &&
-                    rawReply['id']?.toString().trim() == messageId) {
-                  final reply = Map<String, dynamic>.from(rawReply);
-                  reply['text'] = newText;
-                  stored['replyTo'] = reply;
-                  modified = true;
+              for (final item in current) {
+                if (item['id']?.toString().trim() == targetId &&
+                    item['from']?.toString().trim() == owner &&
+                    item['to']?.toString().trim() == peer) {
+                  originalMessage = Map<String, dynamic>.from(item);
+                  break;
                 }
               }
 
-              return modified ? current : null;
-            }).then((_) {}).catchError((Object error, StackTrace stack) {
-              debugPrint('Durable message edit failed: $error');
-            }),
+              if (originalMessage == null ||
+                  !PrivateE2eeEditProtocol.canApply(
+                    payload: operation,
+                    original: originalMessage,
+                    authenticatedFrom: owner,
+                    localUser: owner,
+                    peer: peer,
+                  )) {
+                return null;
+              }
+
+              for (final item in current) {
+                if (item['id']?.toString().trim() == targetId &&
+                    item['from']?.toString().trim() == owner &&
+                    item['to']?.toString().trim() == peer) {
+                  item['text'] = operation['newText'];
+                  item['isEdited'] = true;
+                  item['editedAt'] = operation['editedAt'];
+                  item['lastEditEventId'] = eventId;
+                }
+
+                final reply = item['replyTo'];
+                if (reply is Map &&
+                    reply['id']?.toString().trim() == targetId) {
+                  item['replyTo'] = {
+                    ...Map<String, dynamic>.from(reply),
+                    'text': operation['newText'],
+                  };
+                }
+              }
+
+              return current;
+            },
           );
+
+          if (!saved ||
+              !mounted ||
+              SocketService.instance.currentUser?.trim() != owner ||
+              widget.targetUser.trim() != peer) {
+            if (!saved &&
+                mounted &&
+                SocketService.instance.currentUser?.trim() == owner &&
+                widget.targetUser.trim() == peer) {
+              final confirmed = StorageService.getMessagesVisibleForOwner(
+                owner,
+                peer,
+              ).any(
+                (item) =>
+                    item['id']?.toString().trim() == targetId &&
+                    item['from']?.toString().trim() == owner &&
+                    item['to']?.toString().trim() == peer &&
+                    item['lastEditEventId']?.toString().trim() == eventId,
+              );
+
+              if (confirmed) {
+                _loadMessages();
+              }
+            }
+            return;
+          }
+
+          setState(() {
+            for (final item in _messages) {
+              if (item['id']?.toString().trim() == targetId &&
+                  item['from']?.toString().trim() == owner &&
+                  item['to']?.toString().trim() == peer) {
+                item['text'] = operation['newText'];
+                item['isEdited'] = true;
+                item['editedAt'] = operation['editedAt'];
+                item['lastEditEventId'] = eventId;
+              }
+
+              final reply = item['replyTo'];
+              if (reply is Map &&
+                  reply['id']?.toString().trim() == targetId) {
+                item['replyTo'] = {
+                  ...Map<String, dynamic>.from(reply),
+                  'text': operation['newText'],
+                };
+              }
+            }
+          });
+        } catch (error) {
+          debugPrint('Private E2EE edit ACK persistence failed: $error');
         }
+      }());
+
+      return;
+    }
+    if (type == 'private_e2ee_edit') {
+      // Only process Signal-decrypted private edits. The transport layer
+      // must establish authenticatedFrom from its verified envelope.
+      final owner = currentUser.trim();
+      final peer = widget.targetUser.trim();
+      final from = data['from']?.toString().trim() ?? '';
+      final to = data['to']?.toString().trim() ?? '';
+      final targetId = data['targetMessageId']?.toString().trim() ?? '';
+      final authenticatedFrom =
+          data['authenticatedFrom']?.toString().trim() ?? '';
+
+      if (!mounted ||
+          owner.isEmpty ||
+          peer.isEmpty ||
+          targetId.isEmpty ||
+          authenticatedFrom.isEmpty ||
+          from != authenticatedFrom ||
+          !((from == peer && to == owner) ||
+              (from == owner && to == peer))) {
+        return;
       }
 
+      // A server event is not sufficient proof of authorship. This route
+      // depends on Signal verification in SocketService before dispatch.
+      unawaited(() async {
+        try {
+          final saved = await StorageService.mutateMessagesDurably(
+            owner,
+            peer,
+            (current) {
+              Map<String, dynamic>? original;
+
+              for (final item in current) {
+                if (item['id']?.toString().trim() == targetId &&
+                    item['from']?.toString().trim() == from &&
+                    item['to']?.toString().trim() == to) {
+                  original = Map<String, dynamic>.from(item);
+                  break;
+                }
+              }
+
+              if (original == null ||
+                  !PrivateE2eeEditProtocol.canApply(
+                    payload: data,
+                    original: original,
+                    authenticatedFrom: authenticatedFrom,
+                    localUser: owner,
+                    peer: peer,
+                  )) {
+                return null;
+              }
+
+              for (final item in current) {
+                if (item['id']?.toString().trim() == targetId &&
+                    item['from']?.toString().trim() == from &&
+                    item['to']?.toString().trim() == to) {
+                  item['text'] = data['newText'];
+                  item['isEdited'] = true;
+                  item['editedAt'] = data['editedAt'];
+                  item['lastEditEventId'] = data['id'];
+                }
+
+                final reply = item['replyTo'];
+                if (reply is Map &&
+                    reply['id']?.toString().trim() == targetId) {
+                  item['replyTo'] = {
+                    ...Map<String, dynamic>.from(reply),
+                    'text': data['newText'],
+                  };
+                }
+              }
+
+              return current;
+            },
+          );
+
+          if (!saved || !mounted ||
+              SocketService.instance.currentUser?.trim() != owner ||
+              widget.targetUser.trim() != peer) {
+            // SocketService may already have applied the Signal edit.
+            // Refresh from persisted history instead of creating a bubble.
+            if (!saved &&
+                mounted &&
+                SocketService.instance.currentUser?.trim() == owner &&
+                widget.targetUser.trim() == peer) {
+              final confirmed = StorageService.getMessagesVisibleForOwner(
+                owner,
+                peer,
+              ).any(
+                (item) =>
+                    item['id']?.toString().trim() == targetId &&
+                    item['from']?.toString().trim() == from &&
+                    item['to']?.toString().trim() == to &&
+                    item['lastEditEventId']?.toString().trim() ==
+                        data['id']?.toString().trim(),
+              );
+              if (confirmed) {
+                _loadMessages();
+              }
+            }
+            return;
+          }
+
+          setState(() {
+            for (final item in _messages) {
+              if (item['id']?.toString().trim() == targetId &&
+                  item['from']?.toString().trim() == from &&
+                  item['to']?.toString().trim() == to) {
+                item['text'] = data['newText'];
+                item['isEdited'] = true;
+                item['editedAt'] = data['editedAt'];
+                item['lastEditEventId'] = data['id'];
+              }
+
+              final reply = item['replyTo'];
+              if (reply is Map &&
+                  reply['id']?.toString().trim() == targetId) {
+                item['replyTo'] = {
+                  ...Map<String, dynamic>.from(reply),
+                  'text': data['newText'],
+                };
+              }
+            }
+          });
+        } catch (error) {
+          debugPrint('Protected private edit persistence failed: $error');
+        }
+      }());
+
+      return;
+    }
+    if (type == 'message_edited') {
+      // Fail closed: legacy private edits carry plaintext.
+      // Accept edits only through a future verified E2EE protocol.
       return;
     }
 
@@ -2546,6 +3152,10 @@ class _ChatScreenState extends State<ChatScreen>
     // Preserve all fields, including E2EE and media metadata.
     final pendingMessage = Map<String, dynamic>.from(newMessage);
 
+    // Always derive the direction from verified chat participants.
+    // Do not trust stale isMe metadata from a queued message.
+    pendingMessage['isMe'] = sender == owner;
+
     // Persist first. A deleted or duplicate message must not be
     // inserted into the visible history by this handler.
     unawaited(
@@ -2591,6 +3201,10 @@ class _ChatScreenState extends State<ChatScreen>
             final persistedMessage = visibleMessage;
             if (persistedMessage == null) return;
             _normalizeReactionUsers(persistedMessage);
+
+            // The durable storage path may return metadata saved earlier.
+            // Repair the visible direction before the first render.
+            persistedMessage['isMe'] = sender == owner;
 
             if (SocketService.instance.currentUser?.trim() != owner) {
               return;
@@ -2735,95 +3349,6 @@ class _ChatScreenState extends State<ChatScreen>
     );
   }
 
-  Future<void> _showShareContactPicker() async {
-    if (_sendingPrivateMedia || _isRecordingVoice) return;
-
-    final completer = Completer<List<String>>();
-    _registeredUsersCompleter = completer;
-    SocketService.instance.getRegisteredUsers();
-
-    List<String> users = _registeredUsers;
-    try {
-      users = await completer.future.timeout(const Duration(seconds: 8));
-    } on TimeoutException {
-      users = _registeredUsers;
-    } finally {
-      if (identical(_registeredUsersCompleter, completer)) {
-        _registeredUsersCompleter = null;
-      }
-    }
-
-    if (!mounted) return;
-    if (users.isEmpty) {
-      _privateMediaSnack(
-        AppLanguageService.instance.text('chatContactsNotFound'),
-      );
-      return;
-    }
-
-    final selected = await showModalBottomSheet<String>(
-      context: context,
-      backgroundColor: FenyvoPalette.surface,
-      showDragHandle: true,
-      builder: (sheetContext) => SafeArea(
-        child: SizedBox(
-          height: MediaQuery.of(sheetContext).size.height * .65,
-          child: Column(
-            children: [
-              Padding(
-                padding: EdgeInsets.fromLTRB(16, 8, 16, 12),
-                child: Text(
-                  AppLanguageService.instance.text('chatShareContact'),
-                  style: TextStyle(
-                    color: FenyvoPalette.ink,
-                    fontSize: 20,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-              Expanded(
-                child: ListView.separated(
-                  itemCount: users.length,
-                  separatorBuilder: (_, __) => const Divider(height: 1),
-                  itemBuilder: (context, index) {
-                    final user = users[index];
-                    return ListTile(
-                      leading: CircleAvatar(
-                        child: Text(user.substring(0, 1).toUpperCase()),
-                      ),
-                      title: Text(
-                        user,
-                        style: const TextStyle(
-                          color: FenyvoPalette.ink,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      subtitle: Text(
-                        '@$user',
-                        style: const TextStyle(color: FenyvoPalette.secondary),
-                      ),
-                      trailing: Icon(Icons.send_rounded, color: _gold),
-                      onTap: () => Navigator.of(sheetContext).pop(user),
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-
-    if (!mounted || selected == null || selected.trim().isEmpty) return;
-
-    final username = selected.trim();
-    SocketService.instance.sendMessage(
-      widget.targetUser,
-      'Контакт: @$username',
-      sharedContact: <String, dynamic>{'username': username, 'name': username},
-    );
-  }
-
   Future<void> _pickPrivateImage() async {
     try {
       if (Platform.isWindows) {
@@ -2923,6 +3448,13 @@ class _ChatScreenState extends State<ChatScreen>
     }
   }
 
+  String _videoNoteText(String ru, String uk, String en) {
+    final code = AppLanguageService.instance.code.value;
+    if (code.startsWith('uk')) return uk;
+    if (code.startsWith('en')) return en;
+    return ru;
+  }
+
   Future<void> _pickPrivateFile() async {
     try {
       final result = await FilePicker.platform.pickFiles(
@@ -2973,16 +3505,13 @@ class _ChatScreenState extends State<ChatScreen>
     }
     if (mounted) setState(() => _sendingPrivateMedia = true);
     try {
-      final protectWithE2ee = SocketService.instance.isE2eeActiveWith(
-        widget.targetUser,
-      );
       final upload = await MediaTransferService.uploadFile(
         path: path,
         fileName: PrivateAttachmentHelpers.safeFileName(fileName),
         mimeType: mimeType,
         messageType: messageType,
         maxBytes: maxBytes,
-        encryptForE2ee: protectWithE2ee,
+        encryptForE2ee: true,
       );
       SocketService.instance.sendMediaMessage(
         widget.targetUser,
@@ -3015,6 +3544,65 @@ class _ChatScreenState extends State<ChatScreen>
         return 'video.mp4';
       default:
         return 'file.bin';
+    }
+  }
+
+  // FENYVO_MEDIA_DOWNLOAD_MENU_974
+  // Saving media is explicit user action, separate from Save to FENYVO.
+  Future<void> _downloadPrivateMessageMedia(
+    Map<String, dynamic> message,
+  ) async {
+    if (message['messageType']?.toString().trim() != 'voice') {
+      await _savePrivateAttachment(message);
+      return;
+    }
+
+    try {
+      final path = await _voiceCachePath(message);
+      final file = File(path);
+
+      if (!await file.exists() || await file.length() <= 0) {
+        throw StateError('voice_file_unavailable');
+      }
+
+      final originalName = _privateAttachmentName(message);
+      final lowerName = originalName.toLowerCase();
+
+      final hasAudioExtension =
+          lowerName.endsWith('.m4a') ||
+          lowerName.endsWith('.mp3') ||
+          lowerName.endsWith('.ogg') ||
+          lowerName.endsWith('.wav') ||
+          lowerName.endsWith('.aac');
+
+      final fileName = PrivateAttachmentHelpers.safeFileName(
+        hasAudioExtension
+            ? originalName
+            : 'voice_message_${DateTime.now().millisecondsSinceEpoch}.m4a',
+      );
+
+      final lowerFileName = fileName.toLowerCase();
+      final mime = lowerFileName.endsWith('.mp3')
+          ? 'audio/mpeg'
+          : lowerFileName.endsWith('.ogg')
+          ? 'audio/ogg'
+          : lowerFileName.endsWith('.wav')
+          ? 'audio/wav'
+          : lowerFileName.endsWith('.aac')
+          ? 'audio/aac'
+          : 'audio/mp4';
+
+      final savedPath = await FenyvoDownloadService.saveBytes(
+        bytes: await file.readAsBytes(),
+        fileName: fileName,
+        mimeType: mime,
+      );
+
+      if (!mounted) return;
+      _privateMediaSnack(_chatText('savedToFenyvo', {'path': savedPath}));
+    } catch (error) {
+      if (!mounted) return;
+      _privateMediaSnack(_chatText('fileSaveError', {'error': error}));
     }
   }
 
@@ -3413,6 +4001,38 @@ class _ChatScreenState extends State<ChatScreen>
     }
   }
 
+  // Publish only recording state, never audio content.
+  // A refresh keeps the remote indicator alive while recording.
+  void _setLocalVoiceRecordingActivity(bool active) {
+    _localVoiceActivityTimer?.cancel();
+    _localVoiceActivityTimer = null;
+
+    if (active && (!mounted || !_isRecordingVoice)) return;
+
+    SocketService.instance.sendRecordingActivity(
+      widget.targetUser,
+      kind: 'voice',
+      active: active,
+    );
+
+    if (!active) return;
+
+    _localVoiceActivityTimer = Timer.periodic(const Duration(seconds: 5), (
+      timer,
+    ) {
+      if (!mounted || !_isRecordingVoice) {
+        timer.cancel();
+        _localVoiceActivityTimer = null;
+        return;
+      }
+      SocketService.instance.sendRecordingActivity(
+        widget.targetUser,
+        kind: 'voice',
+        active: true,
+      );
+    });
+  }
+
   Future<void> _startVoiceRecording() {
     return _voiceOperations.start(
       isClosing: _voiceShutdown.isClosing,
@@ -3466,6 +4086,9 @@ class _ChatScreenState extends State<ChatScreen>
       _voiceTempPaths.track(path);
 
       try {
+        // FENYVO_VOICE_RECORD_HEX_999
+        // Release inline video decoders before acquiring microphone.
+        await HexInlineVoiceCoordinator.setVoiceRecordingActive(true);
         await _voiceRecorder.start(path: path);
       } catch (_) {
         try {
@@ -3487,6 +4110,7 @@ class _ChatScreenState extends State<ChatScreen>
 
       if (!mounted || !_voicePressActive) {
         final stoppedPath = await _voiceRecorder.stop();
+        await HexInlineVoiceCoordinator.setVoiceRecordingActive(false);
 
         final abandonedPaths = PrivateVoiceTempCleanupPolicy.pathsAfterStop(
           stopSucceeded: true,
@@ -3512,6 +4136,7 @@ class _ChatScreenState extends State<ChatScreen>
 
       _voiceTicker.stop();
 
+      _setLocalVoiceRecordingActivity(true);
       _voiceTicker.start(
         onTick: (delta) {
           if (!mounted || !_isRecordingVoice) {
@@ -3530,6 +4155,7 @@ class _ChatScreenState extends State<ChatScreen>
         },
       );
     } catch (error) {
+      await HexInlineVoiceCoordinator.setVoiceRecordingActive(false);
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -3558,6 +4184,7 @@ class _ChatScreenState extends State<ChatScreen>
     }
 
     _voiceTicker.stop();
+    _setLocalVoiceRecordingActivity(false);
 
     final duration = _voiceRecordDuration;
 
@@ -3588,6 +4215,8 @@ class _ChatScreenState extends State<ChatScreen>
       _voiceStopFailed = true;
       debugPrint('Voice recorder stop failed: $error');
       return;
+    } finally {
+      await HexInlineVoiceCoordinator.setVoiceRecordingActive(false);
     }
 
     final path = stoppedPath ?? fallbackPath;
@@ -3638,16 +4267,13 @@ class _ChatScreenState extends State<ChatScreen>
         return;
       }
 
-      final protectWithE2ee = SocketService.instance.isE2eeActiveWith(
-        widget.targetUser,
-      );
       final upload = await MediaTransferService.uploadFile(
         path: file.path,
         fileName: PrivateAttachmentHelpers.basename(file.path),
         mimeType: 'audio/mp4',
         messageType: 'voice',
         maxBytes: PrivateVoiceRecordingPolicy.maximumFileBytes,
-        encryptForE2ee: protectWithE2ee,
+        encryptForE2ee: true,
       );
 
       SocketService.instance.sendVoiceMessage(
@@ -3683,44 +4309,29 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   void _handleVoiceLongPressStart(LongPressStartDetails details) {
-    if (_voiceStarting || _isRecordingVoice) {
+    if (_voiceStarting || _isRecordingVoice || _sendingPrivateMedia) {
       return;
     }
 
     _voiceDragStart = details.globalPosition;
+    _voicePressActive = true;
+    _voiceRecordingLocked = false;
+    _voiceHoldPendingFinish = null;
 
-    // FIX5: a long press now enters the same locked recording mode as a
-    // normal tap. This leaves the recording composer on screen with explicit
-    // Cancel and Send buttons instead of depending on a release/swipe gesture.
     unawaited(_startLockedVoiceRecording());
   }
 
   void _handleVoiceDragPosition(Offset globalPosition) {
     final start = _voiceDragStart;
 
-    if (!_voicePressActive ||
-        start == null ||
-        !_isRecordingVoice ||
-        _voiceRecordingLocked) {
+    if (!_voicePressActive || start == null || _voiceRecordingLocked) {
       return;
     }
 
     final delta = globalPosition - start;
 
     if (PrivateVoiceRecordingGesturePolicy.shouldCancel(delta.dx)) {
-      _voicePressActive = false;
-
-      unawaited(_finishVoiceRecording(send: false));
-
-      return;
-    }
-
-    if (PrivateVoiceRecordingGesturePolicy.shouldLock(delta.dy)) {
-      _voicePressActive = false;
-
-      setState(() {
-        _voiceRecordingLocked = true;
-      });
+      _finishVoicePointerGesture(send: false);
     }
   }
 
@@ -3729,11 +4340,18 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   void _finishVoicePointerGesture({required bool send}) {
-    // FIX6: pointer-up/cancel no longer stops a recording. Recording is
-    // controlled only by the visible Cancel and Send buttons. Keeping this
-    // bridge as a no-op avoids gesture races during a long press.
-    if (send) {
+    if (!_voicePressActive) return;
+
+    _voicePressActive = false;
+    _voiceDragStart = null;
+
+    if (_isRecordingVoice) {
+      unawaited(_finishVoiceRecording(send: send));
       return;
+    }
+
+    if (_voiceStarting) {
+      _voiceHoldPendingFinish = send;
     }
   }
 
@@ -3770,11 +4388,16 @@ class _ChatScreenState extends State<ChatScreen>
   Future<void> _toggleVoicePlayback(Map<String, dynamic> message) async {
     final id = _getMessageId(message);
 
+    // Logs contain only fixed event names, never message identifiers.
+    debugPrint('FENYVO_VOICE_TRACE event=play_tapped');
+
     if (id.isEmpty || !_isVoiceMessage(message)) {
+      debugPrint('FENYVO_VOICE_TRACE event=play_rejected');
       return;
     }
 
     if (_playingVoiceMessageId == id) {
+      debugPrint('FENYVO_VOICE_TRACE event=existing_player');
       if (_voiceIsPlaying) {
         await _voicePlayer.pause();
       } else {
@@ -3784,10 +4407,20 @@ class _ChatScreenState extends State<ChatScreen>
       return;
     }
 
+    var playbackStage = 'stop';
     try {
       await _voicePlayer.stop();
 
+      playbackStage = 'cache';
       final path = await _voiceCachePath(message);
+      debugPrint('FENYVO_VOICE_TRACE event=cache_ready');
+
+      playbackStage = 'file';
+      final voiceFile = File(path);
+      if (!await voiceFile.exists() || await voiceFile.length() <= 0) {
+        throw StateError('voice_file_unavailable');
+      }
+      debugPrint('FENYVO_VOICE_TRACE event=file_valid');
 
       if (!mounted) {
         return;
@@ -3802,13 +4435,56 @@ class _ChatScreenState extends State<ChatScreen>
         _voiceIsPlaying = true;
       });
 
-      await _voicePlayer.play(DeviceFileSource(path));
+      playbackStage = 'play';
+      debugPrint(
+        'FENYVO_VOICE_TIMING event=start '
+        'expected_ms=${_voicePlaybackDuration.inMilliseconds} '
+        'rate=${_voicePlaybackRate.toStringAsFixed(1)}',
+      );
+      await HexInlineVoiceCoordinator.setVoiceActive(true);
+      // FENYVO_VOICE_BYTES_SOURCE_EXPERIMENT_987
+      // Android-only source comparison; no encryption or cache changes.
+      final audioLength = await voiceFile.length();
+      if (Platform.isAndroid && audioLength <= 20 * 1024 * 1024) {
+        final lowerPath = path.toLowerCase();
+        final mime = lowerPath.endsWith('.ogg')
+            ? 'audio/ogg'
+            : lowerPath.endsWith('.mp3')
+            ? 'audio/mpeg'
+            : lowerPath.endsWith('.wav')
+            ? 'audio/wav'
+            : lowerPath.endsWith('.aac')
+            ? 'audio/aac'
+            : 'audio/mp4';
 
+        debugPrint('FENYVO_VOICE_TIMING event=bytes_source');
+        await _voicePlayer.play(
+          BytesSource(await voiceFile.readAsBytes(), mimeType: mime),
+        );
+      } else {
+        debugPrint('FENYVO_VOICE_TIMING event=file_source');
+        await _voicePlayer.play(DeviceFileSource(path));
+      }
+      debugPrint('FENYVO_VOICE_TRACE event=play_returned');
+
+      playbackStage = 'rate';
       await _voicePlayer.setPlaybackRate(_voicePlaybackRate);
+      debugPrint('FENYVO_VOICE_TRACE event=rate_applied');
     } catch (error) {
+      unawaited(HexInlineVoiceCoordinator.setVoiceActive(false));
+      // FENYVO_VOICE_PLAYBACK_DIAGNOSTIC_955
+      // No message content, media identifiers, paths, or E2EE data.
+      debugPrint(
+        'FENYVO_VOICE_PLAYBACK_FAILURE '
+        'stage=$playbackStage type=${error.runtimeType}',
+      );
+
       if (mounted) {
         setState(() {
           _voiceIsPlaying = false;
+          _playingVoiceMessageId = null;
+          _voicePlaybackPosition = Duration.zero;
+          _voicePlaybackDuration = Duration.zero;
         });
 
         ScaffoldMessenger.of(context).showSnackBar(
@@ -3863,28 +4539,16 @@ class _ChatScreenState extends State<ChatScreen>
   }
 
   Future<void> _startLockedVoiceRecording() async {
-    if (_isRecordingVoice) {
-      _voicePressActive = false;
-      await _finishVoiceRecording(send: true);
-      return;
-    }
-
-    _voicePressActive = true;
+    if (_voiceStarting || _isRecordingVoice) return;
 
     await _startVoiceRecording();
 
-    if (!mounted) {
-      _voicePressActive = false;
-      return;
-    }
+    final pending = _voiceHoldPendingFinish;
+    _voiceHoldPendingFinish = null;
 
-    if (_isRecordingVoice) {
-      setState(() {
-        _voiceRecordingLocked = true;
-      });
+    if (pending != null && _isRecordingVoice) {
+      await _finishVoiceRecording(send: pending);
     }
-
-    _voicePressActive = false;
   }
 
   // ========================================
@@ -4355,554 +5019,16 @@ class _ChatScreenState extends State<ChatScreen>
     );
   }
 
-  Widget _buildMessageListItem(int reverseIndex) {
-    final messageIndex = _messages.length - 1 - reverseIndex;
-
-    final message = _messages[messageIndex];
-
-    final isFirstMessage = messageIndex == 0;
-
-    final previousMessage = isFirstMessage ? null : _messages[messageIndex - 1];
-
-    final showDateSeparator =
-        isFirstMessage ||
-        previousMessage == null ||
-        !_isSameMessageDay(message['time'], previousMessage['time']);
-
-    final messageId = _getMessageId(message);
-
-    return KeyedSubtree(
-      key: _messageItemKey(messageId),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (showDateSeparator) _buildMessageDateSeparator(message['time']),
-          _buildMessageBubble(message),
-        ],
-      ),
-    );
-  }
-
   GlobalKey _messageItemKey(String messageId) {
     return _messageItemKeys.putIfAbsent(messageId, GlobalKey.new);
   }
 
-  void _recalculateSearchMatches() {
-    final previousId =
-        _searchMatchIndex >= 0 && _searchMatchIndex < _searchMatchIds.length
-        ? _searchMatchIds[_searchMatchIndex]
-        : '';
-
-    _searchMatchIds = _messages
-        .where((message) => MessageSearchService.matches(message, _searchQuery))
-        .map(_getMessageId)
-        .where((id) => id.isNotEmpty)
-        .toList(growable: false);
-
-    if (_searchMatchIds.isEmpty) {
-      _searchMatchIndex = -1;
-      return;
-    }
-
-    final previousIndex = previousId.isEmpty
-        ? -1
-        : _searchMatchIds.indexOf(previousId);
-    _searchMatchIndex = previousIndex >= 0
-        ? previousIndex
-        : _searchMatchIds.length - 1;
+  void _updateMessageSearchState(VoidCallback update) {
+    setState(update);
   }
 
-  void _openMessageSearch() {
-    setState(() {
-      _searchMode = true;
-      _searchQuery = _searchController.text.trim();
-      _recalculateSearchMatches();
-    });
-
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _searchFocusNode.requestFocus();
-    });
-  }
-
-  void _closeMessageSearch() {
-    _searchController.clear();
-    _searchFocusNode.unfocus();
-    setState(() {
-      _searchMode = false;
-      _searchQuery = '';
-      _searchMatchIds = <String>[];
-      _searchMatchIndex = -1;
-    });
-  }
-
-  void _onMessageSearchChanged(String value) {
-    setState(() {
-      _searchQuery = value.trim();
-      _recalculateSearchMatches();
-    });
-
-    if (_searchMatchIndex >= 0) {
-      unawaited(_jumpToCurrentSearchMatch());
-    }
-  }
-
-  Future<void> _jumpToCurrentSearchMatch() async {
-    if (_searchMatchIndex < 0 || _searchMatchIndex >= _searchMatchIds.length) {
-      return;
-    }
-
-    final id = _searchMatchIds[_searchMatchIndex];
-    final index = _messages.indexWhere(
-      (message) => _getMessageId(message) == id,
-    );
-    if (index >= 0) await _jumpToPinnedMessage(_messages[index]);
-  }
-
-  Future<void> _nextMessageSearchMatch({required bool newer}) async {
-    if (_searchMatchIds.isEmpty) return;
-
-    setState(() {
-      if (_searchMatchIndex < 0) {
-        _searchMatchIndex = _searchMatchIds.length - 1;
-      } else if (newer) {
-        _searchMatchIndex = (_searchMatchIndex + 1) % _searchMatchIds.length;
-      } else {
-        _searchMatchIndex =
-            (_searchMatchIndex - 1 + _searchMatchIds.length) %
-            _searchMatchIds.length;
-      }
-    });
-
-    await _jumpToCurrentSearchMatch();
-  }
-
-  Widget _buildMessageSearchBar() {
-    final matchCount = _searchMatchIds.length;
-    final current = _searchMatchIndex >= 0 ? _searchMatchIndex + 1 : 0;
-
-    return Container(
-      color: FenyvoPalette.surface,
-      padding: EdgeInsets.fromLTRB(
-        Platform.isWindows ? 16 : 10,
-        7,
-        Platform.isWindows ? 16 : 10,
-        7,
-      ),
-      child: Row(
-        children: [
-          Expanded(
-            child: TextField(
-              controller: _searchController,
-              focusNode: _searchFocusNode,
-              onChanged: _onMessageSearchChanged,
-              textInputAction: TextInputAction.search,
-              style: const TextStyle(color: FenyvoPalette.ink),
-              decoration: InputDecoration(
-                hintText: _chatText('searchConversationHint'),
-                hintStyle: const TextStyle(color: FenyvoPalette.muted),
-                prefixIcon: const Icon(Icons.search_rounded, color: _gold),
-                suffixText: _searchQuery.isEmpty
-                    ? null
-                    : '$current/$matchCount',
-                suffixStyle: const TextStyle(
-                  color: _gold,
-                  fontWeight: FontWeight.w700,
-                ),
-                filled: true,
-                fillColor: FenyvoPalette.canvasDeep,
-                isDense: true,
-                border: OutlineInputBorder(
-                  borderRadius: BorderRadius.circular(20),
-                  borderSide: BorderSide.none,
-                ),
-              ),
-            ),
-          ),
-          IconButton(
-            tooltip: _chatText('previousMatch'),
-            onPressed: matchCount == 0
-                ? null
-                : () => unawaited(_nextMessageSearchMatch(newer: false)),
-            icon: const Icon(Icons.keyboard_arrow_up_rounded, color: _gold),
-          ),
-          IconButton(
-            tooltip: _chatText('nextMatch'),
-            onPressed: matchCount == 0
-                ? null
-                : () => unawaited(_nextMessageSearchMatch(newer: true)),
-            icon: const Icon(Icons.keyboard_arrow_down_rounded, color: _gold),
-          ),
-          IconButton(
-            tooltip: _chatText('closeSearch'),
-            onPressed: _closeMessageSearch,
-            icon: const Icon(
-              Icons.close_rounded,
-              color: FenyvoPalette.secondary,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  bool _isMessagePinned(Map<String, dynamic> message) {
-    return message['isPinned'] == true;
-  }
-
-  List<Map<String, dynamic>> _getPinnedMessages() {
-    return _messages.where(_isMessagePinned).take(10).toList(growable: false);
-  }
-
-  void _togglePinnedMessage(Map<String, dynamic> message) {
-    final targetId = _getMessageId(message);
-
-    if (targetId.isEmpty) {
-      return;
-    }
-
-    final wasPinned = _isMessagePinned(message);
-
-    final pinnedCount = _messages.where(_isMessagePinned).length;
-
-    if (!wasPinned && pinnedCount >= 10) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(_chatText('pinLimit')),
-          backgroundColor: FenyvoPalette.surface,
-        ),
-      );
-      return;
-    }
-
-    setState(() {
-      for (final item in _messages) {
-        if (_getMessageId(item) == targetId) {
-          item['isPinned'] = !wasPinned;
-          break;
-        }
-      }
-    });
-
-    final owner = SocketService.instance.currentUser?.trim() ?? '';
-    final peer = widget.targetUser.trim();
-    final nextPinned = !wasPinned;
-
-    if (owner.isNotEmpty && peer.isNotEmpty && owner != peer) {
-      unawaited(
-        StorageService.mutateMessagesDurably(owner, peer, (current) {
-          for (final stored in current) {
-            if (stored['id']?.toString().trim() != targetId) {
-              continue;
-            }
-
-            final sender = stored['from']?.toString().trim() ?? '';
-            final recipient = stored['to']?.toString().trim() ?? '';
-            final belongsToChat =
-                (sender == owner && recipient == peer) ||
-                (sender == peer && recipient == owner);
-            if (!belongsToChat) return null;
-
-            if ((stored['isPinned'] == true) == nextPinned) {
-              return null;
-            }
-
-            stored['isPinned'] = nextPinned;
-            return current;
-          }
-          return null;
-        }).then((_) {}).catchError((Object error, StackTrace stack) {
-          debugPrint('Durable local pin update failed: $error');
-        }),
-      );
-    }
-
-    final currentUser = SocketService.instance.currentUser?.trim() ?? '';
-    if (currentUser.isNotEmpty) {
-      if (wasPinned) {
-        StorageService.removePinnedMessage(
-          currentUser,
-          widget.targetUser,
-          targetId,
-        );
-      } else {
-        StorageService.addPinnedMessage(currentUser, widget.targetUser, {
-          'messageId': targetId,
-          'updatedAt': DateTime.now().toIso8601String(),
-        });
-      }
-    }
-
-    SocketService.instance.setPinnedMessage(
-      messageId: targetId,
-      to: widget.targetUser,
-      pinned: !wasPinned,
-      messageFrom: message['from']?.toString() ?? '',
-    );
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        duration: const Duration(milliseconds: 1100),
-        behavior: SnackBarBehavior.floating,
-        backgroundColor: FenyvoPalette.surface,
-        content: Row(
-          children: [
-            Icon(
-              wasPinned ? Icons.push_pin_outlined : Icons.push_pin_rounded,
-              color: _gold,
-              size: 18,
-            ),
-            const SizedBox(width: 9),
-            Expanded(
-              child: Text(
-                wasPinned
-                    ? '\u0421\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435 \u043E\u0442\u043A\u0440\u0435\u043F\u043B\u0435\u043D\u043E'
-                    : '\u0421\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435 \u0437\u0430\u043A\u0440\u0435\u043F\u043B\u0435\u043D\u043E',
-                style: const TextStyle(color: FenyvoPalette.ink),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Future<void> _jumpToPinnedMessage(Map<String, dynamic> message) async {
-    final targetId = _getMessageId(message);
-
-    if (targetId.isEmpty) {
-      return;
-    }
-
-    final messageIndex = _messages.indexWhere(
-      (item) => _getMessageId(item) == targetId,
-    );
-
-    if (messageIndex < 0) {
-      if (!mounted) {
-        return;
-      }
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            '\u0421\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435 \u0431\u043E\u043B\u044C\u0448\u0435 \u043D\u0435\u0434\u043E\u0441\u0442\u0443\u043F\u043D\u043E',
-          ),
-        ),
-      );
-
-      return;
-    }
-
-    _pinnedHighlightTimer?.cancel();
-
-    if (mounted) {
-      setState(() {
-        _highlightedMessageId = targetId;
-      });
-    }
-
-    await Future<void>.delayed(const Duration(milliseconds: 35));
-
-    if (_messageScrollController.hasClients) {
-      final targetReverseIndex = _messages.length - 1 - messageIndex;
-
-      final position = _messageScrollController.position;
-
-      final maxExtent = position.maxScrollExtent;
-
-      final estimatedOffset = _messages.length <= 1
-          ? 0.0
-          : maxExtent * targetReverseIndex / (_messages.length - 1);
-
-      await _messageScrollController.animateTo(
-        estimatedOffset.clamp(
-          position.minScrollExtent,
-          position.maxScrollExtent,
-        ),
-        duration: const Duration(milliseconds: 360),
-        curve: Curves.easeOutCubic,
-      );
-
-      for (var attempt = 0; attempt < 24; attempt++) {
-        if (!mounted || !_messageScrollController.hasClients) {
-          break;
-        }
-
-        await Future<void>.delayed(const Duration(milliseconds: 35));
-
-        final itemContext = _messageItemKeys[targetId]?.currentContext;
-
-        if (itemContext != null) {
-          await Scrollable.ensureVisible(
-            itemContext,
-            alignment: 0.50,
-            duration: const Duration(milliseconds: 320),
-            curve: Curves.easeOutCubic,
-          );
-
-          break;
-        }
-
-        final builtReverseIndices = <int>[];
-
-        for (
-          var reverseIndex = 0;
-          reverseIndex < _messages.length;
-          reverseIndex++
-        ) {
-          final index = _messages.length - 1 - reverseIndex;
-
-          final id = _getMessageId(_messages[index]);
-
-          if (id.isEmpty) {
-            continue;
-          }
-
-          if (_messageItemKeys[id]?.currentContext != null) {
-            builtReverseIndices.add(reverseIndex);
-          }
-        }
-
-        final currentPosition = _messageScrollController.position;
-
-        final viewport = currentPosition.viewportDimension;
-
-        final step = viewport > 220 ? viewport * 0.78 : 220.0;
-
-        var nextOffset = currentPosition.pixels;
-
-        if (builtReverseIndices.isEmpty) {
-          nextOffset = estimatedOffset;
-        } else {
-          builtReverseIndices.sort();
-
-          final firstBuilt = builtReverseIndices.first;
-
-          final lastBuilt = builtReverseIndices.last;
-
-          if (targetReverseIndex > lastBuilt) {
-            nextOffset += step;
-          } else if (targetReverseIndex < firstBuilt) {
-            nextOffset -= step;
-          } else {
-            nextOffset = estimatedOffset;
-          }
-        }
-
-        final clampedOffset = nextOffset.clamp(
-          currentPosition.minScrollExtent,
-          currentPosition.maxScrollExtent,
-        );
-
-        if ((clampedOffset - currentPosition.pixels).abs() < 1.0) {
-          break;
-        }
-
-        await _messageScrollController.animateTo(
-          clampedOffset,
-          duration: const Duration(milliseconds: 150),
-          curve: Curves.easeOutCubic,
-        );
-      }
-
-      final finalContext = _messageItemKeys[targetId]?.currentContext;
-
-      if (finalContext != null) {
-        await Scrollable.ensureVisible(
-          finalContext,
-          alignment: 0.50,
-          duration: const Duration(milliseconds: 260),
-          curve: Curves.easeOutCubic,
-        );
-      }
-    }
-
-    _pinnedHighlightTimer = Timer(const Duration(milliseconds: 2200), () {
-      if (!mounted || _highlightedMessageId != targetId) {
-        return;
-      }
-
-      setState(() {
-        _highlightedMessageId = null;
-      });
-    });
-  }
-
-  Widget _buildPinnedMessageBanner() {
-    final pinned = _getPinnedMessages();
-    if (pinned.isEmpty) return const SizedBox.shrink();
-    return Container(
-      height: 46,
-      decoration: const BoxDecoration(
-        color: FenyvoPalette.surface,
-        border: Border(
-          bottom: BorderSide(color: FenyvoPalette.line, width: .5),
-        ),
-      ),
-      padding: const EdgeInsets.symmetric(horizontal: 12),
-      child: Row(
-        children: [
-          const Icon(
-            Icons.push_pin_outlined,
-            size: 18,
-            color: FenyvoPalette.gold,
-          ),
-          const SizedBox(width: 8),
-          Expanded(
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: pinned.length,
-              separatorBuilder: (_, index) => const SizedBox(width: 12),
-              itemBuilder: (context, index) {
-                final message = pinned[index];
-                return ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 260),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Flexible(
-                        child: InkWell(
-                          onTap: () => unawaited(_jumpToPinnedMessage(message)),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                            child: Text(
-                              message['text']?.toString() ??
-                                  _chatText('message'),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                fontSize: 13,
-                                color: FenyvoPalette.ink,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                      IconButton(
-                        tooltip: _chatText('unpin'),
-                        constraints: const BoxConstraints(
-                          minWidth: 40,
-                          minHeight: 40,
-                        ),
-                        onPressed: () => _togglePinnedMessage(message),
-                        icon: const Icon(Icons.close_rounded, size: 16),
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
-          ),
-          Text(
-            '${pinned.length}/10',
-            style: const TextStyle(
-              color: FenyvoPalette.secondary,
-              fontSize: 11,
-            ),
-          ),
-        ],
-      ),
-    );
+  void _updatePinnedMessageState(VoidCallback update) {
+    setState(update);
   }
 
   Widget _buildBackground() {
@@ -4949,191 +5075,6 @@ class _ChatScreenState extends State<ChatScreen>
 
   // ========================================
   // \u041E\u0414\u041D\u041E \u0417\u041E\u041B\u041E\u0422\u041E\u0415 \u0421\u0415\u0420\u0414\u0415\u0427\u041A\u041E
-  // ========================================
-
-  Widget _buildHeartIcon({
-    required bool filled,
-    required bool enabled,
-    required VoidCallback? onTap,
-  }) {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: enabled ? onTap : null,
-      child: Container(
-        width: 30,
-        height: 30,
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          shape: BoxShape.circle,
-          color: FenyvoPalette.surface.withValues(alpha: 0.72),
-          border: Border.all(
-            color: _gold.withValues(alpha: enabled ? 0.95 : 0.70),
-            width: 1,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.06),
-              blurRadius: 5,
-              offset: const Offset(0, 2),
-            ),
-          ],
-        ),
-        child: Icon(
-          filled ? Icons.favorite : Icons.favorite_border,
-          color: _gold,
-          size: 18,
-        ),
-      ),
-    );
-  }
-
-  Widget _buildReactionChip({
-    required String reaction,
-    required int count,
-    required bool selected,
-    required VoidCallback onTap,
-  }) {
-    return GestureDetector(
-      behavior: HitTestBehavior.opaque,
-      onTap: onTap,
-      child: Container(
-        height: 30,
-        padding: const EdgeInsets.symmetric(horizontal: 8),
-        alignment: Alignment.center,
-        decoration: BoxDecoration(
-          color: selected
-              ? FenyvoPalette.blue.withValues(alpha: 0.22)
-              : FenyvoPalette.surface.withValues(alpha: 0.72),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: _gold.withValues(alpha: selected ? 1.0 : 0.75),
-            width: selected ? 1.4 : 1,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: selected
-                  ? _gold.withValues(alpha: 0.06)
-                  : Colors.black.withValues(alpha: 0.06),
-              blurRadius: selected ? 8 : 5,
-            ),
-          ],
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(reaction, style: const TextStyle(fontSize: 16, height: 1)),
-            if (count > 1) ...[
-              const SizedBox(width: 4),
-              Text(
-                '$count',
-                style: const TextStyle(
-                  color: FenyvoPalette.ink,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ========================================
-  // \u0420\u042F\u0414 \u0420\u0415\u0410\u041A\u0426\u0418\u0419
-  // ========================================
-
-  Widget _buildReactionRow(Map<String, dynamic> message) {
-    final currentUser = SocketService.instance.currentUser ?? '';
-    final reactions = _getMessageReactions(message);
-
-    if (reactions.isEmpty) return const SizedBox.shrink();
-
-    final counts = countMessageReactions(reactions.values);
-
-    final widgets = <Widget>[];
-    for (final reaction in _supportedReactions) {
-      final count = counts[reaction] ?? 0;
-      if (count == 0) continue;
-      if (widgets.isNotEmpty) widgets.add(const SizedBox(width: 4));
-      widgets.add(
-        _buildReactionChip(
-          reaction: reaction,
-          count: count,
-          selected: reactions[currentUser] == reaction,
-          onTap: () {
-            _sendReaction(message, reaction);
-          },
-        ),
-      );
-    }
-
-    if (currentUser.isNotEmpty && !reactions.containsKey(currentUser)) {
-      if (widgets.isNotEmpty) widgets.add(const SizedBox(width: 4));
-      widgets.add(
-        _buildHeartIcon(
-          filled: false,
-          enabled: true,
-          onTap: () {
-            _sendReaction(message, '\u2764\uFE0F');
-          },
-        ),
-      );
-    }
-
-    return Row(mainAxisSize: MainAxisSize.min, children: widgets);
-  }
-
-  // ========================================
-  // \u0413\u0410\u041B\u041E\u0427\u041A\u0418 \u0421\u0422\u0410\u0422\u0423\u0421\u0410
-  // ========================================
-
-  Widget _buildMessageStatus(Map<String, dynamic> message) {
-    final status = message['status']?.toString().trim() ?? 'sent';
-
-    final isRead = status == 'read';
-
-    if (status == 'queued') {
-      return Icon(
-        Icons.schedule_rounded,
-        size: 15,
-        color: FenyvoPalette.secondary,
-        semanticLabel: _chatText('waitingToSend'),
-      );
-    }
-    if (status == 'sending') {
-      return Icon(
-        Icons.sync_rounded,
-        size: 15,
-        color: FenyvoPalette.secondary,
-        semanticLabel: _chatText('sending'),
-      );
-    }
-    if (status == 'failed') {
-      return Icon(
-        Icons.error_outline_rounded,
-        size: 15,
-        color: Colors.red,
-        semanticLabel: _chatText('notSent'),
-      );
-    }
-
-    return Icon(
-      isRead || status == 'delivered'
-          ? Icons.done_all_rounded
-          : Icons.done_rounded,
-      size: 15,
-      color: isRead ? FenyvoPalette.gold : FenyvoPalette.secondary,
-      semanticLabel: isRead
-          ? _chatText('read')
-          : status == 'delivered'
-          ? _chatText('delivered')
-          : _chatText('sent'),
-    );
-  }
-
-  // ========================================
-  // \u041C\u0415\u041D\u042E \u041F\u041E \u0414\u041E\u041B\u0413\u041E\u041C\u0423 \u041D\u0410\u0416\u0410\u0422\u0418\u042E
   // ========================================
 
   Future<void> _copyMessageText(Map<String, dynamic> message) async {
@@ -5232,367 +5173,6 @@ class _ChatScreenState extends State<ChatScreen>
     } finally {
       client.close(force: true);
     }
-  }
-
-  Future<void> _translateMessage(Map<String, dynamic> message) async {
-    final originalText = message['text']?.toString().trim() ?? '';
-
-    if (originalText.isEmpty || !mounted) {
-      return;
-    }
-
-    var targetLanguage = 'uk';
-    var translatedText = '';
-    var isLoading = false;
-    String? errorText;
-
-    await showModalBottomSheet<void>(
-      context: context,
-      useRootNavigator: true,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (sheetContext) {
-        return StatefulBuilder(
-          builder: (context, setSheetState) {
-            Future<void> performTranslation() async {
-              if (isLoading) {
-                return;
-              }
-
-              setSheetState(() {
-                isLoading = true;
-                errorText = null;
-              });
-
-              try {
-                final result = await _requestTranslation(
-                  text: originalText,
-                  targetLanguage: targetLanguage,
-                );
-
-                if (!sheetContext.mounted) {
-                  return;
-                }
-
-                setSheetState(() {
-                  translatedText = result;
-                  isLoading = false;
-                });
-              } catch (_) {
-                if (!sheetContext.mounted) {
-                  return;
-                }
-
-                setSheetState(() {
-                  translatedText = '';
-                  isLoading = false;
-                  errorText = '\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043F\u0435\u0440\u0435\u0432\u0435\u0441\u0442\u0438. \u041F\u0440\u043E\u0432\u0435\u0440\u044C \u0438\u043D\u0442\u0435\u0440\u043D\u0435\u0442 \u0438 \u043F\u043E\u043F\u0440\u043E\u0431\u0443\u0439 \u0435\u0449\u0451 \u0440\u0430\u0437.';
-                });
-              }
-            }
-
-            Widget languageButton({
-              required String code,
-              required String label,
-            }) {
-              final selected = targetLanguage == code;
-
-              return Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 3),
-                  child: OutlinedButton(
-                    onPressed: isLoading
-                        ? null
-                        : () {
-                            setSheetState(() {
-                              targetLanguage = code;
-                              translatedText = '';
-                              errorText = null;
-                            });
-                          },
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: selected
-                          ? FenyvoPalette.ink
-                          : FenyvoPalette.ink,
-                      backgroundColor: selected
-                          ? FenyvoPalette.blue
-                          : FenyvoPalette.surface,
-                      side: BorderSide(
-                        color: selected ? _gold : _gold.withValues(alpha: 0.45),
-                      ),
-                      padding: const EdgeInsets.symmetric(vertical: 11),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(13),
-                      ),
-                    ),
-                    child: Text(
-                      label,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ),
-                ),
-              );
-            }
-
-            return SafeArea(
-              top: false,
-              child: Container(
-                constraints: BoxConstraints(
-                  maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.88,
-                ),
-                decoration: const BoxDecoration(
-                  color: FenyvoPalette.surface,
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-                  border: Border(top: BorderSide(color: _gold, width: 1.2)),
-                ),
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(18, 10, 18, 22),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Align(
-                        child: Container(
-                          width: 42,
-                          height: 4,
-                          decoration: BoxDecoration(
-                            color: FenyvoPalette.line,
-                            borderRadius: BorderRadius.circular(3),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      const Row(
-                        children: [
-                          Icon(Icons.translate_rounded, color: _gold),
-                          SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              '\u041F\u0435\u0440\u0435\u0432\u043E\u0434 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F',
-                              style: TextStyle(
-                                color: FenyvoPalette.ink,
-                                fontSize: 18,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 18),
-                      const Text(
-                        '\u041E\u0420\u0418\u0413\u0418\u041D\u0410\u041B',
-                        style: TextStyle(
-                          color: _gold,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 1.1,
-                        ),
-                      ),
-                      const SizedBox(height: 7),
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: FenyvoPalette.surface,
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(
-                            color: _gold.withValues(alpha: 0.30),
-                          ),
-                        ),
-                        child: SelectableText(
-                          originalText,
-                          style: const TextStyle(
-                            color: FenyvoPalette.ink,
-                            fontSize: 15,
-                            height: 1.35,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 18),
-                      const Text(
-                        '\u041F\u0415\u0420\u0415\u0412\u0415\u0421\u0422\u0418 \u041D\u0410',
-                        style: TextStyle(
-                          color: _gold,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 1.1,
-                        ),
-                      ),
-                      const SizedBox(height: 7),
-                      Row(
-                        children: [
-                          languageButton(
-                            code: 'uk',
-                            label: '\u0423\u043A\u0440\u0430\u0457\u043D\u0441\u044C\u043A\u0430',
-                          ),
-                          languageButton(
-                            code: 'ru',
-                            label: '\u0420\u0443\u0441\u0441\u043A\u0438\u0439',
-                          ),
-                          languageButton(code: 'en', label: 'English'),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          languageButton(
-                            code: 'ar',
-                            label: '\u0627\u0644\u0639\u0631\u0628\u064A\u0629',
-                          ),
-                          languageButton(code: 'zh-CN', label: '\u4E2D\u6587'),
-                          languageButton(
-                            code: 'ja',
-                            label: '\u65E5\u672C\u8A9E',
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 14),
-                      SizedBox(
-                        width: double.infinity,
-                        child: FilledButton.icon(
-                          onPressed: isLoading ? null : performTranslation,
-                          style: FilledButton.styleFrom(
-                            backgroundColor: FenyvoPalette.blue,
-                            foregroundColor: FenyvoPalette.ink,
-                            disabledBackgroundColor: _gold.withValues(
-                              alpha: 0.35,
-                            ),
-                            padding: const EdgeInsets.symmetric(vertical: 13),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(15),
-                            ),
-                          ),
-                          icon: isLoading
-                              ? const SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2.2,
-                                    color: FenyvoPalette.ink,
-                                  ),
-                                )
-                              : const Icon(Icons.translate_rounded),
-                          label: Text(
-                            isLoading
-                                ? '\u041F\u0435\u0440\u0435\u0432\u043E\u0434\u0438\u043C...'
-                                : '\u041F\u0435\u0440\u0435\u0432\u0435\u0441\u0442\u0438',
-                            style: const TextStyle(fontWeight: FontWeight.w800),
-                          ),
-                        ),
-                      ),
-                      if (errorText != null) ...[
-                        const SizedBox(height: 12),
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.red.withValues(alpha: 0.10),
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(
-                              color: Colors.redAccent.withValues(alpha: 0.45),
-                            ),
-                          ),
-                          child: Text(
-                            errorText!,
-                            style: const TextStyle(
-                              color: Colors.redAccent,
-                              fontSize: 13,
-                            ),
-                          ),
-                        ),
-                      ],
-                      if (translatedText.isNotEmpty) ...[
-                        const SizedBox(height: 18),
-                        const Text(
-                          '\u041F\u0415\u0420\u0415\u0412\u041E\u0414',
-                          style: TextStyle(
-                            color: _gold,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 1.1,
-                          ),
-                        ),
-                        const SizedBox(height: 7),
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(
-                            color: FenyvoPalette.surface,
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(
-                              color: _gold.withValues(alpha: 0.55),
-                            ),
-                          ),
-                          child: SelectableText(
-                            translatedText,
-                            textDirection: targetLanguage == 'ar'
-                                ? TextDirection.rtl
-                                : TextDirection.ltr,
-                            textAlign: targetLanguage == 'ar'
-                                ? TextAlign.right
-                                : TextAlign.left,
-                            style: const TextStyle(
-                              color: FenyvoPalette.ink,
-                              fontSize: 16,
-                              height: 1.4,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        SizedBox(
-                          width: double.infinity,
-                          child: OutlinedButton.icon(
-                            onPressed: () async {
-                              await Clipboard.setData(
-                                ClipboardData(text: translatedText),
-                              );
-
-                              if (!sheetContext.mounted) {
-                                return;
-                              }
-
-                              ScaffoldMessenger.of(sheetContext).showSnackBar(
-                                const SnackBar(
-                                  content: Text(
-                                    '\u041F\u0435\u0440\u0435\u0432\u043E\u0434 \u0441\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u043D',
-                                  ),
-                                  backgroundColor: FenyvoPalette.surface,
-                                  duration: Duration(milliseconds: 1000),
-                                ),
-                              );
-                            },
-                            style: OutlinedButton.styleFrom(
-                              foregroundColor: _gold,
-                              side: BorderSide(
-                                color: _gold.withValues(alpha: 0.65),
-                              ),
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(15),
-                              ),
-                            ),
-                            icon: const Icon(Icons.copy_rounded),
-                            label: const Text(
-                              '\u0421\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u043F\u0435\u0440\u0435\u0432\u043E\u0434',
-                              style: TextStyle(fontWeight: FontWeight.w700),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
   }
 
   String _fenyvoAiRequestId(String suffix) {
@@ -6191,15 +5771,11 @@ class _ChatScreenState extends State<ChatScreen>
     final cleanText = text.trim();
 
     if (cleanText.isEmpty) {
-      throw Exception(
-        '\u041F\u0443\u0441\u0442\u043E\u0435 \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435',
-      );
+      throw Exception(_privateChatGptUiText('emptyMessage'));
     }
 
     if (!SocketService.instance.isConnected) {
-      throw Exception(
-        '\u041D\u0435\u0442 \u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0435\u043D\u0438\u044F \u043A \u0441\u0435\u0440\u0432\u0435\u0440\u0443',
-      );
+      throw Exception(_privateChatGptUiText('notConnected'));
     }
 
     final requestId =
@@ -6219,9 +5795,7 @@ class _ChatScreenState extends State<ChatScreen>
       return await completer.future.timeout(
         const Duration(seconds: 50),
         onTimeout: () {
-          throw TimeoutException(
-            'ChatGPT \u043D\u0435 \u043E\u0442\u0432\u0435\u0442\u0438\u043B \u0432\u043E\u0432\u0440\u0435\u043C\u044F',
-          );
+          throw TimeoutException(_privateChatGptUiText('timeout'));
         },
       );
     } finally {
@@ -6229,961 +5803,8 @@ class _ChatScreenState extends State<ChatScreen>
     }
   }
 
-  Future<void> _showChatGptSheet(Map<String, dynamic> message) async {
-    final originalText = message['text']?.toString().trim() ?? '';
-
-    if (originalText.isEmpty || !mounted) {
-      return;
-    }
-
-    var selectedAction = 'reply';
-    var resultText = '';
-    var isLoading = false;
-    String? errorText;
-
-    const actionLabels = <String, String>{
-      'reply': '\u041F\u0440\u0435\u0434\u043B\u043E\u0436\u0438\u0442\u044C \u043E\u0442\u0432\u0435\u0442',
-      'explain': '\u041E\u0431\u044A\u044F\u0441\u043D\u0438\u0442\u044C',
-      'rewrite': '\u041F\u0435\u0440\u0435\u0444\u043E\u0440\u043C\u0443\u043B\u0438\u0440\u043E\u0432\u0430\u0442\u044C',
-      'shorter': '\u0421\u0434\u0435\u043B\u0430\u0442\u044C \u043A\u043E\u0440\u043E\u0447\u0435',
-    };
-
-    await showModalBottomSheet<void>(
-      context: context,
-      useRootNavigator: true,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (sheetContext) {
-        return StatefulBuilder(
-          builder: (context, setSheetState) {
-            Future<void> performAction() async {
-              if (isLoading) {
-                return;
-              }
-
-              setSheetState(() {
-                isLoading = true;
-                errorText = null;
-                resultText = '';
-              });
-
-              try {
-                final result = await _requestChatGpt(
-                  action: selectedAction,
-                  text: originalText,
-                );
-
-                if (!sheetContext.mounted) {
-                  return;
-                }
-
-                setSheetState(() {
-                  resultText = result;
-                  isLoading = false;
-                });
-              } catch (error) {
-                if (!sheetContext.mounted) {
-                  return;
-                }
-
-                var message = error.toString();
-
-                if (message.startsWith('Exception: ')) {
-                  message = message.substring(11);
-                }
-
-                setSheetState(() {
-                  isLoading = false;
-                  errorText = message;
-                });
-              }
-            }
-
-            Widget actionButton({
-              required String action,
-              required IconData icon,
-            }) {
-              final selected = selectedAction == action;
-
-              return OutlinedButton.icon(
-                onPressed: isLoading
-                    ? null
-                    : () {
-                        setSheetState(() {
-                          selectedAction = action;
-                          resultText = '';
-                          errorText = null;
-                        });
-                      },
-                style: OutlinedButton.styleFrom(
-                  foregroundColor: selected
-                      ? FenyvoPalette.ink
-                      : FenyvoPalette.ink,
-                  backgroundColor: selected
-                      ? FenyvoPalette.blue
-                      : FenyvoPalette.surface,
-                  side: BorderSide(
-                    color: selected ? _gold : _gold.withValues(alpha: 0.45),
-                  ),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 12,
-                    vertical: 11,
-                  ),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(13),
-                  ),
-                ),
-                icon: Icon(icon, size: 17),
-                label: Text(
-                  actionLabels[action] ?? action,
-                  style: const TextStyle(
-                    fontSize: 12.5,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              );
-            }
-
-            return SafeArea(
-              top: false,
-              child: Container(
-                constraints: BoxConstraints(
-                  maxHeight: MediaQuery.sizeOf(sheetContext).height * 0.90,
-                ),
-                decoration: const BoxDecoration(
-                  color: FenyvoPalette.surface,
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-                  border: Border(top: BorderSide(color: _gold, width: 1.2)),
-                ),
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(18, 10, 18, 22),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Align(
-                        child: Container(
-                          width: 42,
-                          height: 4,
-                          decoration: BoxDecoration(
-                            color: FenyvoPalette.line,
-                            borderRadius: BorderRadius.circular(3),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      const Row(
-                        children: [
-                          Icon(Icons.auto_awesome_rounded, color: _gold),
-                          SizedBox(width: 10),
-                          Expanded(
-                            child: Text(
-                              'ChatGPT \u0434\u043B\u044F \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u044F',
-                              style: TextStyle(
-                                color: FenyvoPalette.ink,
-                                fontSize: 18,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 18),
-                      const Text(
-                        '\u0421\u041E\u041E\u0411\u0429\u0415\u041D\u0418\u0415',
-                        style: TextStyle(
-                          color: _gold,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 1.1,
-                        ),
-                      ),
-                      const SizedBox(height: 7),
-                      Container(
-                        width: double.infinity,
-                        padding: const EdgeInsets.all(14),
-                        decoration: BoxDecoration(
-                          color: FenyvoPalette.surface,
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(
-                            color: _gold.withValues(alpha: 0.30),
-                          ),
-                        ),
-                        child: SelectableText(
-                          originalText,
-                          style: const TextStyle(
-                            color: FenyvoPalette.ink,
-                            fontSize: 15,
-                            height: 1.35,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 18),
-                      const Text(
-                        '\u0427\u0422\u041E \u0421\u0414\u0415\u041B\u0410\u0422\u042C',
-                        style: TextStyle(
-                          color: _gold,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 1.1,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: [
-                          actionButton(
-                            action: 'reply',
-                            icon: Icons.reply_rounded,
-                          ),
-                          actionButton(
-                            action: 'explain',
-                            icon: Icons.lightbulb_outline_rounded,
-                          ),
-                          actionButton(
-                            action: 'rewrite',
-                            icon: Icons.edit_note_rounded,
-                          ),
-                          actionButton(
-                            action: 'shorter',
-                            icon: Icons.compress_rounded,
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 14),
-                      SizedBox(
-                        width: double.infinity,
-                        child: FilledButton.icon(
-                          onPressed: isLoading ? null : performAction,
-                          style: FilledButton.styleFrom(
-                            backgroundColor: FenyvoPalette.blue,
-                            foregroundColor: FenyvoPalette.ink,
-                            disabledBackgroundColor: _gold.withValues(
-                              alpha: 0.35,
-                            ),
-                            padding: const EdgeInsets.symmetric(vertical: 13),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(15),
-                            ),
-                          ),
-                          icon: isLoading
-                              ? const SizedBox(
-                                  width: 18,
-                                  height: 18,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2.2,
-                                    color: FenyvoPalette.ink,
-                                  ),
-                                )
-                              : const Icon(Icons.auto_awesome_rounded),
-                          label: Text(
-                            isLoading
-                                ? 'ChatGPT \u0434\u0443\u043C\u0430\u0435\u0442...'
-                                : actionLabels[selectedAction] ?? '\u0412\u044B\u043F\u043E\u043B\u043D\u0438\u0442\u044C',
-                            style: const TextStyle(fontWeight: FontWeight.w800),
-                          ),
-                        ),
-                      ),
-                      if (errorText != null) ...[
-                        const SizedBox(height: 12),
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(12),
-                          decoration: BoxDecoration(
-                            color: Colors.red.withValues(alpha: 0.10),
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(
-                              color: Colors.redAccent.withValues(alpha: 0.45),
-                            ),
-                          ),
-                          child: Text(
-                            errorText!,
-                            style: const TextStyle(
-                              color: Colors.redAccent,
-                              fontSize: 13,
-                            ),
-                          ),
-                        ),
-                      ],
-                      if (resultText.isNotEmpty) ...[
-                        const SizedBox(height: 18),
-                        const Text(
-                          '\u0420\u0415\u0417\u0423\u041B\u042C\u0422\u0410\u0422',
-                          style: TextStyle(
-                            color: _gold,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: 1.1,
-                          ),
-                        ),
-                        const SizedBox(height: 7),
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(
-                            color: FenyvoPalette.surface,
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(
-                              color: _gold.withValues(alpha: 0.55),
-                            ),
-                          ),
-                          child: SelectableText(
-                            resultText,
-                            style: const TextStyle(
-                              color: FenyvoPalette.ink,
-                              fontSize: 16,
-                              height: 1.4,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 10),
-                        Row(
-                          children: [
-                            Expanded(
-                              child: OutlinedButton.icon(
-                                onPressed: () async {
-                                  await Clipboard.setData(
-                                    ClipboardData(text: resultText),
-                                  );
-
-                                  if (!sheetContext.mounted) {
-                                    return;
-                                  }
-
-                                  ScaffoldMessenger.of(
-                                    sheetContext,
-                                  ).showSnackBar(
-                                    const SnackBar(
-                                      content: Text(
-                                        '\u041E\u0442\u0432\u0435\u0442 ChatGPT \u0441\u043A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u043D',
-                                      ),
-                                      backgroundColor: FenyvoPalette.surface,
-                                      duration: Duration(milliseconds: 1000),
-                                    ),
-                                  );
-                                },
-                                style: OutlinedButton.styleFrom(
-                                  foregroundColor: _gold,
-                                  side: BorderSide(
-                                    color: _gold.withValues(alpha: 0.65),
-                                  ),
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 12,
-                                  ),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(15),
-                                  ),
-                                ),
-                                icon: const Icon(Icons.copy_rounded),
-                                label: const Text(
-                                  '\u041A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C',
-                                  style: TextStyle(fontWeight: FontWeight.w700),
-                                ),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: FilledButton.icon(
-                                onPressed: () {
-                                  final value = resultText.trim();
-
-                                  if (value.isEmpty) {
-                                    return;
-                                  }
-
-                                  Navigator.of(sheetContext).pop();
-
-                                  _messageController.text = value;
-                                  _messageController.selection =
-                                      TextSelection.collapsed(
-                                        offset: value.length,
-                                      );
-                                  _messageFocusNode.requestFocus();
-                                },
-                                style: FilledButton.styleFrom(
-                                  backgroundColor: FenyvoPalette.blue,
-                                  foregroundColor: FenyvoPalette.ink,
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 12,
-                                  ),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(15),
-                                  ),
-                                ),
-                                icon: const Icon(Icons.input_rounded),
-                                label: const Text(
-                                  '\u0412\u0441\u0442\u0430\u0432\u0438\u0442\u044C',
-                                  style: TextStyle(fontWeight: FontWeight.w800),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                      const SizedBox(height: 8),
-                      Text(
-                        '\u0422\u0435\u043A\u0441\u0442 \u043E\u0442\u043F\u0440\u0430\u0432\u043B\u044F\u0435\u0442\u0441\u044F \u0432 ChatGPT \u0442\u043E\u043B\u044C\u043A\u043E \u043F\u043E\u0441\u043B\u0435 \u0432\u044B\u0431\u043E\u0440\u0430 \u0434\u0435\u0439\u0441\u0442\u0432\u0438\u044F.',
-                        style: TextStyle(
-                          color: FenyvoPalette.ink.withValues(alpha: 0.45),
-                          fontSize: 11,
-                          height: 1.3,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  Future<void> _showAutoReplySettings() async {
-    if (!SocketService.instance.isConnected) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(_chatText('aiInternetRequired')),
-            backgroundColor: Colors.red,
-          ),
-        );
-      }
-
-      return;
-    }
-
-    const legacyGoal =
-        '\u041F\u043E\u0434\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0442\u044C \u043F\u043E\u043B\u0435\u0437\u043D\u044B\u0439, \u0443\u0432\u0430\u0436\u0438\u0442\u0435\u043B\u044C\u043D\u044B\u0439 \u0434\u0438\u0430\u043B\u043E\u0433 \u0438 \u043F\u043E\u043C\u043E\u0433\u0430\u0442\u044C \u043F\u0440\u0438\u0439\u0442\u0438 \u043A \u043D\u0443\u0436\u043D\u043E\u043C\u0443 \u0440\u0435\u0437\u0443\u043B\u044C\u0442\u0430\u0442\u0443.';
-    const legacyPrompt =
-        '\u041E\u0442\u0432\u0435\u0447\u0430\u0439 \u043A\u043E\u0440\u043E\u0442\u043A\u043E, \u0435\u0441\u0442\u0435\u0441\u0442\u0432\u0435\u043D\u043D\u043E \u0438 \u0434\u0440\u0443\u0436\u0435\u043B\u044E\u0431\u043D\u043E. \u041E\u0442\u0432\u0435\u0447\u0430\u0439 \u043D\u0430 \u044F\u0437\u044B\u043A\u0435 \u0441\u043E\u0431\u0435\u0441\u0435\u0434\u043D\u0438\u043A\u0430. \u041D\u0435 \u0434\u043E\u0431\u0430\u0432\u043B\u044F\u0439 \u043F\u043E\u044F\u0441\u043D\u0435\u043D\u0438\u0439 \u043E\u0442 \u0441\u0435\u0431\u044F.';
-    const legacyPromptWithEverything =
-        '\u041E\u0442\u0432\u0435\u0447\u0430\u0439 \u043A\u043E\u0440\u043E\u0442\u043A\u043E, \u0435\u0441\u0442\u0435\u0441\u0442\u0432\u0435\u043D\u043D\u043E \u0438 \u0434\u0440\u0443\u0436\u0435\u043B\u044E\u0431\u043D\u043E. \u041E\u0442\u0432\u0435\u0447\u0430\u0439 \u043D\u0430 \u044F\u0437\u044B\u043A\u0435 \u0441\u043E\u0431\u0435\u0441\u0435\u0434\u043D\u0438\u043A\u0430. \u041D\u0435 \u0434\u043E\u0431\u0430\u0432\u043B\u044F\u0439 \u043F\u043E\u044F\u0441\u043D\u0435\u043D\u0438\u0439 \u043E\u0442 \u0441\u0435\u0431\u044F. \u0413\u043E\u0432\u043E\u0440\u0438 \u043E\u0431\u043E \u0432\u0441\u0451\u043C.';
-    const legacyBoundaries =
-        '\u041D\u0435 \u0434\u0430\u0432\u0438, \u043D\u0435 \u0443\u0433\u0440\u043E\u0436\u0430\u0439, \u043D\u0435 \u043E\u0431\u043C\u0430\u043D\u044B\u0432\u0430\u0439 \u0438 \u043D\u0435 \u043C\u0430\u043D\u0438\u043F\u0443\u043B\u0438\u0440\u0443\u0439. \u0423\u0432\u0430\u0436\u0430\u0439 \u043E\u0442\u043A\u0430\u0437 \u0438 \u043F\u0440\u043E\u0441\u044C\u0431\u0443 \u043F\u0440\u0435\u043A\u0440\u0430\u0442\u0438\u0442\u044C \u043E\u0431\u0449\u0435\u043D\u0438\u0435.';
-    final goalController = TextEditingController(
-      text:
-          (_autoReplyGoal == legacyGoal ||
-              (_autoReplyGoal.startsWith(
-                    '\u041F\u043E\u0434\u0434\u0435\u0440\u0436\u0438\u0432\u0430\u0442\u044C \u043F\u043E\u043B\u0435\u0437\u043D\u044B\u0439',
-                  ) &&
-                  _autoReplyGoal.length < 220))
-          ? _chatText('autoGoalDefault')
-          : _autoReplyGoal,
-    );
-    final promptController = TextEditingController(
-      text:
-          (_autoReplyPrompt == legacyPrompt ||
-              _autoReplyPrompt == legacyPromptWithEverything ||
-              (_autoReplyPrompt.startsWith(
-                    '\u041E\u0442\u0432\u0435\u0447\u0430\u0439 \u043A\u043E\u0440\u043E\u0442\u043A\u043E',
-                  ) &&
-                  _autoReplyPrompt.contains(
-                    '\u044F\u0437\u044B\u043A\u0435 \u0441\u043E\u0431\u0435\u0441\u0435\u0434\u043D\u0438\u043A\u0430',
-                  )))
-          ? _chatText('autoPromptDefault')
-          : _autoReplyPrompt,
-    );
-    final contextController = TextEditingController(text: _autoReplyContext);
-    final boundariesController = TextEditingController(
-      text: _autoReplyBoundaries == legacyBoundaries
-          ? _chatText('autoBoundariesDefault')
-          : _autoReplyBoundaries,
-    );
-
-    var enabled = _autoReplyEnabled;
-    var mode = _autoReplyMode;
-    var idleSeconds = _autoReplyIdleSeconds;
-    var delaySeconds = _autoReplyDelaySeconds;
-
-    Widget buildLabel(String text) {
-      return Padding(
-        padding: const EdgeInsets.only(bottom: 8),
-        child: Text(
-          text,
-          style: const TextStyle(
-            color: FenyvoPalette.ink,
-            fontSize: 14,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
-      );
-    }
-
-    InputDecoration inputDecoration(String hint) {
-      return InputDecoration(
-        hintText: hint,
-        hintStyle: const TextStyle(color: FenyvoPalette.muted),
-        filled: true,
-        fillColor: FenyvoPalette.surface,
-        counterStyle: const TextStyle(color: FenyvoPalette.muted),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: FenyvoPalette.line),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: _gold),
-        ),
-      );
-    }
-
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      useSafeArea: true,
-      backgroundColor: Colors.transparent,
-      builder: (sheetContext) {
-        return StatefulBuilder(
-          builder: (sheetContext, setSheetState) {
-            final bottomInset = MediaQuery.viewInsetsOf(sheetContext).bottom;
-
-            return AnimatedPadding(
-              duration: const Duration(milliseconds: 180),
-              padding: EdgeInsets.only(bottom: bottomInset),
-              child: Container(
-                constraints: const BoxConstraints(maxWidth: 620),
-                decoration: const BoxDecoration(
-                  color: FenyvoPalette.canvas,
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-                ),
-                child: SingleChildScrollView(
-                  padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Center(
-                        child: Container(
-                          width: 44,
-                          height: 4,
-                          decoration: BoxDecoration(
-                            color: FenyvoPalette.line,
-                            borderRadius: BorderRadius.circular(99),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 18),
-                      Row(
-                        children: [
-                          Container(
-                            width: 44,
-                            height: 44,
-                            decoration: BoxDecoration(
-                              color: FenyvoPalette.blue.withValues(alpha: 0.12),
-                              shape: BoxShape.circle,
-                              border: Border.all(
-                                color: _gold.withValues(alpha: 0.55),
-                              ),
-                            ),
-                            child: const Icon(
-                              Icons.smart_toy_rounded,
-                              color: _gold,
-                            ),
-                          ),
-                          const SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  _chatText('aiAutoTitle'),
-                                  style: const TextStyle(
-                                    color: FenyvoPalette.ink,
-                                    fontSize: 18,
-                                    fontWeight: FontWeight.w800,
-                                  ),
-                                ),
-                                const SizedBox(height: 3),
-                                Text(
-                                  _chatText('aiSeparateSession', {
-                                    'user': widget.targetUser,
-                                  }),
-                                  style: const TextStyle(
-                                    color: FenyvoPalette.secondary,
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 18),
-                      Container(
-                        decoration: BoxDecoration(
-                          color: FenyvoPalette.surface,
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(
-                            color: enabled
-                                ? _gold.withValues(alpha: 0.55)
-                                : FenyvoPalette.line,
-                          ),
-                        ),
-                        child: SwitchListTile.adaptive(
-                          value: enabled,
-                          onChanged: (value) {
-                            setSheetState(() {
-                              enabled = value;
-                            });
-
-                            // V616: switching OFF is an emergency stop and is
-                            // applied to the server immediately. Switching ON
-                            // still waits for the Save button so the user can
-                            // finish goal/style/context settings first.
-                            if (!value) {
-                              SocketService.instance.setAutoReplySettings(
-                                peer: widget.targetUser,
-                                enabled: false,
-                                mode: mode,
-                                idleSeconds: idleSeconds,
-                                goal: goalController.text.trim(),
-                                prompt: promptController.text.trim(),
-                                context: contextController.text.trim(),
-                                boundaries: boundariesController.text.trim(),
-                                delaySeconds: delaySeconds,
-                              );
-
-                              if (mounted) {
-                                setState(() {
-                                  _autoReplyEnabled = false;
-                                });
-                              }
-                            }
-                          },
-                          title: Text(
-                            enabled
-                                ? _chatText('autoReplyEnabled')
-                                : _chatText('autoReplyDisabled'),
-                            style: const TextStyle(
-                              color: FenyvoPalette.ink,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                          subtitle: Text(
-                            _chatText('autoReplyDescription'),
-                            style: const TextStyle(
-                              color: FenyvoPalette.secondary,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 18),
-                      buildLabel(_chatText('aiParticipationMode')),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children:
-                            <Map<String, String>>[
-                              {
-                                'id': 'auto',
-                                'label': '\u26A1 ${_chatText('modeAuto')}',
-                              },
-                              {
-                                'id': 'suggest',
-                                'label':
-                                    '\u{1F4A1} ${_chatText('modeSuggest')}',
-                              },
-                              {
-                                'id': 'idle',
-                                'label': '\u23F3 ${_chatText('modeIdle')}',
-                              },
-                              {
-                                'id': 'until_goal',
-                                'label':
-                                    '\u{1F3AF} ${_chatText('modeUntilGoal')}',
-                              },
-                            ].map((item) {
-                              final id = item['id']!;
-                              final selected = mode == id;
-
-                              return ChoiceChip(
-                                label: Text(item['label']!),
-                                selected: selected,
-                                onSelected: (_) {
-                                  setSheetState(() {
-                                    mode = id;
-                                  });
-                                },
-                                selectedColor: _gold,
-                                backgroundColor: FenyvoPalette.surface,
-                                side: BorderSide(
-                                  color: selected ? _gold : FenyvoPalette.line,
-                                ),
-                                labelStyle: TextStyle(
-                                  color: selected
-                                      ? FenyvoPalette.ink
-                                      : FenyvoPalette.secondary,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                                showCheckmark: false,
-                              );
-                            }).toList(),
-                      ),
-                      const SizedBox(height: 10),
-                      Text(
-                        mode == 'suggest'
-                            ? '\u{1F4A1} ${_chatText('modeSuggestDescription')}'
-                            : mode == 'idle'
-                            ? '\u23F3 ${_chatText('modeIdleDescription')}'
-                            : mode == 'until_goal'
-                            ? '\u{1F3AF} ${_chatText('modeUntilGoalDescription')}'
-                            : '\u26A1 ${_chatText('modeAutoDescription')}',
-                        style: const TextStyle(
-                          color: FenyvoPalette.secondary,
-                          fontSize: 12,
-                          height: 1.35,
-                        ),
-                      ),
-                      if (mode == 'idle') ...[
-                        const SizedBox(height: 14),
-                        buildLabel(_chatText('idleDelayLabel')),
-                        Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: <int>[30, 60, 120, 300].map((seconds) {
-                            final selected = idleSeconds == seconds;
-                            final label = seconds < 60
-                                ? _chatText('secondsShort', {'count': seconds})
-                                : _chatText('minutesShort', {
-                                    'count': seconds ~/ 60,
-                                  });
-
-                            return ChoiceChip(
-                              label: Text(label),
-                              selected: selected,
-                              onSelected: (_) {
-                                setSheetState(() {
-                                  idleSeconds = seconds;
-                                });
-                              },
-                              selectedColor: _gold,
-                              backgroundColor: FenyvoPalette.surface,
-                              side: BorderSide(
-                                color: selected ? _gold : FenyvoPalette.line,
-                              ),
-                              labelStyle: TextStyle(
-                                color: selected
-                                    ? FenyvoPalette.ink
-                                    : FenyvoPalette.secondary,
-                                fontWeight: FontWeight.w700,
-                              ),
-                              showCheckmark: false,
-                            );
-                          }).toList(),
-                        ),
-                      ],
-                      const SizedBox(height: 18),
-                      buildLabel(_chatText('conversationGoal')),
-                      TextField(
-                        controller: goalController,
-                        maxLength: 500,
-                        minLines: 2,
-                        maxLines: 5,
-                        style: const TextStyle(color: FenyvoPalette.ink),
-                        decoration: inputDecoration(
-                          _chatText('conversationGoalHint'),
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      buildLabel(_chatText('conversationStyle')),
-                      TextField(
-                        controller: promptController,
-                        maxLength: 600,
-                        minLines: 2,
-                        maxLines: 5,
-                        style: const TextStyle(color: FenyvoPalette.ink),
-                        decoration: inputDecoration(
-                          _chatText('conversationStyleHint'),
-                        ),
-                      ),
-                      const SizedBox(height: 6),
-                      buildLabel(_chatText('aiContext')),
-                      TextField(
-                        controller: contextController,
-                        maxLength: 800,
-                        minLines: 2,
-                        maxLines: 6,
-                        style: const TextStyle(color: FenyvoPalette.ink),
-                        decoration: inputDecoration(_chatText('aiContextHint')),
-                      ),
-                      const SizedBox(height: 6),
-                      buildLabel(_chatText('aiBoundaries')),
-                      TextField(
-                        controller: boundariesController,
-                        maxLength: 500,
-                        minLines: 2,
-                        maxLines: 5,
-                        style: const TextStyle(color: FenyvoPalette.ink),
-                        decoration: inputDecoration(
-                          _chatText('aiBoundariesHint'),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      buildLabel(_chatText('replyDelay')),
-                      Wrap(
-                        spacing: 8,
-                        runSpacing: 8,
-                        children: <int>[3, 5, 10].map((seconds) {
-                          final selected = delaySeconds == seconds;
-
-                          return ChoiceChip(
-                            label: Text(
-                              _chatText('secondsShort', {'count': seconds}),
-                            ),
-                            selected: selected,
-                            onSelected: (_) {
-                              setSheetState(() {
-                                delaySeconds = seconds;
-                              });
-                            },
-                            selectedColor: _gold,
-                            backgroundColor: FenyvoPalette.surface,
-                            side: BorderSide(
-                              color: selected ? _gold : FenyvoPalette.line,
-                            ),
-                            labelStyle: TextStyle(
-                              color: selected
-                                  ? FenyvoPalette.ink
-                                  : FenyvoPalette.secondary,
-                              fontWeight: FontWeight.w700,
-                            ),
-                            showCheckmark: false,
-                          );
-                        }).toList(),
-                      ),
-                      const SizedBox(height: 16),
-                      Container(
-                        padding: const EdgeInsets.all(12),
-                        decoration: BoxDecoration(
-                          color: FenyvoPalette.blue.withValues(alpha: 0.07),
-                          borderRadius: BorderRadius.circular(13),
-                          border: Border.all(
-                            color: _gold.withValues(alpha: 0.20),
-                          ),
-                        ),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Icon(
-                              Icons.info_outline_rounded,
-                              color: _gold,
-                              size: 18,
-                            ),
-                            const SizedBox(width: 9),
-                            Expanded(
-                              child: Text(
-                                _chatText('autoReplyMemoryInfo'),
-                                style: const TextStyle(
-                                  color: FenyvoPalette.secondary,
-                                  fontSize: 12,
-                                  height: 1.35,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      SizedBox(
-                        width: double.infinity,
-                        child: OutlinedButton.icon(
-                          onPressed: () {
-                            SocketService.instance.clearAutoReplyHistory(
-                              widget.targetUser,
-                            );
-                          },
-                          style: OutlinedButton.styleFrom(
-                            foregroundColor: FenyvoPalette.secondary,
-                            side: const BorderSide(color: FenyvoPalette.line),
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                          ),
-                          icon: const Icon(Icons.restart_alt_rounded),
-                          label: Text(_chatText('restartAiDialog')),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      SizedBox(
-                        width: double.infinity,
-                        child: FilledButton.icon(
-                          onPressed: () {
-                            var goal = goalController.text.trim();
-                            var prompt = promptController.text.trim();
-                            final aiContext = contextController.text.trim();
-                            var boundaries = boundariesController.text.trim();
-
-                            if (goal.isEmpty) {
-                              goal = _chatText('autoGoalDefault');
-                            }
-
-                            if (prompt.isEmpty) {
-                              prompt = _chatText('autoPromptDefault');
-                            }
-
-                            if (boundaries.isEmpty) {
-                              boundaries = _chatText('autoBoundariesDefault');
-                            }
-
-                            SocketService.instance.setAutoReplySettings(
-                              peer: widget.targetUser,
-                              enabled: enabled,
-                              mode: mode,
-                              idleSeconds: idleSeconds,
-                              goal: goal,
-                              prompt: prompt,
-                              context: aiContext,
-                              boundaries: boundaries,
-                              delaySeconds: delaySeconds,
-                            );
-
-                            if (mounted) {
-                              setState(() {
-                                _autoReplyEnabled = enabled;
-                                _autoReplyMode = mode;
-                                _autoReplyIdleSeconds = idleSeconds;
-                                _autoReplyGoal = goal;
-                                _autoReplyPrompt = prompt;
-                                _autoReplyContext = aiContext;
-                                _autoReplyBoundaries = boundaries;
-                                _autoReplyDelaySeconds = delaySeconds;
-                                _autoReplyLoading = false;
-                              });
-                            }
-
-                            Navigator.of(sheetContext).pop();
-                          },
-                          style: FilledButton.styleFrom(
-                            backgroundColor: FenyvoPalette.blue,
-                            foregroundColor: FenyvoPalette.ink,
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(15),
-                            ),
-                          ),
-                          icon: const Icon(Icons.save_rounded),
-                          label: Text(
-                            _chatText('saveGoalAndStart'),
-                            style: const TextStyle(fontWeight: FontWeight.w900),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-
-    goalController.dispose();
-    promptController.dispose();
-    contextController.dispose();
-    boundariesController.dispose();
+  void _autoReplyApplyState(VoidCallback update) {
+    setState(update);
   }
 
   Future<void> _editMessage(Map<String, dynamic> message) async {
@@ -7201,7 +5822,8 @@ class _ChatScreenState extends State<ChatScreen>
         messageFrom != currentUser ||
         messageId.isEmpty ||
         oldText.isEmpty ||
-        forwardedFrom.isNotEmpty) {
+        forwardedFrom.isNotEmpty ||
+        message['e2ee'] != true) {
       return;
     }
 
@@ -7384,11 +6006,28 @@ class _ChatScreenState extends State<ChatScreen>
       return;
     }
 
-    SocketService.instance.editMessage(
-      messageId: messageId,
+    // The legacy plaintext edit API must never be used here.
+    // The secure sender validates the original author, recipient,
+    // encrypted status and operation before Signal encryption.
+    final accepted = SocketService.instance.sendPrivateE2eeEdit(
+      originalMessage: Map<String, dynamic>.from(message),
       to: widget.targetUser,
       newText: editedText,
     );
+
+    if (!accepted && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _videoNoteText(
+              'Не удалось отправить защищённое редактирование',
+              'Не вдалося надіслати захищене редагування',
+              'Could not send encrypted edit',
+            ),
+          ),
+        ),
+      );
+    }
   }
 
   Future<void> _deleteMessageForMe(Map<String, dynamic> message) async {
@@ -7806,7 +6445,7 @@ class _ChatScreenState extends State<ChatScreen>
             mimeType: mimeType,
             messageType: type,
             maxBytes: maxBytes,
-            encryptForE2ee: SocketService.instance.isE2eeActiveWith(user),
+            encryptForE2ee: true,
           );
           if (type == 'voice') {
             final rawDuration =
@@ -7868,639 +6507,10 @@ class _ChatScreenState extends State<ChatScreen>
     );
   }
 
-  Future<void> _forwardMessage(Map<String, dynamic> message) async {
-    final currentUser = SocketService.instance.currentUser ?? '';
-
-    final messageType = PrivateAttachmentHelpers.messageType(message);
-    final rawText = message['text']?.toString().trim() ?? '';
-    final text = rawText.isNotEmpty
-        ? rawText
-        : messageType == 'voice'
-        ? '🎤 Голосовое сообщение'
-        : messageType == 'image'
-        ? '📷 Фото'
-        : messageType == 'video'
-        ? '🎥 Видео'
-        : messageType == 'file'
-        ? '📎 ${_privateAttachmentName(message)}'
-        : '';
-
-    if (currentUser.isEmpty || (messageType == 'text' && text.isEmpty)) {
-      return;
-    }
-
-    final users = StorageService.getChatUsers(currentUser)
-      ..removeWhere((user) => user.trim().isEmpty || user == currentUser)
-      ..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
-
-    if (users.isEmpty) {
-      if (!mounted) {
-        return;
-      }
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            '\u041D\u0435\u0442 \u0434\u0440\u0443\u0433\u0438\u0445 \u0447\u0430\u0442\u043E\u0432 \u0434\u043B\u044F \u043F\u0435\u0440\u0435\u0441\u044B\u043B\u043A\u0438',
-          ),
-          backgroundColor: FenyvoPalette.surface,
-        ),
-      );
-
-      return;
-    }
-
-    final forwardedFrom =
-        message['forwardedFrom']?.toString().trim().isNotEmpty == true
-        ? message['forwardedFrom'].toString().trim()
-        : message['from']?.toString().trim() ?? currentUser;
-
-    final commentController = TextEditingController();
-
-    final searchController = TextEditingController();
-
-    final selectedUsers = <String>{};
-    var searchQuery = '';
-
-    if (!mounted) {
-      return;
-    }
-
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (sheetContext) {
-        return StatefulBuilder(
-          builder: (context, setSheetState) {
-            final filteredUsers = users
-                .where((user) => user.toLowerCase().contains(searchQuery))
-                .toList();
-
-            final keyboardHeight = MediaQuery.viewInsetsOf(sheetContext).bottom;
-
-            final screenHeight = MediaQuery.sizeOf(sheetContext).height;
-
-            return AnimatedPadding(
-              duration: const Duration(milliseconds: 180),
-              curve: Curves.easeOut,
-              padding: EdgeInsets.only(bottom: keyboardHeight),
-              child: SafeArea(
-                child: Container(
-                  constraints: BoxConstraints(
-                    maxHeight: (screenHeight - keyboardHeight) * 0.92,
-                  ),
-                  decoration: const BoxDecoration(
-                    color: FenyvoPalette.surface,
-                    borderRadius: BorderRadius.vertical(
-                      top: Radius.circular(24),
-                    ),
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const SizedBox(height: 10),
-                      Container(
-                        width: 42,
-                        height: 4,
-                        decoration: BoxDecoration(
-                          color: FenyvoPalette.line,
-                          borderRadius: BorderRadius.circular(3),
-                        ),
-                      ),
-                      const Padding(
-                        padding: EdgeInsets.fromLTRB(18, 16, 18, 12),
-                        child: Row(
-                          children: [
-                            Icon(Icons.forward_rounded, color: _gold),
-                            SizedBox(width: 10),
-                            Text(
-                              '\u041F\u0435\u0440\u0435\u0441\u043B\u0430\u0442\u044C \u0441\u043E\u043E\u0431\u0449\u0435\u043D\u0438\u0435',
-                              style: TextStyle(
-                                color: FenyvoPalette.ink,
-                                fontSize: 18,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const Divider(height: 1, color: Color(0x33171B20)),
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
-                        child: TextField(
-                          controller: searchController,
-                          onChanged: (value) {
-                            setSheetState(() {
-                              searchQuery = value.trim().toLowerCase();
-                            });
-                          },
-                          style: const TextStyle(color: FenyvoPalette.ink),
-                          decoration: InputDecoration(
-                            hintText: '\u041F\u043E\u0438\u0441\u043A \u043A\u043E\u043D\u0442\u0430\u043A\u0442\u0430',
-                            hintStyle: const TextStyle(
-                              color: FenyvoPalette.muted,
-                            ),
-                            prefixIcon: const Icon(
-                              Icons.search_rounded,
-                              color: _gold,
-                            ),
-                            suffixIcon: searchQuery.isEmpty
-                                ? null
-                                : IconButton(
-                                    onPressed: () {
-                                      searchController.clear();
-                                      setSheetState(() {
-                                        searchQuery = '';
-                                      });
-                                    },
-                                    icon: const Icon(
-                                      Icons.close,
-                                      color: FenyvoPalette.secondary,
-                                    ),
-                                  ),
-                            filled: true,
-                            fillColor: FenyvoPalette.surface,
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: 14,
-                              vertical: 12,
-                            ),
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(16),
-                              borderSide: BorderSide.none,
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(16),
-                              borderSide: const BorderSide(
-                                color: _gold,
-                                width: 1,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                      if (selectedUsers.isNotEmpty)
-                        SizedBox(
-                          height: 42,
-                          child: ListView(
-                            scrollDirection: Axis.horizontal,
-                            padding: const EdgeInsets.symmetric(horizontal: 14),
-                            children: selectedUsers
-                                .map(
-                                  (user) => Padding(
-                                    padding: const EdgeInsets.only(right: 7),
-                                    child: InputChip(
-                                      label: Text(user),
-                                      labelStyle: const TextStyle(
-                                        color: FenyvoPalette.ink,
-                                        fontWeight: FontWeight.w600,
-                                      ),
-                                      backgroundColor: FenyvoPalette.blue,
-                                      deleteIconColor: Colors.black,
-                                      side: BorderSide.none,
-                                      onDeleted: () {
-                                        setSheetState(() {
-                                          selectedUsers.remove(user);
-                                        });
-                                      },
-                                    ),
-                                  ),
-                                )
-                                .toList(),
-                          ),
-                        ),
-                      Flexible(
-                        child: ListView.builder(
-                          shrinkWrap: true,
-                          itemCount: filteredUsers.length,
-                          itemBuilder: (context, index) {
-                            final user = filteredUsers[index];
-                            final avatar = StorageService.getAvatar(user);
-                            ImageProvider? imageProvider;
-
-                            if (avatar != null && avatar.isNotEmpty) {
-                              try {
-                                imageProvider = MemoryImage(
-                                  base64Decode(avatar),
-                                );
-                              } catch (_) {
-                                imageProvider = null;
-                              }
-                            }
-
-                            return ListTile(
-                              leading: CircleAvatar(
-                                backgroundColor: FenyvoPalette.surface,
-                                backgroundImage: imageProvider,
-                                child: imageProvider == null
-                                    ? Text(
-                                        user.isEmpty
-                                            ? '?'
-                                            : user[0].toUpperCase(),
-                                        style: const TextStyle(
-                                          color: _gold,
-                                          fontWeight: FontWeight.bold,
-                                        ),
-                                      )
-                                    : null,
-                              ),
-                              title: Text(
-                                user,
-                                style: const TextStyle(
-                                  color: FenyvoPalette.ink,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                              trailing: AnimatedContainer(
-                                duration: const Duration(milliseconds: 160),
-                                width: 27,
-                                height: 27,
-                                decoration: BoxDecoration(
-                                  color: selectedUsers.contains(user)
-                                      ? FenyvoPalette.blue
-                                      : Colors.transparent,
-                                  shape: BoxShape.circle,
-                                  border: Border.all(color: _gold, width: 1.3),
-                                ),
-                                child: selectedUsers.contains(user)
-                                    ? const Icon(
-                                        Icons.check,
-                                        color: FenyvoPalette.ink,
-                                        size: 18,
-                                      )
-                                    : null,
-                              ),
-                              onTap: () {
-                                setSheetState(() {
-                                  if (!selectedUsers.add(user)) {
-                                    selectedUsers.remove(user);
-                                  }
-                                });
-                              },
-                            );
-                          },
-                        ),
-                      ),
-                      const Divider(height: 1, color: Color(0x33171B20)),
-                      Container(
-                        width: double.infinity,
-                        margin: const EdgeInsets.fromLTRB(16, 10, 16, 8),
-                        padding: const EdgeInsets.all(10),
-                        decoration: BoxDecoration(
-                          color: FenyvoPalette.surface,
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(
-                            color: _gold.withValues(alpha: 0.35),
-                          ),
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              '\u21AA ' +
-                                  AppLanguageService.instance
-                                      .text('chatForwardedFromPeerLabelV2')
-                                      .replaceAll('{user}', forwardedFrom),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                color: _gold,
-                                fontSize: 11,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            const SizedBox(height: 4),
-                            Text(
-                              text,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                color: FenyvoPalette.secondary,
-                                fontSize: 12,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        child: TextField(
-                          controller: commentController,
-                          minLines: 1,
-                          maxLines: 3,
-                          style: const TextStyle(color: FenyvoPalette.ink),
-                          decoration: InputDecoration(
-                            hintText: '\u0414\u043E\u0431\u0430\u0432\u0438\u0442\u044C \u043A\u043E\u043C\u043C\u0435\u043D\u0442\u0430\u0440\u0438\u0439\u2026',
-                            hintStyle: const TextStyle(
-                              color: FenyvoPalette.muted,
-                            ),
-                            prefixIcon: const Icon(
-                              Icons.chat_bubble_outline_rounded,
-                              color: _gold,
-                            ),
-                            filled: true,
-                            fillColor: FenyvoPalette.surface,
-                            border: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(16),
-                              borderSide: BorderSide.none,
-                            ),
-                            focusedBorder: OutlineInputBorder(
-                              borderRadius: BorderRadius.circular(16),
-                              borderSide: const BorderSide(
-                                color: _gold,
-                                width: 1,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 10, 16, 14),
-                        child: SizedBox(
-                          width: double.infinity,
-                          height: 48,
-                          child: ElevatedButton.icon(
-                            onPressed: selectedUsers.isEmpty
-                                ? null
-                                : () {
-                                    final comment = commentController.text
-                                        .trim();
-                                    final recipients = selectedUsers.toList();
-
-                                    Navigator.of(sheetContext).pop();
-
-                                    unawaited(
-                                      _sendForwardedMessage(
-                                        message: message,
-                                        recipients: recipients,
-                                        forwardedFrom: forwardedFrom,
-                                        comment: comment,
-                                      ),
-                                    );
-                                  },
-                            icon: const Icon(Icons.send_rounded),
-                            label: Text(
-                              selectedUsers.isEmpty
-                                  ? '\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u043F\u043E\u043B\u0443\u0447\u0430\u0442\u0435\u043B\u044F'
-                                  : selectedUsers.length == 1
-                                  ? '\u041E\u0442\u043F\u0440\u0430\u0432\u0438\u0442\u044C'
-                                  : '\u041E\u0442\u043F\u0440\u0430\u0432\u0438\u0442\u044C (${selectedUsers.length})',
-                            ),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: FenyvoPalette.blue,
-                              foregroundColor: FenyvoPalette.ink,
-                              disabledBackgroundColor: FenyvoPalette.surface,
-                              disabledForegroundColor: FenyvoPalette.muted,
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                              textStyle: const TextStyle(
-                                fontSize: 15,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            );
-          },
-        );
-      },
-    );
-
-    commentController.dispose();
-    searchController.dispose();
-  }
-
   // ========================================
   // \u041A\u041E\u041C\u041F\u0410\u041A\u0422\u041D\u0410\u042F \u041A\u041D\u041E\u041F\u041A\u0410 \u0420\u0415\u0410\u041A\u0426\u0418\u0418
   // ========================================
 
-  Widget _buildQuickReactionButton({
-    String? emoji,
-    IconData? icon,
-    Color? iconColor,
-    required VoidCallback onTap,
-  }) {
-    return InkWell(
-      borderRadius: BorderRadius.circular(22),
-      onTap: onTap,
-      child: Container(
-        width: 40,
-        height: 40,
-        alignment: Alignment.center,
-        child: icon != null
-            ? Icon(icon, color: iconColor ?? FenyvoPalette.ink, size: 26)
-            : Text(emoji ?? '', style: const TextStyle(fontSize: 24)),
-      ),
-    );
-  }
-
-  // ========================================
-  // \u041F\u041E\u041B\u041D\u042B\u0419 \u0412\u042B\u0411\u041E\u0420 \u0420\u0415\u0410\u041A\u0426\u0418\u0419
-  // ========================================
-
-  Future<void> _showReactionPicker(Map<String, dynamic> message) async {
-    if (!mounted) return;
-
-    final currentUser = SocketService.instance.currentUser ?? '';
-    final selectedReaction = currentUser.isEmpty
-        ? ''
-        : _getMessageReactions(message)[currentUser] ?? '';
-
-    await showModalBottomSheet<void>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (sheetContext) {
-        final sheetHeight = MediaQuery.sizeOf(sheetContext).height * 0.50;
-
-        return SafeArea(
-          top: false,
-          child: Container(
-            height: sheetHeight,
-            decoration: const BoxDecoration(
-              color: FenyvoPalette.surface,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-              border: Border(top: BorderSide(color: _gold, width: 1.2)),
-            ),
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 18),
-            child: Column(
-              children: [
-                Container(
-                  width: 42,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: FenyvoPalette.line,
-                    borderRadius: BorderRadius.circular(3),
-                  ),
-                ),
-                const SizedBox(height: 14),
-                const Row(
-                  children: [
-                    Icon(Icons.emoji_emotions_outlined, color: _gold),
-                    SizedBox(width: 10),
-                    Text(
-                      '\u0412\u044B\u0431\u0435\u0440\u0438\u0442\u0435 \u0440\u0435\u0430\u043A\u0446\u0438\u044E',
-                      style: TextStyle(
-                        color: FenyvoPalette.ink,
-                        fontSize: 17,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 14),
-                Expanded(
-                  child: GridView.builder(
-                    itemCount: _supportedReactions.length,
-                    gridDelegate:
-                        const SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: 6,
-                          mainAxisSpacing: 8,
-                          crossAxisSpacing: 8,
-                        ),
-                    itemBuilder: (context, index) {
-                      final reaction = _supportedReactions[index];
-                      final selected = reaction == selectedReaction;
-                      return InkWell(
-                        borderRadius: BorderRadius.circular(16),
-                        onTap: () {
-                          Navigator.of(sheetContext).pop();
-                          Future<void>.delayed(
-                            const Duration(milliseconds: 60),
-                            () {
-                              if (!mounted) return;
-                              _sendReaction(message, reaction);
-                            },
-                          );
-                        },
-                        child: Container(
-                          alignment: Alignment.center,
-                          decoration: BoxDecoration(
-                            color: selected
-                                ? FenyvoPalette.blue.withValues(alpha: 0.20)
-                                : FenyvoPalette.surface.withValues(alpha: 0.42),
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(
-                              color: _gold.withValues(
-                                alpha: selected ? 1.0 : 0.45,
-                              ),
-                            ),
-                          ),
-                          child: Text(
-                            reaction,
-                            style: const TextStyle(fontSize: 28),
-                          ),
-                        ),
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-  // ========================================
-  // \u041A\u041E\u041C\u041F\u0410\u041A\u0422\u041D\u0410\u042F \u0421\u0422\u0420\u041E\u041A\u0410 \u041C\u0415\u041D\u042E
-  // ========================================
-
-  Widget _buildMessageMenuItem({
-    required IconData icon,
-    required String title,
-    String? subtitle,
-    required VoidCallback onTap,
-    bool danger = false,
-  }) {
-    final color = danger ? const Color(0xFFFF4D4D) : FenyvoPalette.ink;
-
-    return InkWell(
-      onTap: onTap,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 8),
-        child: Row(
-          children: [
-            SizedBox(
-              width: 37,
-              child: Icon(
-                icon,
-                color: danger ? const Color(0xFFFF4D4D) : _gold,
-                size: 22,
-              ),
-            ),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    style: TextStyle(
-                      color: color,
-                      fontSize: 15.5,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  if (subtitle != null && subtitle.isNotEmpty) ...[
-                    const SizedBox(height: 1),
-                    Text(
-                      subtitle,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        color: danger
-                            ? const Color(0xFFFF6A6A)
-                            : _gold.withValues(alpha: 0.78),
-                        fontSize: 10.5,
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  PopupMenuItem<String> _buildDesktopMessageContextItem({
-    required String value,
-    required IconData icon,
-    required String label,
-    bool danger = false,
-  }) {
-    final itemColor = danger ? const Color(0xFFFF6262) : FenyvoPalette.ink;
-
-    return PopupMenuItem<String>(
-      value: value,
-      height: 40,
-      child: Row(
-        children: [
-          Icon(icon, size: 18, color: danger ? const Color(0xFFFF6262) : _gold),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              label,
-              style: TextStyle(
-                color: itemColor,
-                fontSize: 13.5,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // LEGACY_MEDIA_REGRANT_UI_V1
   bool _canOfferLegacyMediaAccess(Map<String, dynamic> message) {
     final socket = SocketService.instance;
     final me = socket.currentUser ?? '';
@@ -8556,177 +6566,6 @@ class _ChatScreenState extends State<ChatScreen>
         },
       ),
     );
-  }
-
-  Future<void> _showDesktopMessageContextMenu(
-    Map<String, dynamic> message,
-    Offset globalPosition,
-  ) async {
-    if (!mounted || !Platform.isWindows) {
-      return;
-    }
-
-    final overlayState = Overlay.of(context);
-
-    final overlayObject = overlayState.context.findRenderObject();
-
-    if (overlayObject is! RenderBox) {
-      return;
-    }
-
-    final localPosition = overlayObject.globalToLocal(globalPosition);
-
-    final isMe = message['isMe'] == true;
-
-    final isE2ee = message['e2ee'] == true;
-
-    final forwardedFrom = message['forwardedFrom']?.toString().trim() ?? '';
-
-    final isPinned = _isMessagePinned(message);
-
-    final result = await showMenu<String>(
-      context: context,
-      position: RelativeRect.fromLTRB(
-        localPosition.dx,
-        localPosition.dy,
-        overlayObject.size.width - localPosition.dx,
-        overlayObject.size.height - localPosition.dy,
-      ),
-      color: FenyvoPalette.surface,
-      elevation: 14,
-      shadowColor: Colors.black.withValues(alpha: 0.72),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
-        side: BorderSide(color: _gold.withValues(alpha: 0.34), width: 0.8),
-      ),
-      items: [
-        _buildDesktopMessageContextItem(
-          value: 'save',
-          icon: Icons.bookmark_add_outlined,
-          label: _chatText('save'),
-        ),
-        _buildDesktopMessageContextItem(
-          value: 'reply',
-          icon: Icons.reply_rounded,
-          label: _chatText('reply'),
-        ),
-        _buildDesktopMessageContextItem(
-          value: 'copy',
-          icon: Icons.copy_rounded,
-          label: _chatText('copy'),
-        ),
-        _buildDesktopMessageContextItem(
-          value: 'forward',
-          icon: Icons.forward_rounded,
-          label: _chatText('forward'),
-        ),
-        if (_canOfferLegacyMediaAccess(message))
-          _buildDesktopMessageContextItem(
-            value: 'legacy_media_access',
-            icon: Icons.lock_open_rounded,
-            label: _legacyMediaAccessText(
-              'Открыть доступ',
-              'Надати доступ',
-              'Grant access',
-            ),
-          ),
-        if (isMe && forwardedFrom.isEmpty && !isE2ee)
-          _buildDesktopMessageContextItem(
-            value: 'edit',
-            icon: Icons.edit_rounded,
-            label: _chatText('edit'),
-          ),
-        const PopupMenuDivider(height: 8),
-        _buildDesktopMessageContextItem(
-          value: 'heart',
-          icon: Icons.favorite_rounded,
-          label: '${_chatText('reaction')} ❤️',
-        ),
-        if (!isE2ee)
-          _buildDesktopMessageContextItem(
-            value: 'translate',
-            icon: Icons.translate_rounded,
-            label: _chatText('translate'),
-          ),
-        if (!isE2ee)
-          _buildDesktopMessageContextItem(
-            value: 'chatgpt',
-            icon: Icons.auto_awesome_rounded,
-            label: 'ChatGPT',
-          ),
-        _buildDesktopMessageContextItem(
-          value: 'pin',
-          icon: isPinned ? Icons.push_pin_outlined : Icons.push_pin_rounded,
-          label: isPinned ? _chatText('unpin') : _chatText('pin'),
-        ),
-        const PopupMenuDivider(height: 8),
-        if (isMe)
-          _buildDesktopMessageContextItem(
-            value: 'delete_everyone',
-            icon: Icons.delete_sweep_rounded,
-            label: _chatText('deleteForEveryone'),
-            danger: true,
-          ),
-        _buildDesktopMessageContextItem(
-          value: 'delete_me',
-          icon: Icons.delete_rounded,
-          label: _chatText('delete'),
-          danger: true,
-        ),
-      ],
-    );
-
-    if (!mounted || result == null) {
-      return;
-    }
-
-    switch (result) {
-      case 'save':
-        unawaited(_saveToSaved(message));
-        break;
-      case 'reply':
-        _startReply(message);
-        break;
-
-      case 'copy':
-        unawaited(_copyMessageText(message));
-        break;
-
-      case 'forward':
-        unawaited(_forwardMessage(message));
-        break;
-
-      case 'legacy_media_access':
-        unawaited(_showLegacyMediaAccess(message));
-        break;
-      case 'edit':
-        unawaited(_editMessage(message));
-        break;
-
-      case 'heart':
-        _sendReaction(message, '\u2764\uFE0F');
-        break;
-
-      case 'translate':
-        unawaited(_translateMessage(message));
-        break;
-
-      case 'chatgpt':
-        unawaited(_showChatGptSheet(message));
-        break;
-
-      case 'pin':
-        _togglePinnedMessage(message);
-        break;
-
-      case 'delete_everyone':
-        unawaited(_deleteMessageForEveryone(message));
-        break;
-
-      case 'delete_me':
-        unawaited(_deleteMessageForMe(message));
-        break;
-    }
   }
 
   Future<void> _saveToSaved(Map<String, dynamic> message) async {
@@ -8917,6 +6756,48 @@ class _ChatScreenState extends State<ChatScreen>
                                 );
                               },
                             ),
+                            // FENYVO_MEDIA_DOWNLOAD_MENU_974
+                            if (message['messageType']
+                                        ?.toString()
+                                        .trim() ==
+                                    'voice' ||
+                                const <String>[
+                                  'image',
+                                  'video',
+                                  'file',
+                                  'document',
+                                  'audio',
+                                ].contains(
+                                  PrivateAttachmentHelpers.messageType(
+                                    message,
+                                  ),
+                                )) ...[
+                              Divider(
+                                height: 1,
+                                thickness: 0.6,
+                                color: _gold.withValues(alpha: 0.15),
+                              ),
+                              _buildMessageMenuItem(
+                                icon: Icons.download_rounded,
+                                title: _legacyMediaAccessText(
+                                  'Скачать на телефон',
+                                  'Завантажити на телефон',
+                                  'Download to device',
+                                ),
+                                subtitle: _legacyMediaAccessText(
+                                  'Сохранить файл в память устройства',
+                                  'Зберегти файл у пам’ять пристрою',
+                                  'Save the file to this device',
+                                ),
+                                onTap: () {
+                                  closeAndRun(() {
+                                    unawaited(
+                                      _downloadPrivateMessageMedia(message),
+                                    );
+                                  });
+                                },
+                              ),
+                            ],
                             _buildMessageMenuItem(
                               icon: Icons.reply_rounded,
                               title: _chatText('reply'),
@@ -9157,848 +7038,9 @@ class _ChatScreenState extends State<ChatScreen>
     );
   }
 
-  Widget _buildDesktopQuickMessageAction({
-    required IconData icon,
-    required String tooltip,
-    required bool isMe,
-    required VoidCallback onTap,
-  }) {
-    final foreground = isMe
-        ? FenyvoPalette.secondary
-        : _gold.withValues(alpha: 0.88);
-
-    return Tooltip(
-      message: tooltip,
-      waitDuration: const Duration(milliseconds: 350),
-      child: MouseRegion(
-        cursor: SystemMouseCursors.click,
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTap: onTap,
-          child: Container(
-            width: 24,
-            height: 24,
-            alignment: Alignment.center,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: isMe
-                  ? FenyvoPalette.surface.withValues(alpha: 0.075)
-                  : FenyvoPalette.blue.withValues(alpha: 0.075),
-              border: Border.all(
-                color: isMe
-                    ? FenyvoPalette.ink.withValues(alpha: 0.14)
-                    : _gold.withValues(alpha: 0.16),
-                width: 0.7,
-              ),
-            ),
-            child: Icon(icon, size: 14, color: foreground),
-          ),
-        ),
-      ),
-    );
-  }
-
-  // ========================================
-  // \u041E\u0414\u041D\u041E \u0421\u041E\u041E\u0411\u0429\u0415\u041D\u0418\u0415
-  // ========================================
-
-  Widget _buildSharedContactCard(
-    Map<String, dynamic> contact, {
-    required bool isMe,
-  }) {
-    final username = contact['username']?.toString().trim() ?? '';
-    final name = contact['name']?.toString().trim() ?? '';
-    final title = name.isNotEmpty ? name : username;
-    final initial = title.isNotEmpty
-        ? title.substring(0, 1).toUpperCase()
-        : '?';
-
-    return Container(
-      constraints: const BoxConstraints(minWidth: 220, maxWidth: 320),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: isMe
-            ? FenyvoPalette.surface.withValues(alpha: .18)
-            : FenyvoPalette.blue.withValues(alpha: .10),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: isMe ? FenyvoPalette.line : _gold.withValues(alpha: .42),
-        ),
-      ),
-      child: Row(
-        children: [
-          CircleAvatar(
-            radius: 23,
-            backgroundColor: FenyvoPalette.surfaceRaised,
-            child: Text(
-              initial,
-              style: const TextStyle(
-                color: _gold,
-                fontSize: 18,
-                fontWeight: FontWeight.w800,
-              ),
-            ),
-          ),
-          const SizedBox(width: 11),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: FenyvoPalette.ink,
-                    fontSize: 15,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                if (username.isNotEmpty) ...[
-                  const SizedBox(height: 2),
-                  Text(
-                    '@$username',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: FenyvoPalette.secondary,
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          const Icon(Icons.person_rounded, color: _gold, size: 22),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildMessageBubble(Map<String, dynamic> message) {
-    if (message['localCallEntry'] == true) {
-      return _buildCallHistoryBubble(message);
-    }
-    final isMe = message['isMe'] == true;
-
-    final isAiGenerated =
-        message['aiGenerated'] == true || message['autoReply'] == true;
-
-    final isE2ee = message['e2ee'] == true;
-
-    final isVoiceMessage = _isVoiceMessage(message);
-
-    final privateMessageType = PrivateAttachmentHelpers.messageType(message);
-
-    final isPrivateMediaMessage =
-        privateMessageType == 'image' ||
-        privateMessageType == 'video' ||
-        privateMessageType == 'file';
-
-    final text = message['text']?.toString() ?? '';
-    Map<String, dynamic>? sharedContact;
-    final rawSharedContact = message['sharedContact'];
-    if (rawSharedContact is Map) {
-      final parsed = Map<String, dynamic>.from(rawSharedContact);
-      if (parsed['username']?.toString().trim().isNotEmpty == true) {
-        sharedContact = parsed;
-      }
-    }
-
-    final from = message['from']?.toString() ?? '';
-
-    final forwardedFrom = message['forwardedFrom']?.toString().trim() ?? '';
-
-    final forwardComment = message['forwardComment']?.toString().trim() ?? '';
-
-    final isWindowsDesktop = Platform.isWindows;
-
-    final messageId = _getMessageId(message);
-
-    final isHovered = isWindowsDesktop && _hoveredMessageId == messageId;
-
-    final showDesktopActions = isHovered;
-
-    final isPinnedHighlight = _highlightedMessageId == messageId;
-
-    final bubbleMaxWidth = isWindowsDesktop
-        ? forwardedFrom.isNotEmpty
-              ? 520.0
-              : 480.0
-        : MediaQuery.of(context).size.width * 0.7;
-
-    final timeStr = _formatTime(message['time']);
-
-    final isEdited =
-        message['isEdited'] == true ||
-        (message['editedAt']?.toString().trim().isNotEmpty ?? false);
-
-    Map<String, dynamic>? replyTo;
-
-    final rawReplyTo = message['replyTo'];
-
-    if (rawReplyTo is Map) {
-      replyTo = Map<String, dynamic>.from(rawReplyTo);
-    }
-
-    final signalBorder = isPinnedHighlight
-        ? BorderSide(color: isMe ? FenyvoPalette.ink : _gold, width: 2)
-        : isHovered
-        ? BorderSide(
-            color: isMe
-                ? FenyvoPalette.ink.withValues(alpha: .30)
-                : _gold.withValues(alpha: .52),
-            width: .9,
-          )
-        : BorderSide(
-            color: isMe
-                ? _gold.withValues(alpha: .38)
-                : FenyvoPalette.line.withValues(alpha: .88),
-            width: .75,
-          );
-    final signalShape = isWindowsDesktop
-        ? RoundedRectangleBorder(
-            borderRadius: BorderRadius.only(
-              topLeft: Radius.circular(isMe ? 18 : 6),
-              topRight: Radius.circular(isMe ? 6 : 18),
-              bottomLeft: const Radius.circular(18),
-              bottomRight: const Radius.circular(18),
-            ),
-            side: signalBorder,
-          )
-        : BeveledRectangleBorder(
-            borderRadius: BorderRadius.only(
-              topLeft: Radius.circular(isMe ? 13 : 5),
-              topRight: Radius.circular(isMe ? 5 : 13),
-              bottomRight: Radius.circular(isMe ? 13 : 5),
-              bottomLeft: Radius.circular(isMe ? 5 : 13),
-            ),
-            side: signalBorder,
-          );
-
-    return Align(
-      alignment: isMe ? Alignment.centerRight : Alignment.centerLeft,
-      child: MouseRegion(
-        cursor: isWindowsDesktop ? SystemMouseCursors.basic : MouseCursor.defer,
-        onEnter: isWindowsDesktop
-            ? (_) {
-                if (_hoveredMessageId != messageId) {
-                  setState(() {
-                    _hoveredMessageId = messageId;
-                  });
-                }
-              }
-            : null,
-        onExit: isWindowsDesktop
-            ? (_) {
-                if (_hoveredMessageId == messageId) {
-                  setState(() {
-                    _hoveredMessageId = null;
-                  });
-                }
-              }
-            : null,
-        child: GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onLongPress: () {
-            _showMessageActionMenu(message);
-          },
-          onDoubleTap: isWindowsDesktop
-              ? () {
-                  _startReply(message);
-                }
-              : null,
-          onSecondaryTapDown: isWindowsDesktop
-              ? (details) {
-                  unawaited(
-                    _showDesktopMessageContextMenu(
-                      message,
-                      details.globalPosition,
-                    ),
-                  );
-                }
-              : null,
-          child: Padding(
-            padding: EdgeInsets.only(
-              top: isWindowsDesktop ? 2 : 4,
-              bottom: isWindowsDesktop ? 8 : 18,
-            ),
-            child: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                AnimatedContainer(
-                  duration: const Duration(milliseconds: 150),
-                  curve: Curves.easeOutCubic,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 16,
-                    vertical: 10,
-                  ),
-                  constraints: BoxConstraints(maxWidth: bubbleMaxWidth),
-                  decoration: ShapeDecoration(
-                    gradient: isMe
-                        ? const LinearGradient(
-                            colors: [
-                              FenyvoPalette.surfaceRaised,
-                              FenyvoPalette.blue,
-                            ],
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                          )
-                        : const LinearGradient(
-                            colors: [
-                              FenyvoPalette.surfaceSoft,
-                              FenyvoPalette.surface,
-                            ],
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                          ),
-                    shape: signalShape,
-                    shadows: [
-                      BoxShadow(
-                        color: Colors.black.withValues(
-                          alpha: isPinnedHighlight
-                              ? 0.10
-                              : isHovered
-                              ? 0.07
-                              : 0.03,
-                        ),
-                        blurRadius: isPinnedHighlight
-                            ? 14
-                            : isHovered
-                            ? 9
-                            : 4,
-                        offset: const Offset(0, 2),
-                      ),
-                      if (isPinnedHighlight)
-                        BoxShadow(
-                          color: _gold.withValues(alpha: 0.06),
-                          blurRadius: 24,
-                          spreadRadius: 1.5,
-                        )
-                      else if (isHovered)
-                        BoxShadow(
-                          color: isMe
-                              ? _gold.withValues(alpha: 0.06)
-                              : _gold.withValues(alpha: 0.06),
-                          blurRadius: 14,
-                          spreadRadius: -2,
-                        ),
-                    ],
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      if (!isMe && from.isNotEmpty && forwardedFrom.isEmpty)
-                        Text(
-                          from,
-                          style: const TextStyle(
-                            fontSize: 10,
-                            color: _gold,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-
-                      if (!isMe && from.isNotEmpty && forwardedFrom.isEmpty)
-                        const SizedBox(height: 2),
-
-                      if (replyTo != null)
-                        _buildReplyPreview(replyTo, isMe: isMe),
-
-                      if (forwardedFrom.isNotEmpty) ...[
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.forward_rounded,
-                              size: 12,
-                              color: isMe
-                                  ? FenyvoPalette.secondary
-                                  : _gold.withValues(alpha: 0.90),
-                            ),
-                            const SizedBox(width: 4),
-                            Flexible(
-                              child: Text(
-                                AppLanguageService.instance
-                                    .text('chatForwardedFromPeerLabelV2')
-                                    .replaceAll('{user}', forwardedFrom),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  color: isMe
-                                      ? FenyvoPalette.secondary
-                                      : _gold.withValues(alpha: 0.90),
-                                  fontSize: 9.5,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 3),
-                      ],
-
-                      if (sharedContact != null)
-                        _buildSharedContactCard(sharedContact, isMe: isMe)
-                      else if (isVoiceMessage)
-                        PrivateVoiceMessagePlayer(
-                          message: message,
-                          isMe: isMe,
-                          messageId: _getMessageId(message),
-                          playingVoiceMessageId: _playingVoiceMessageId,
-                          playbackPosition: _voicePlaybackPosition,
-                          playbackDuration: _voicePlaybackDuration,
-                          playbackRate: _voicePlaybackRate,
-                          isPlaying: _voiceIsPlaying,
-                          gold: _gold,
-                          onToggle: () => _toggleVoicePlayback(message),
-                          onSeek: (fraction) =>
-                              _seekVoiceMessage(message, fraction),
-                          onCycleRate: () => _cycleVoicePlaybackRate(message),
-                        )
-                      else if (isPrivateMediaMessage)
-                        _buildPrivateMediaBody(message, isMe: isMe)
-                      else
-                        Text(
-                          text,
-                          style: TextStyle(
-                            color: isMe ? FenyvoPalette.ink : FenyvoPalette.ink,
-                            fontSize: 16,
-                          ),
-                        ),
-
-                      if (forwardComment.isNotEmpty) ...[
-                        Padding(
-                          padding: const EdgeInsets.symmetric(vertical: 6),
-                          child: Container(
-                            height: 0.6,
-                            color: isMe
-                                ? FenyvoPalette.line
-                                : FenyvoPalette.blue.withValues(alpha: 0.22),
-                          ),
-                        ),
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.chat_bubble_outline_rounded,
-                              size: 11,
-                              color: isMe
-                                  ? FenyvoPalette.secondary
-                                  : _gold.withValues(alpha: 0.82),
-                            ),
-                            const SizedBox(width: 4),
-                            Flexible(
-                              child: Text(
-                                from.isNotEmpty
-                                    ? from
-                                    : AppLanguageService.instance.text(
-                                        'chatCommentFallback',
-                                      ),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  color: isMe
-                                      ? FenyvoPalette.secondary
-                                      : _gold.withValues(alpha: 0.82),
-                                  fontSize: 9.5,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          forwardComment,
-                          style: TextStyle(
-                            color: isMe ? FenyvoPalette.ink : FenyvoPalette.ink,
-                            fontSize: 14,
-                            height: 1.18,
-                          ),
-                        ),
-                      ],
-
-                      if (isWindowsDesktop &&
-                          isHovered &&
-                          (isVoiceMessage || isPrivateMediaMessage))
-                        Padding(
-                          padding: const EdgeInsets.only(top: 7),
-                          child: Align(
-                            alignment: Alignment.centerRight,
-                            child: Tooltip(
-                              message: AppLanguageService.instance.text(
-                                'chatForwardMedia',
-                              ),
-                              child: InkWell(
-                                borderRadius: BorderRadius.circular(12),
-                                onTap: () =>
-                                    unawaited(_forwardMessage(message)),
-                                child: Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 10,
-                                    vertical: 5,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color: isMe
-                                        ? FenyvoPalette.surface.withValues(
-                                            alpha: 0.09,
-                                          )
-                                        : FenyvoPalette.blue.withValues(
-                                            alpha: 0.10,
-                                          ),
-                                    borderRadius: BorderRadius.circular(12),
-                                    border: Border.all(
-                                      color: isMe
-                                          ? FenyvoPalette.line
-                                          : _gold.withValues(alpha: 0.42),
-                                    ),
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(
-                                        Icons.forward_rounded,
-                                        size: 16,
-                                        color: isMe ? FenyvoPalette.ink : _gold,
-                                      ),
-                                      const SizedBox(width: 5),
-                                      Text(
-                                        AppLanguageService.instance.text(
-                                          'chatForward',
-                                        ),
-                                        style: TextStyle(
-                                          color: isMe
-                                              ? FenyvoPalette.ink
-                                              : _gold,
-                                          fontSize: 11,
-                                          fontWeight: FontWeight.w700,
-                                        ),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ),
-
-                      const SizedBox(height: 4),
-
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          if (isE2ee) ...[
-                            Icon(
-                              message['e2eeError'] == true
-                                  ? Icons.lock_reset_rounded
-                                  : Icons.lock_rounded,
-                              size: 10,
-                              color: message['e2eeError'] == true
-                                  ? Colors.redAccent
-                                  : _gold,
-                            ),
-                            const SizedBox(width: 3),
-                          ],
-                          if (isAiGenerated) ...[
-                            Icon(
-                              Icons.smart_toy_rounded,
-                              size: 10,
-                              color: isMe
-                                  ? FenyvoPalette.secondary
-                                  : _gold.withValues(alpha: 0.88),
-                            ),
-                            const SizedBox(width: 3),
-                            Text(
-                              'AI',
-                              style: TextStyle(
-                                color: isMe
-                                    ? FenyvoPalette.secondary
-                                    : _gold.withValues(alpha: 0.88),
-                                fontSize: 9,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                            const SizedBox(width: 5),
-                          ],
-                          if (timeStr.isNotEmpty)
-                            Text(
-                              timeStr,
-                              style: TextStyle(
-                                color: isMe
-                                    ? FenyvoPalette.secondary
-                                    : FenyvoPalette.secondary,
-                                fontSize: 10,
-                              ),
-                            ),
-
-                          if (isEdited) ...[
-                            const SizedBox(width: 4),
-                            Text(
-                              '\u0438\u0437\u043C\u0435\u043D\u0435\u043D\u043E',
-                              style: TextStyle(
-                                color: isMe
-                                    ? FenyvoPalette.secondary
-                                    : FenyvoPalette.muted,
-                                fontSize: 9,
-                                fontStyle: FontStyle.italic,
-                              ),
-                            ),
-                          ],
-
-                          if (isMe) ...[
-                            const SizedBox(width: 4),
-                            _buildMessageStatus(message),
-                          ],
-
-                          if (!isWindowsDesktop &&
-                              (isVoiceMessage || isPrivateMediaMessage)) ...[
-                            const SizedBox(width: 5),
-                            Tooltip(
-                              message: AppLanguageService.instance.text(
-                                'chatForward',
-                              ),
-                              child: InkWell(
-                                borderRadius: BorderRadius.circular(15),
-                                onTap: () =>
-                                    unawaited(_forwardMessage(message)),
-                                child: Padding(
-                                  padding: const EdgeInsets.all(4),
-                                  child: Icon(
-                                    Icons.forward_rounded,
-                                    size: 17,
-                                    color: isMe
-                                        ? FenyvoPalette.secondary
-                                        : _gold,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-
-                          if (isWindowsDesktop) ...[
-                            const SizedBox(width: 8),
-                            AnimatedOpacity(
-                              duration: const Duration(milliseconds: 120),
-                              curve: Curves.easeOutCubic,
-                              opacity: showDesktopActions ? 1.0 : 0.0,
-                              child: AnimatedScale(
-                                duration: const Duration(milliseconds: 130),
-                                curve: Curves.easeOutCubic,
-                                scale: showDesktopActions ? 1.0 : 0.90,
-                                child: IgnorePointer(
-                                  ignoring: !showDesktopActions,
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      _buildDesktopQuickMessageAction(
-                                        icon: Icons.reply_rounded,
-                                        tooltip: '\u041E\u0442\u0432\u0435\u0442\u0438\u0442\u044C',
-                                        isMe: isMe,
-                                        onTap: () {
-                                          _startReply(message);
-                                        },
-                                      ),
-                                      const SizedBox(width: 4),
-                                      _buildDesktopQuickMessageAction(
-                                        icon: Icons.copy_rounded,
-                                        tooltip: '\u041A\u043E\u043F\u0438\u0440\u043E\u0432\u0430\u0442\u044C',
-                                        isMe: isMe,
-                                        onTap: () {
-                                          unawaited(_copyMessageText(message));
-                                        },
-                                      ),
-                                      const SizedBox(width: 4),
-                                      _buildDesktopQuickMessageAction(
-                                        icon: Icons.forward_rounded,
-                                        tooltip: '\u041F\u0435\u0440\u0435\u0441\u043B\u0430\u0442\u044C',
-                                        isMe: isMe,
-                                        onTap: () {
-                                          unawaited(_forwardMessage(message));
-                                        },
-                                      ),
-                                      if (isMe && forwardedFrom.isEmpty) ...[
-                                        const SizedBox(width: 4),
-                                        _buildDesktopQuickMessageAction(
-                                          icon: Icons.edit_rounded,
-                                          tooltip: '\u0418\u0437\u043C\u0435\u043D\u0438\u0442\u044C',
-                                          isMe: isMe,
-                                          onTap: () {
-                                            unawaited(_editMessage(message));
-                                          },
-                                        ),
-                                      ],
-                                      const SizedBox(width: 4),
-                                      _buildDesktopQuickMessageAction(
-                                        icon: Icons.favorite_outline_rounded,
-                                        tooltip: '\u0420\u0435\u0430\u043A\u0446\u0438\u044F \u2764\uFE0F',
-                                        isMe: isMe,
-                                        onTap: () {
-                                          _sendReaction(
-                                            message,
-                                            '\u2764\uFE0F',
-                                          );
-                                        },
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-
-                if (!isMe)
-                  Positioned(
-                    left: -8,
-                    top: 22,
-                    child: Container(
-                      width: 9,
-                      height: 9,
-                      decoration: BoxDecoration(
-                        color: _gold,
-                        shape: BoxShape.circle,
-                        border: Border.all(
-                          color: FenyvoPalette.canvasDeep,
-                          width: 2,
-                        ),
-                        boxShadow: [
-                          BoxShadow(
-                            color: _gold.withValues(alpha: .30),
-                            blurRadius: 7,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-
-                if (isMe && !isWindowsDesktop)
-                  Positioned(
-                    right: 2,
-                    top: 12,
-                    bottom: 12,
-                    child: Container(
-                      width: 3,
-                      decoration: BoxDecoration(
-                        color: _gold.withValues(alpha: .82),
-                        borderRadius: BorderRadius.circular(3),
-                      ),
-                    ),
-                  ),
-
-                Positioned(
-                  bottom: -15,
-                  left: isMe ? -15 : null,
-                  right: isMe ? null : -15,
-                  child: AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 180),
-                    transitionBuilder: (child, animation) {
-                      return ScaleTransition(
-                        scale: CurvedAnimation(
-                          parent: animation,
-                          curve: Curves.easeOutBack,
-                        ),
-                        child: child,
-                      );
-                    },
-                    child: KeyedSubtree(
-                      key: ValueKey<String>(_reactionStateKey(message)),
-                      child: _buildReactionRow(message),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildCallHistoryBubble(Map<String, dynamic> message) {
-    final raw = message['call'];
-    final call = raw is Map
-        ? Map<String, dynamic>.from(raw)
-        : <String, dynamic>{};
-    final missed = call['outcome'] == 'missed';
-    final incoming = call['incoming'] == true;
-    final video = call['video'] == true;
-    final accent = missed ? Colors.redAccent : _gold;
-    return Align(
-      alignment: Alignment.center,
-      child: Padding(
-        padding: const EdgeInsets.only(top: 4, bottom: 14),
-        child: Material(
-          color: FenyvoPalette.surface.withValues(alpha: 0.94),
-          borderRadius: BorderRadius.circular(18),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(18),
-            onTap: () => unawaited(
-              CallService.instance.startCall(
-                peer: widget.targetUser,
-                video: video,
-              ),
-            ),
-            child: Container(
-              constraints: BoxConstraints(
-                maxWidth: Platform.isWindows ? 310 : 340,
-              ),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(18),
-                border: Border.all(color: accent.withValues(alpha: 0.42)),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    video ? Icons.videocam_rounded : Icons.call_rounded,
-                    color: accent,
-                  ),
-                  const SizedBox(width: 11),
-                  Flexible(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          CallHistoryService.title(call),
-                          style: TextStyle(
-                            color: missed
-                                ? Colors.redAccent
-                                : FenyvoPalette.ink,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                        const SizedBox(height: 3),
-                        Text(
-                          CallHistoryService.status(call),
-                          style: const TextStyle(
-                            color: FenyvoPalette.secondary,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Icon(
-                    incoming
-                        ? Icons.call_received_rounded
-                        : Icons.call_made_rounded,
-                    color: accent,
-                    size: 19,
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
+  // Flutter State retains ownership of setState.
+  void _updateMessageBubbleState(VoidCallback update) {
+    setState(update);
   }
 
   void _handleMessageScroll() {
@@ -10653,123 +7695,6 @@ class _ChatScreenState extends State<ChatScreen>
     );
   }
 
-  Widget _buildMessages() {
-    if (_messages.isEmpty) {
-      return Center(
-        child: Text(
-          _chatText('noMessages'),
-          style: const TextStyle(
-            color: FenyvoPalette.secondary,
-            fontSize: 16,
-            fontWeight: FontWeight.w500,
-            shadows: [Shadow(blurRadius: 4, color: FenyvoPalette.ink)],
-          ),
-        ),
-      );
-    }
-
-    final isWindowsDesktop = Platform.isWindows;
-
-    return Stack(
-      children: [
-        if (!isWindowsDesktop)
-          Positioned(
-            left: 27,
-            top: 0,
-            bottom: 0,
-            child: Container(
-              width: 1.2,
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    Colors.transparent,
-                    FenyvoPalette.line.withValues(alpha: .82),
-                    FenyvoPalette.line.withValues(alpha: .82),
-                    Colors.transparent,
-                  ],
-                ),
-              ),
-            ),
-          ),
-        Positioned.fill(
-          child: isWindowsDesktop
-              ? ScrollbarTheme(
-                  data: ScrollbarThemeData(
-                    thumbColor: WidgetStateProperty.resolveWith<Color?>((
-                      states,
-                    ) {
-                      if (states.contains(WidgetState.dragged)) {
-                        return _gold.withValues(alpha: 0.88);
-                      }
-
-                      if (states.contains(WidgetState.hovered)) {
-                        return _gold.withValues(alpha: 0.72);
-                      }
-
-                      return _gold.withValues(alpha: 0.34);
-                    }),
-                    thickness: WidgetStateProperty.resolveWith<double?>((
-                      states,
-                    ) {
-                      if (states.contains(WidgetState.dragged) ||
-                          states.contains(WidgetState.hovered)) {
-                        return 8;
-                      }
-
-                      return 5;
-                    }),
-                    radius: const Radius.circular(10),
-                    trackColor: WidgetStatePropertyAll(FenyvoPalette.line),
-                    trackBorderColor: WidgetStatePropertyAll(
-                      Colors.transparent,
-                    ),
-                  ),
-                  child: Scrollbar(
-                    controller: _messageScrollController,
-                    thumbVisibility: true,
-                    trackVisibility: false,
-                    interactive: true,
-                    child: ListView.builder(
-                      controller: _messageScrollController,
-                      reverse: true,
-                      padding: const EdgeInsets.fromLTRB(28, 22, 28, 22),
-                      itemCount: _messages.length,
-                      keyboardDismissBehavior:
-                          ScrollViewKeyboardDismissBehavior.onDrag,
-                      itemBuilder: (context, index) {
-                        return _buildMessageListItem(index);
-                      },
-                    ),
-                  ),
-                )
-              : ListView.builder(
-                  controller: _messageScrollController,
-                  reverse: true,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 24,
-                    vertical: 12,
-                  ),
-                  itemCount: _messages.length,
-                  keyboardDismissBehavior:
-                      ScrollViewKeyboardDismissBehavior.onDrag,
-                  itemBuilder: (context, index) {
-                    return _buildMessageListItem(index);
-                  },
-                ),
-        ),
-
-        if (isWindowsDesktop)
-          Positioned(
-            right: 24,
-            bottom: 18,
-            child: _buildScrollToLatestButton(),
-          ),
-      ],
-    );
-  }
-
   // ========================================
   // \u041F\u041E\u041B\u0415 \u0412\u0412\u041E\u0414\u0410
   // ========================================
@@ -10783,193 +7708,9 @@ class _ChatScreenState extends State<ChatScreen>
     setState(() => _emojiVisible = open);
   }
 
-  Widget _buildMessageInput() {
-    if (_isRecordingVoice)
-      return _withVoicePointerBridge(
-        PrivateVoiceRecordingComposer(
-          replyPreview: PrivateComposerReplyPreview(
-            replyMessage: _replyToMessage,
-            currentUser: SocketService.instance.currentUser ?? '',
-            languageCode: AppLanguageService.instance.code.value,
-            onCancel: _cancelReply,
-          ),
-          duration: _voiceRecordDuration,
-          languageCode: AppLanguageService.instance.code.value,
-          onCancel: () => _finishVoiceRecording(send: false),
-          onSend: () => _finishVoiceRecording(send: true),
-        ),
-      );
-    return _withVoicePointerBridge(
-      Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          _buildTypingIndicator(),
-          PrivateComposerReplyPreview(
-            replyMessage: _replyToMessage,
-            currentUser: SocketService.instance.currentUser ?? '',
-            languageCode: AppLanguageService.instance.code.value,
-            onCancel: _cancelReply,
-          ),
-          Container(
-            margin: const EdgeInsets.fromLTRB(10, 5, 10, 9),
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                colors: [FenyvoPalette.surfaceSoft, FenyvoPalette.rail],
-              ),
-              borderRadius: BorderRadius.circular(30),
-              border: Border.all(color: FenyvoPalette.line),
-              boxShadow: const [
-                BoxShadow(
-                  color: Color(0x4A000000),
-                  blurRadius: 16,
-                  offset: Offset(0, 7),
-                ),
-              ],
-            ),
-            padding: const EdgeInsets.fromLTRB(6, 5, 6, 5),
-            child: SafeArea(
-              top: false,
-              minimum: const EdgeInsets.only(bottom: 1),
-              child: Center(
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(
-                    maxWidth: Platform.isWindows ? 800 : 920,
-                  ),
-                  child: Row(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: [
-                      IconButton.outlined(
-                        tooltip: _chatText('attachment'),
-                        onPressed: _sendingPrivateMedia
-                            ? null
-                            : () => unawaited(_showPrivateAttachmentMenu()),
-                        icon: _sendingPrivateMedia
-                            ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Icon(
-                                Icons.add_circle_outline_rounded,
-                                color: FenyvoPalette.gold,
-                              ),
-                        style: IconButton.styleFrom(
-                          side: BorderSide(
-                            color: FenyvoPalette.gold.withValues(alpha: .58),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 2),
-                      Expanded(
-                        child: CallbackShortcuts(
-                          bindings: Platform.isWindows
-                              ? <ShortcutActivator, VoidCallback>{
-                                  const SingleActivator(
-                                    LogicalKeyboardKey.enter,
-                                  ): _sendMessage,
-                                  const SingleActivator(
-                                    LogicalKeyboardKey.escape,
-                                  ): _cancelReply,
-                                }
-                              : const <ShortcutActivator, VoidCallback>{},
-                          child: TextField(
-                            key: const ValueKey('private-composer'),
-                            controller: _messageController,
-                            focusNode: _messageFocusNode,
-                            onTap: () {
-                              if (_emojiVisible)
-                                setState(() => _emojiVisible = false);
-                            },
-                            autofocus: false,
-                            style: const TextStyle(
-                              color: FenyvoPalette.ink,
-                              fontSize: 16,
-                            ),
-                            keyboardType: TextInputType.multiline,
-                            minLines: 1,
-                            maxLines: 6,
-                            textInputAction: TextInputAction.newline,
-                            onChanged: _handleTextChanged,
-                            decoration: InputDecoration(
-                              hintText: _chatText('messageHint'),
-                              fillColor: FenyvoPalette.canvasDeep.withValues(
-                                alpha: .72,
-                              ),
-                              filled: true,
-                              suffixIcon: IconButton(
-                                tooltip: _chatText('emoji'),
-                                onPressed: _openComposerEmoji,
-                                icon: const Icon(
-                                  Icons.emoji_emotions_outlined,
-                                  color: FenyvoPalette.ink,
-                                ),
-                              ),
-                              border: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(26),
-                                borderSide: const BorderSide(
-                                  color: FenyvoPalette.line,
-                                ),
-                              ),
-                              enabledBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(26),
-                                borderSide: const BorderSide(
-                                  color: FenyvoPalette.line,
-                                ),
-                              ),
-                              focusedBorder: OutlineInputBorder(
-                                borderRadius: BorderRadius.circular(26),
-                                borderSide: BorderSide(
-                                  color: FenyvoPalette.gold.withValues(
-                                    alpha: .72,
-                                  ),
-                                ),
-                              ),
-                              contentPadding: const EdgeInsets.symmetric(
-                                horizontal: 16,
-                                vertical: 13,
-                              ),
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      if (_messageController.text.trim().isEmpty)
-                        PrivateVoiceRecordButton(
-                          tooltip: AppLanguageService.instance.text(
-                            'chatHoldToRecord',
-                          ),
-                          onTap: () => unawaited(_startLockedVoiceRecording()),
-                          onLongPressStart: _handleVoiceLongPressStart,
-                          onLongPressMoveUpdate: _handleVoiceLongPressMove,
-                          onLongPressEnd: _handleVoiceLongPressEnd,
-                        )
-                      else
-                        SizedBox(
-                          width: 48,
-                          height: 48,
-                          child: IconButton.filled(
-                            tooltip: Platform.isWindows
-                                ? _chatText('sendEnter')
-                                : _chatText('send'),
-                            onPressed: _sendMessage,
-                            style: IconButton.styleFrom(
-                              backgroundColor: FenyvoPalette.gold,
-                              foregroundColor: FenyvoPalette.onGold,
-                            ),
-                            icon: const Icon(Icons.send_rounded),
-                          ),
-                        ),
-                    ],
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
+  // State owns Flutter UI mutations.
+  void _updateComposerState(VoidCallback update) {
+    setState(update);
   }
 
   // ========================================
@@ -11533,9 +8274,11 @@ class _ChatScreenState extends State<ChatScreen>
                     (Platform.isAndroid || Platform.isWindows)) {
                   unawaited(_toggleScreenSecurity());
                 }
-                if (value == 'e2ee') unawaited(_toggleChatE2ee());
                 if (value == 'e2ee_verify') {
                   unawaited(_showE2eeSafetyNumber());
+                }
+                if (value == 'e2ee_recovery') {
+                  unawaited(_showVerifiedE2eeRecovery());
                 }
                 if (value == 'trust') {
                   unawaited(
@@ -11559,28 +8302,23 @@ class _ChatScreenState extends State<ChatScreen>
                     ],
                   ),
                 ),
-                PopupMenuItem(
-                  value: 'e2ee',
-                  enabled: !_changingE2ee,
-                  child: Row(
-                    children: [
-                      Icon(
-                        _e2eeActive
-                            ? Icons.lock_rounded
-                            : Icons.lock_open_rounded,
-                        color: _e2eeActive ? _gold : null,
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          _e2eeActive
-                              ? _chatText('e2eeChatOn')
-                              : _chatText('e2eeChatInvite'),
+                if (SocketService.instance.isAuthenticated)
+                  PopupMenuItem(
+                    value: 'e2ee_recovery',
+                    child: Row(
+                      children: [
+                        const Icon(Icons.security_rounded, color: Colors.orange),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(_videoNoteText(
+                            'Восстановить защищённую переписку',
+                            'Відновити захищене листування',
+                            'Recover encrypted chat',
+                          )),
                         ),
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
                 if (_e2eeActive)
                   PopupMenuItem(
                     value: 'e2ee_verify',

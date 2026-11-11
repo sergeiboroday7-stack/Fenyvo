@@ -8,6 +8,7 @@ class PrivateVoiceRecordButton extends StatelessWidget {
   const PrivateVoiceRecordButton({
     super.key,
     required this.tooltip,
+    this.icon = Icons.mic_rounded,
     required this.onTap,
     required this.onLongPressStart,
     required this.onLongPressMoveUpdate,
@@ -15,6 +16,7 @@ class PrivateVoiceRecordButton extends StatelessWidget {
   });
 
   final String tooltip;
+  final IconData icon;
   final VoidCallback onTap;
   final GestureLongPressStartCallback onLongPressStart;
   final GestureLongPressMoveUpdateCallback onLongPressMoveUpdate;
@@ -37,11 +39,7 @@ class PrivateVoiceRecordButton extends StatelessWidget {
             shape: BoxShape.circle,
             color: FenyvoPalette.gold,
           ),
-          child: const Icon(
-            Icons.mic_rounded,
-            color: FenyvoPalette.onGold,
-            size: 24,
-          ),
+          child: Icon(icon, color: FenyvoPalette.onGold, size: 24),
         ),
       ),
     );

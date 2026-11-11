@@ -45,16 +45,16 @@ class MyFenyvoDashboard extends StatelessWidget {
         : about.trim();
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 16, 16, 6),
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
             key: const ValueKey('my-fenyvo-hero'),
             width: double.infinity,
-            padding: const EdgeInsets.fromLTRB(20, 18, 20, 22),
+            padding: const EdgeInsets.fromLTRB(18, 16, 18, 18),
             decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(28),
+              borderRadius: BorderRadius.circular(24),
               border: Border.all(color: const Color(0x88C7A65C)),
               gradient: const LinearGradient(
                 begin: Alignment.topLeft,
@@ -71,54 +71,6 @@ class MyFenyvoDashboard extends StatelessWidget {
             ),
             child: Column(
               children: [
-                Row(
-                  children: [
-                    Container(
-                      width: 42,
-                      height: 42,
-                      decoration: BoxDecoration(
-                        color: FenyvoPalette.gold.withValues(alpha: 0.14),
-                        shape: BoxShape.circle,
-                        border: Border.all(color: FenyvoPalette.gold),
-                      ),
-                      child: const Icon(
-                        Icons.bolt_rounded,
-                        color: FenyvoPalette.gold,
-                        size: 26,
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            AppLanguageService.instance.text(
-                              'dashboardHeroTitle',
-                            ),
-                            style: TextStyle(
-                              color: FenyvoPalette.ink,
-                              fontSize: 20,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: 1.2,
-                            ),
-                          ),
-                          Text(
-                            AppLanguageService.instance.text(
-                              'dashboardPersonalCabinet',
-                            ),
-                            style: TextStyle(
-                              color: FenyvoPalette.gold,
-                              fontSize: 12,
-                              letterSpacing: 1.4,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
@@ -175,7 +127,7 @@ class MyFenyvoDashboard extends StatelessWidget {
                               child: LinearProgressIndicator(minHeight: 2),
                             ),
                           ],
-                          const SizedBox(height: 14),
+                          const SizedBox(height: 4),
                           Text(
                             username,
                             maxLines: 1,
@@ -227,10 +179,10 @@ class MyFenyvoDashboard extends StatelessWidget {
                               ],
                             ),
                           ),
-                          const SizedBox(height: 14),
+                          const SizedBox(height: 8),
                           Text(
                             safeAbout,
-                            maxLines: 3,
+                            maxLines: 2,
                             overflow: TextOverflow.ellipsis,
                             textAlign: TextAlign.start,
                             style: const TextStyle(
@@ -293,7 +245,7 @@ class MyFenyvoDashboard extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(height: 18),
+          const SizedBox(height: 14),
           Padding(
             padding: EdgeInsets.only(left: 4, bottom: 10),
             child: Text(
@@ -381,93 +333,6 @@ class MyFenyvoDashboard extends StatelessWidget {
                 ],
               );
             },
-          ),
-          const SizedBox(height: 18),
-          Container(
-            key: const ValueKey('fenyvo-supporter-banner'),
-            width: double.infinity,
-            padding: const EdgeInsets.all(18),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(22),
-              border: Border.all(
-                color: FenyvoPalette.gold.withValues(alpha: 0.55),
-              ),
-              gradient: const LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [FenyvoPalette.surfaceRaised, FenyvoPalette.canvasDeep],
-              ),
-            ),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: FenyvoPalette.gold.withValues(alpha: 0.14),
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: const Icon(
-                    Icons.bolt_rounded,
-                    color: FenyvoPalette.gold,
-                    size: 28,
-                  ),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        AppLanguageService.instance.text(
-                          'dashboardDevelopmentTitle',
-                        ),
-                        style: TextStyle(
-                          color: FenyvoPalette.gold,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 0.7,
-                        ),
-                      ),
-                      SizedBox(height: 7),
-                      Text(
-                        AppLanguageService.instance.text(
-                          'dashboardDevelopmentTagline',
-                        ),
-                        style: TextStyle(
-                          color: FenyvoPalette.ink,
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      SizedBox(height: 6),
-                      Text(
-                        AppLanguageService.instance.text(
-                          'dashboardDevelopmentDescription',
-                        ),
-                        style: TextStyle(
-                          color: FenyvoPalette.secondary,
-                          fontSize: 12,
-                          height: 1.45,
-                        ),
-                      ),
-                      SizedBox(height: 10),
-                      Text(
-                        AppLanguageService.instance.text(
-                          'dashboardDevelopmentComingSoon',
-                        ),
-                        style: TextStyle(
-                          color: FenyvoPalette.gold,
-                          fontSize: 11,
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 1,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
           ),
         ],
       ),

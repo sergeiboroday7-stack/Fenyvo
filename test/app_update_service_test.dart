@@ -51,4 +51,18 @@ void main() {
       throwsFormatException,
     );
   });
+
+  test('repairs Windows-1251 mojibake in release notes', () {
+    const broken =
+        'Р\u0098СЃРїСЂР°РІР»РµРЅРѕ РѕС‚РѕР±СЂР°Р¶РµРЅРёРµ СЃС‚Р°С‚СѓСЃР° РѕРЅР»Р°Р№РЅ.';
+    expect(
+      AppRelease.repairMojibake(broken),
+      'Исправлено отображение статуса онлайн.',
+    );
+  });
+
+  test('does not alter valid Cyrillic release notes', () {
+    const valid = 'После выхода пользователя статус исчезает через секунду.';
+    expect(AppRelease.repairMojibake(valid), valid);
+  });
 }

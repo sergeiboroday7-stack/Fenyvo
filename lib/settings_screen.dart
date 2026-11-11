@@ -16,7 +16,6 @@ import 'config/support_links.dart';
 import 'services/socket_service.dart';
 import 'services/storage_service.dart';
 import 'services/app_language_service.dart';
-import 'services/e2ee_settings_service.dart';
 import 'screens/my_contact_screen.dart';
 import 'screens/support_payment_screens.dart';
 import 'screens/support_ai_screen.dart';
@@ -54,8 +53,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
   double _backgroundOpacity = 0.35;
 
   int _selectedTextColor = 0xFFFFFFFF;
-  bool _e2eeEnabled = false;
-  bool _changingE2ee = false;
   String _profileAbout = '';
   String _profileRegion = '';
   String _profileStatus = '';
@@ -113,7 +110,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _loadBackground();
     _loadBackgroundOpacity();
     _loadTextColor();
-    _loadE2ee();
     SocketService.instance.addMessageHandler(_handleProfileMessage);
     SocketService.instance.getUserProfile(widget.username);
   }
@@ -351,54 +347,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     region.dispose();
     phone.dispose();
     birthDate.dispose();
-  }
-
-  Future<void> _loadE2ee() async {
-    final enabled = await E2eeSettingsService.instance.isEnabled();
-    if (mounted) setState(() => _e2eeEnabled = enabled);
-  }
-
-  Future<void> _changeE2ee(bool enabled) async {
-    final t = AppLanguageService.instance.text;
-    if (enabled) {
-      final confirmed = await showDialog<bool>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: Text(t('e2eeTitle')),
-          content: Text(t('e2eeExplanation')),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: Text(t('cancel')),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: Text(t('e2eeEnable')),
-            ),
-          ],
-        ),
-      );
-      if (confirmed != true) return;
-    }
-    if (!mounted) return;
-    setState(() => _changingE2ee = true);
-    final changed = await SocketService.instance.setE2eeEnabled(enabled);
-    if (!mounted) return;
-    setState(() {
-      _changingE2ee = false;
-      if (changed) _e2eeEnabled = enabled;
-    });
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          changed
-              ? enabled
-                    ? t('e2eeEnabledNotice')
-                    : t('e2eeDisabledNotice')
-              : t('e2eeEnableError'),
-        ),
-      ),
-    );
   }
 
   // ========================================
@@ -1197,20 +1145,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     ),
                   ),
                 ),
-                SwitchListTile.adaptive(
-                  secondary: const Icon(Icons.lock_outline_rounded),
+                ListTile(
+                  leading: const Icon(Icons.lock_rounded),
                   title: Text(t('e2eeTitle')),
-                  subtitle: Text(
-                    _e2eeEnabled ? t('e2eeOnSubtitle') : t('e2eeOffSubtitle'),
-                  ),
-                  value: _e2eeEnabled,
-                  onChanged: _changingE2ee ? null : _changeE2ee,
+                  subtitle: Text(t('e2eeMandatorySubtitle')),
+                  trailing: const Icon(Icons.verified_user_rounded),
                 ),
-                if (_changingE2ee)
-                  const Padding(
-                    padding: EdgeInsets.fromLTRB(16, 0, 16, 12),
-                    child: LinearProgressIndicator(),
-                  ),
               ], controller: _privacyExpansionController),
             ),
 

@@ -480,6 +480,164 @@ class _UpdateCopy {
           versionWord: 'Версия',
           buildWord: 'сборка',
         );
+      case 'de':
+        return const _UpdateCopy(
+          updateTitle: 'Update verfügbar',
+          requiredTitle: 'Update erforderlich',
+          whatsNew: 'Was ist neu?',
+          changes: 'Was wurde geändert?',
+          newInFenyvo: 'Neu in Fenyvo',
+          updateNow: 'Jetzt aktualisieren',
+          later: 'Später erinnern',
+          continueLabel: 'Weiter',
+          requiredNotice: 'Diese Version ist nicht mehr mit dem Dienst kompatibel. Aktualisiere Fenyvo, um fortzufahren.',
+          restartingForUpdate:
+              'FENYVO wird neu gestartet, um das Update zu installieren…',
+          versionWord: 'Version',
+          buildWord: 'Build',
+        );
+      case 'fr':
+        return const _UpdateCopy(
+          updateTitle: 'Mise à jour disponible',
+          requiredTitle: 'Mise à jour requise',
+          whatsNew: 'Nouveautés',
+          changes: 'Modifications',
+          newInFenyvo: 'Nouveau dans Fenyvo',
+          updateNow: 'Mettre à jour',
+          later: 'Me le rappeler plus tard',
+          continueLabel: 'Continuer',
+          requiredNotice: 'Cette version n’est plus compatible avec le service. Mettez Fenyvo à jour pour continuer.',
+          restartingForUpdate:
+              'FENYVO redémarre pour installer la mise à jour…',
+          versionWord: 'Version',
+          buildWord: 'build',
+        );
+      case 'es':
+        return const _UpdateCopy(
+          updateTitle: 'Actualización disponible',
+          requiredTitle: 'Actualización obligatoria',
+          whatsNew: 'Novedades',
+          changes: 'Qué ha cambiado',
+          newInFenyvo: 'Novedades de Fenyvo',
+          updateNow: 'Actualizar ahora',
+          later: 'Recordar más tarde',
+          continueLabel: 'Continuar',
+          requiredNotice: 'Esta versión ya no es compatible con el servicio. Actualiza Fenyvo para continuar.',
+          restartingForUpdate:
+              'FENYVO se reiniciará para instalar la actualización…',
+          versionWord: 'Versión',
+          buildWord: 'compilación',
+        );
+      case 'pt':
+        return const _UpdateCopy(
+          updateTitle: 'Atualização disponível',
+          requiredTitle: 'Atualização obrigatória',
+          whatsNew: 'Novidades',
+          changes: 'O que mudou',
+          newInFenyvo: 'Novidades no Fenyvo',
+          updateNow: 'Atualizar agora',
+          later: 'Lembrar mais tarde',
+          continueLabel: 'Continuar',
+          requiredNotice: 'Esta versão já não é compatível com o serviço. Atualize o Fenyvo para continuar.',
+          restartingForUpdate:
+              'O FENYVO será reiniciado para instalar a atualização…',
+          versionWord: 'Versão',
+          buildWord: 'compilação',
+        );
+      case 'pl':
+        return const _UpdateCopy(
+          updateTitle: 'Dostępna aktualizacja',
+          requiredTitle: 'Wymagana aktualizacja',
+          whatsNew: 'Co nowego',
+          changes: 'Co się zmieniło',
+          newInFenyvo: 'Nowości w Fenyvo',
+          updateNow: 'Aktualizuj teraz',
+          later: 'Przypomnij później',
+          continueLabel: 'Kontynuuj',
+          requiredNotice: 'Ta wersja nie jest już zgodna z usługą. Zaktualizuj Fenyvo, aby kontynuować.',
+          restartingForUpdate:
+              'FENYVO uruchomi się ponownie, aby zainstalować aktualizację…',
+          versionWord: 'Wersja',
+          buildWord: 'kompilacja',
+        );
+      case 'tr':
+        return const _UpdateCopy(
+          updateTitle: 'Güncelleme mevcut',
+          requiredTitle: 'Güncelleme gerekli',
+          whatsNew: 'Yenilikler',
+          changes: 'Neler değişti',
+          newInFenyvo: 'Fenyvo’daki yenilikler',
+          updateNow: 'Şimdi güncelle',
+          later: 'Daha sonra hatırlat',
+          continueLabel: 'Devam et',
+          requiredNotice: 'Bu sürüm artık hizmetle uyumlu değil. Devam etmek için Fenyvo’yu güncelleyin.',
+          restartingForUpdate:
+              'FENYVO güncellemeyi yüklemek için yeniden başlatılıyor…',
+          versionWord: 'Sürüm',
+          buildWord: 'derleme',
+        );
+      case 'ar':
+        return const _UpdateCopy(
+          updateTitle: 'يتوفر تحديث',
+          requiredTitle: 'التحديث مطلوب',
+          whatsNew: 'ما الجديد',
+          changes: 'ما الذي تغير',
+          newInFenyvo: 'الجديد في Fenyvo',
+          updateNow: 'التحديث الآن',
+          later: 'ذكّرني لاحقًا',
+          continueLabel: 'متابعة',
+          requiredNotice:
+              'لم يعد هذا الإصدار متوافقًا مع الخدمة. حدّث Fenyvo للمتابعة.',
+          restartingForUpdate: 'تتم إعادة تشغيل FENYVO لتثبيت التحديث…',
+          versionWord: 'الإصدار',
+          buildWord: 'البنية',
+        );
+      case 'hi':
+        return const _UpdateCopy(
+          updateTitle: 'अपडेट उपलब्ध है',
+          requiredTitle: 'अपडेट आवश्यक है',
+          whatsNew: 'नया क्या है',
+          changes: 'क्या बदला',
+          newInFenyvo: 'Fenyvo में नया',
+          updateNow: 'अभी अपडेट करें',
+          later: 'बाद में याद दिलाएँ',
+          continueLabel: 'जारी रखें',
+          requiredNotice: 'यह संस्करण अब सेवा के अनुकूल नहीं है। जारी रखने के लिए Fenyvo अपडेट करें।',
+          restartingForUpdate:
+              'अपडेट इंस्टॉल करने के लिए FENYVO फिर से शुरू हो रहा है…',
+          versionWord: 'संस्करण',
+          buildWord: 'बिल्ड',
+        );
+      case 'zh':
+        return const _UpdateCopy(
+          updateTitle: '有可用更新',
+          requiredTitle: '需要更新',
+          whatsNew: '更新内容',
+          changes: '已更改内容',
+          newInFenyvo: 'Fenyvo 新功能',
+          updateNow: '立即更新',
+          later: '稍后提醒',
+          continueLabel: '继续',
+          requiredNotice: '此版本已不再兼容服务。请更新 Fenyvo 以继续。',
+          restartingForUpdate: 'FENYVO 正在重启以安装更新…',
+          versionWord: '版本',
+          buildWord: '构建',
+        );
+      case 'ja':
+        return const _UpdateCopy(
+          updateTitle: 'アップデートがあります',
+          requiredTitle: 'アップデートが必要です',
+          whatsNew: '新機能',
+          changes: '変更内容',
+          newInFenyvo: 'Fenyvo の新機能',
+          updateNow: '今すぐ更新',
+          later: '後で通知',
+          continueLabel: '続ける',
+          requiredNotice: 'このバージョンはサービスとの互換性がありません。続行するには Fenyvo を更新してください。',
+          restartingForUpdate: 'アップデートをインストールするため FENYVO を再起動しています…',
+          versionWord: 'バージョン',
+          buildWord: 'ビルド',
+        );
       default:
         return const _UpdateCopy(
           updateTitle: 'Update available',

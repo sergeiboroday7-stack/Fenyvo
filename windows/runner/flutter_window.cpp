@@ -1,4 +1,13 @@
 #include "flutter_window.h"
+#include "hex_video_audio_levels_windows.h"
+
+#include <atomic>
+#include <cwctype>
+#include <filesystem>
+#include <mutex>
+#include <thread>
+#include <utility>
+#include <vector>
 
 #include <optional>
 #include <string>
@@ -13,6 +22,113 @@ constexpr UINT kTrayOpenCommand = 42001;
 constexpr UINT kTrayExitCommand = 42002;
 }  // namespace
 
+using HexAudioResult =
+    flutter::MethodResult<flutter::EncodableValue>;
+
+struct HexAudioReply {
+  std::unique_ptr<HexAudioResult> result;
+  std::vector<double> levels;
+};
+
+struct HexAudioReplyState {
+  std::mutex mutex;
+  std::vector<HexAudioReply> pending;
+  std::atomic<bool> alive{true};
+  std::atomic<int> in_flight{0};
+};
+
+namespace {
+constexpr UINT kHexAudioReadyMessage = WM_APP + 93;
+constexpr int kHexMaxConcurrent = 2;
+
+std::wstring HexEnvironmentPath(const wchar_t* name) {
+  const DWORD count = GetEnvironmentVariableW(name, nullptr, 0);
+  if (count == 0 || count > 32768) return {};
+  std::wstring value(count, L'\0');
+  const DWORD written =
+      GetEnvironmentVariableW(name, value.data(), count);
+  if (written == 0 || written >= count) return {};
+  value.resize(written);
+  return value;
+}
+
+std::wstring HexCanonicalPath(const std::wstring& input) {
+  try {
+    if (input.empty()) return {};
+    const auto candidate = std::filesystem::path(input);
+    if (!candidate.is_absolute()) return {};
+    auto result = std::filesystem::weakly_canonical(candidate).wstring();
+    for (auto& character : result) character = std::towlower(character);
+    return result;
+  } catch (...) {
+    return {};
+  }
+}
+
+bool HexIsWithin(const std::wstring& path,
+                 const std::wstring& root) {
+  if (path.empty() || root.empty()) return false;
+  if (path.size() <= root.size()) return false;
+  if (path.compare(0, root.size(), root) != 0) return false;
+  return path[root.size()] == L'\\' || path[root.size()] == L'/';
+}
+
+bool HexAllowedVideoPath(const std::wstring& input) {
+  if (input.empty() || input.size() > 32767) return false;
+  const std::wstring path = HexCanonicalPath(input);
+  if (path.empty()) return false;
+
+  const auto extension = std::filesystem::path(path).extension().wstring();
+  if (extension != L".mp4" && extension != L".mov" &&
+      extension != L".mkv" && extension != L".webm" &&
+      extension != L".avi") {
+    return false;
+  }
+
+  // Downloaded, locally decrypted media is in the app's cache.
+  // Only cache directories inside Windows application-data roots
+  // are allowed, not arbitrary paths supplied by the caller.
+  for (const wchar_t* variable : {L"APPDATA", L"LOCALAPPDATA"}) {
+    const auto root = HexCanonicalPath(HexEnvironmentPath(variable));
+    if (!HexIsWithin(path, root)) continue;
+
+    const std::wstring marker = L"\\spartan_media_cache\\";
+    if (path.find(marker, root.size()) != std::wstring::npos) {
+      return true;
+    }
+  }
+
+  // Embedded media uses a generated name immediately inside
+  // the application's system temporary directory.
+  wchar_t temporary[32768] = {};
+  const DWORD size = GetTempPathW(32768, temporary);
+  if (size == 0 || size >= 32768) return false;
+
+  const auto tempRoot = HexCanonicalPath(temporary);
+  if (!HexIsWithin(path, tempRoot)) return false;
+
+  const auto parent =
+      HexCanonicalPath(std::filesystem::path(path).parent_path().wstring());
+  if (parent != tempRoot) return false;
+
+  const auto name = std::filesystem::path(path).filename().wstring();
+  return name.rfind(L"spartan_private_video_", 0) == 0;
+}
+
+std::wstring HexUtf8ToWide(const std::string& input) {
+  if (input.empty() || input.size() > 32767) return {};
+  const int size = MultiByteToWideChar(
+      CP_UTF8, MB_ERR_INVALID_CHARS, input.data(),
+      static_cast<int>(input.size()), nullptr, 0);
+  if (size <= 0) return {};
+  std::wstring output(size, L'\0');
+  const int written = MultiByteToWideChar(
+      CP_UTF8, MB_ERR_INVALID_CHARS, input.data(),
+      static_cast<int>(input.size()), output.data(), size);
+  if (written != size) return {};
+  return output;
+}
+}  // namespace
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
 
@@ -111,6 +227,97 @@ bool FlutterWindow::OnCreate() {
 
         result->Success();
       });
+  // Audio analysis is performed off the Flutter/UI thread.
+  // Replies are delivered back on the Windows runner thread.
+  hex_audio_reply_state_ = std::make_shared<HexAudioReplyState>();
+  hex_audio_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          flutter_controller_->engine()->messenger(),
+          "fenyvo/hex_video_audio",
+          &flutter::StandardMethodCodec::GetInstance());
+
+  hex_audio_channel_->SetMethodCallHandler(
+      [this](const auto& call, auto result) {
+        if (call.method_name() != "analyze") {
+          result->NotImplemented();
+          return;
+        }
+
+        const auto* arguments = call.arguments();
+        const auto* map = arguments
+            ? std::get_if<flutter::EncodableMap>(arguments)
+            : nullptr;
+        if (!map) {
+          result->Error("INVALID_ARGUMENTS", "Expected path map");
+          return;
+        }
+
+        const auto item = map->find(flutter::EncodableValue("path"));
+        if (item == map->end()) {
+          result->Error("INVALID_PATH", "Missing local path");
+          return;
+        }
+
+        const auto* utf8 = std::get_if<std::string>(&item->second);
+        if (!utf8) {
+          result->Error("INVALID_PATH", "Path must be text");
+          return;
+        }
+
+        const std::wstring path = HexUtf8ToWide(*utf8);
+        if (!HexAllowedVideoPath(path)) {
+          result->Error("PATH_NOT_ALLOWED", "Video path not allowed");
+          return;
+        }
+
+        const auto state = hex_audio_reply_state_;
+        if (!state || !state->alive.load()) {
+          result->Error("CHANNEL_CLOSED", "Audio channel unavailable");
+          return;
+        }
+
+        if (state->in_flight.fetch_add(1) >= kHexMaxConcurrent) {
+          state->in_flight.fetch_sub(1);
+          result->Error("BUSY", "Audio analyzer busy");
+          return;
+        }
+
+        const HWND window = GetHandle();
+
+        try {
+          std::thread(
+              [state, window, path,
+               result = std::move(result)]() mutable {
+                const HRESULT com =
+                    CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+
+                std::vector<double> levels;
+                if (SUCCEEDED(com)) {
+                  try {
+                    levels = AnalyzeHexVideoAudioWindows(path);
+                  } catch (...) {
+                    levels.clear();
+                  }
+                  CoUninitialize();
+                }
+
+                if (state->alive.load()) {
+                  std::lock_guard<std::mutex> guard(state->mutex);
+                  if (state->alive.load()) {
+                    state->pending.push_back(
+                        HexAudioReply{std::move(result),
+                                      std::move(levels)});
+                    PostMessageW(window, kHexAudioReadyMessage, 0, 0);
+                  }
+                }
+
+                state->in_flight.fetch_sub(1);
+              }).detach();
+        } catch (...) {
+          state->in_flight.fetch_sub(1);
+          result->Error("WORKER_FAILED", "Cannot start analyzer");
+        }
+      });
   taskbar_created_message_ = RegisterWindowMessageW(L"TaskbarCreated");
   restore_message_ = RegisterWindowMessageW(L"SPARTAN_CHAT_RESTORE_WINDOW");
   AddTrayIcon();
@@ -129,6 +336,13 @@ bool FlutterWindow::OnCreate() {
 
 void FlutterWindow::OnDestroy() {
   RemoveTrayIcon();
+  if (hex_audio_reply_state_) {
+    hex_audio_reply_state_->alive.store(false);
+    std::lock_guard<std::mutex> guard(hex_audio_reply_state_->mutex);
+    hex_audio_reply_state_->pending.clear();
+  }
+  hex_audio_channel_ = nullptr;
+  hex_audio_reply_state_.reset();
   screen_security_channel_ = nullptr;
   window_channel_ = nullptr;
   if (flutter_controller_) {
@@ -152,6 +366,26 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
     }
   }
 
+  if (message == kHexAudioReadyMessage) {
+    const auto state = hex_audio_reply_state_;
+    if (state && state->alive.load()) {
+      std::vector<HexAudioReply> replies;
+      {
+        std::lock_guard<std::mutex> guard(state->mutex);
+        replies.swap(state->pending);
+      }
+
+      for (auto& reply : replies) {
+        if (!reply.result) continue;
+        flutter::EncodableList values;
+        for (double level : reply.levels) {
+          values.emplace_back(level);
+        }
+        reply.result->Success(flutter::EncodableValue(values));
+      }
+    }
+    return 0;
+  }
   if (message == taskbar_created_message_) {
     tray_icon_added_ = false;
     AddTrayIcon();

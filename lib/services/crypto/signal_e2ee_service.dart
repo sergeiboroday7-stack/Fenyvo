@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:developer' as developer;
 import 'dart:typed_data';
 
 import 'package:libsignal/libsignal.dart';
@@ -35,28 +36,95 @@ class SignalE2eeService {
   String? _username;
   SignalSecureStore? _store;
   final Map<String, Lock> _peerLocks = <String, Lock>{};
+  final Lock _verifiedRecoveryLock = Lock();
 
   bool get isReady => _libraryReady && _store != null && _username != null;
+
+  // Share initialization for the same account instead of returning early
+  // while key generation or secure-store initialization is still running.
+  Future<void>? _initializationInFlight;
+  String? _initializingUser;
 
   Future<void> initializeForUser(String username) async {
     final user = username.trim();
     if (user.isEmpty) throw ArgumentError('Username is empty');
-    if (!_libraryReady) {
-      await LibSignal.init();
-      _libraryReady = true;
+
+    final pending = _initializationInFlight;
+    if (pending != null) {
+      if (_initializingUser != user) {
+        throw StateError(
+          'Signal initialization is active for another account',
+        );
+      }
+      await pending;
+      return;
     }
-    if (_username == user && _store != null) return;
-    _username = user;
-    _store = SignalSecureStore(user);
-    await _store!.ensureIdentity();
-    await _store!.ensureRegistrationId();
-    await _ensurePreKeys();
+
+    if (_libraryReady && _username == user && _store != null) {
+      return;
+    }
+
+    final operation = _initializeForUserInternal(user);
+    _initializingUser = user;
+    _initializationInFlight = operation;
+
+    try {
+      await operation;
+    } finally {
+      if (identical(_initializationInFlight, operation)) {
+        _initializationInFlight = null;
+        _initializingUser = null;
+      }
+    }
   }
 
+  Future<void> _initializeForUserInternal(String user) async {
+    try {
+      if (!_libraryReady) {
+        await LibSignal.init();
+        _libraryReady = true;
+      }
+
+      if (_username == user && _store != null) return;
+
+      _username = user;
+      _store = SignalSecureStore(user);
+      await _store!.restorePendingVerifiedPeerRecovery();
+      await _store!.ensureIdentity();
+      await _store!.ensureRegistrationId();
+      await _ensurePreKeys();
+    } catch (_) {
+      // Do not report a partially initialized store as ready.
+      if (_username == user) {
+        _username = null;
+        _store = null;
+      }
+      rethrow;
+    }
+  }
   Lock _lockFor(String username) =>
       _peerLocks.putIfAbsent(username.trim(), Lock.new);
 
+  Future<void>? _preKeyMaintenance;
+
   Future<void> _ensurePreKeys() async {
+    final pending = _preKeyMaintenance;
+    if (pending != null) {
+      await pending;
+      return;
+    }
+    final operation = _ensurePreKeysInternal();
+    _preKeyMaintenance = operation;
+    try {
+      await operation;
+    } finally {
+      if (identical(_preKeyMaintenance, operation)) {
+        _preKeyMaintenance = null;
+      }
+    }
+  }
+
+  Future<void> _ensurePreKeysInternal() async {
     final store = _requireStore();
     final identity = await store.ensureIdentity();
     final now = BigInt.from(DateTime.now().toUtc().millisecondsSinceEpoch);
@@ -79,41 +147,33 @@ class SignalE2eeService {
       );
     }
 
-    final preKeyIds = await store.getAllPreKeyIds();
-    var nextPreKeyId = preKeyIds.isEmpty
-        ? 1
-        : preKeyIds.reduce((a, b) => a > b ? a : b) + 1;
     while ((await store.getAllPreKeyIds()).length < _targetPreKeyCount) {
+      final id = await store.reserveNextPreKeyId(kyber: false);
       final privateKey = PrivateKey.generate();
       await store.storePreKey(
-        nextPreKeyId,
+        id,
         PreKeyRecord(
-          id: nextPreKeyId,
+          id: id,
           publicKey: privateKey.getPublicKey(),
           privateKey: privateKey,
         ),
       );
-      nextPreKeyId++;
     }
 
-    final kyberIds = await store.getAllKyberPreKeyIds();
-    var nextKyberId = kyberIds.isEmpty
-        ? 1
-        : kyberIds.reduce((a, b) => a > b ? a : b) + 1;
     while ((await store.getAllKyberPreKeyIds()).length < _targetPreKeyCount) {
+      final id = await store.reserveNextPreKeyId(kyber: true);
       final keyPair = KyberKeyPair.generate();
       final publicKey = keyPair.getPublicKey();
       final signature = identity.sign(message: publicKey.serialize());
       await store.storeKyberPreKey(
-        nextKyberId,
+        id,
         KyberPreKeyRecord.create(
-          id: nextKyberId,
+          id: id,
           timestamp: now,
           keyPair: keyPair,
           signature: signature,
         ),
       );
-      nextKyberId++;
     }
   }
 
@@ -196,6 +256,42 @@ class SignalE2eeService {
     });
   }
 
+  /// Preview a proposed remote identity without trusting or saving it.
+  /// The caller must independently authenticate the candidate key before
+  /// presenting an option to replace a previously verified identity.
+  Future<E2eeSafetyNumber> candidateSafetyNumber(
+    String username,
+    String encodedRemoteIdentity,
+  ) async {
+    final remote = username.trim();
+    final local = _username?.trim() ?? '';
+    if (remote.isEmpty || local.isEmpty || remote == local) {
+      throw StateError('E2EE identity is unavailable');
+    }
+    final candidateBytes = base64Decode(encodedRemoteIdentity);
+    final candidate = PublicKey.deserialize(bytes: candidateBytes);
+    final localIdentity = await _requireStore().ensureIdentity();
+    final fingerprint = Fingerprint(
+      iterations: 5200,
+      version: 2,
+      localIdentifier: utf8.encode(local),
+      localPublicKey: localIdentity.publicKey,
+      remoteIdentifier: utf8.encode(remote),
+      remotePublicKey: candidate.serialize(),
+    );
+    final display = fingerprint.displayString().replaceAll(' ', '');
+    final groups = <String>[];
+    for (var i = 0; i < display.length; i += 5) {
+      final end = i + 5 < display.length ? i + 5 : display.length;
+      groups.add(display.substring(i, end));
+    }
+    return E2eeSafetyNumber(
+      display: groups.join(' '),
+      scannable:
+          'spartan-e2ee:v1:${base64Url.encode(fingerprint.scannableEncoding())}',
+    );
+  }
+
   Future<E2eeSafetyNumber> safetyNumber(String username) async {
     final remote = username.trim();
     final local = _username?.trim() ?? '';
@@ -241,6 +337,81 @@ class SignalE2eeService {
       final address = ProtocolAddress(name: remote, deviceId: deviceId);
       await _store!.deleteSession(address);
       await _store!.deleteRemoteIdentity(address);
+    });
+  }
+
+  /// Changes a trusted remote identity only after explicit out-of-band
+  /// comparison of the *candidate* safety number. This is never automatic.
+  Future<void> acceptVerifiedRemoteBundle(
+    String username,
+    Map<String, dynamic> bundleData,
+    String verifiedSafetyNumber,
+  ) async {
+    final remote = username.trim();
+    final owner = _username?.trim() ?? '';
+    if (remote.isEmpty || owner.isEmpty || remote == owner) {
+      throw StateError('Invalid E2EE recovery owner or peer');
+    }
+    final encodedIdentity = bundleData['identityKey']?.toString() ?? '';
+    if (encodedIdentity.isEmpty) {
+      throw const FormatException('Missing candidate identity');
+    }
+    final comparison = await candidateSafetyNumber(remote, encodedIdentity);
+    if (comparison.display != verifiedSafetyNumber ||
+        verifiedSafetyNumber.replaceAll(' ', '').length != 60) {
+      throw StateError('Candidate safety number was not confirmed');
+    }
+
+    await _verifiedRecoveryLock.synchronized(() async {
+      await _lockFor(remote).synchronized(() async {
+      if (_username != owner) throw StateError('Signal owner changed');
+      final store = _requireStore();
+      final address = ProtocolAddress(name: remote, deviceId: deviceId);
+      final originalSession = await store.loadSession(address);
+      final originalIdentity = await store.getIdentity(address);
+      final signed = Map<String, dynamic>.from(bundleData['signedPreKey'] as Map);
+      final pre = Map<String, dynamic>.from(bundleData['preKey'] as Map);
+      final kyber = Map<String, dynamic>.from(bundleData['kyberPreKey'] as Map);
+      final bundle = PreKeyBundle(
+        registrationId: _positiveInt(bundleData['registrationId']),
+        deviceId: _positiveInt(bundleData['deviceId']),
+        preKeyId: _positiveInt(pre['id']),
+        preKeyPublic: base64Decode(pre['publicKey'].toString()),
+        signedPreKeyId: _positiveInt(signed['id']),
+        signedPreKeyPublic: base64Decode(signed['publicKey'].toString()),
+        signedPreKeySignature: base64Decode(signed['signature'].toString()),
+        identityKey: base64Decode(encodedIdentity),
+        kyberPreKeyId: _positiveInt(kyber['id']),
+        kyberPreKeyPublic: base64Decode(kyber['publicKey'].toString()),
+        kyberPreKeySignature: base64Decode(kyber['signature'].toString()),
+      );
+      if (_positiveInt(bundleData['deviceId']) != deviceId) {
+        throw StateError('Unexpected E2EE peer device');
+      }
+      final current = await candidateSafetyNumber(remote, encodedIdentity);
+      if (current.display != verifiedSafetyNumber) {
+        throw StateError('Candidate identity changed during confirmation');
+      }
+      // Persist the pre-change state before the first destructive write.
+      // An Android process death cannot run catch/finally; the initializer
+      // restores this journal before making Signal usable again.
+      await store.beginVerifiedPeerRecovery(
+        address, originalSession, originalIdentity,
+      );
+      try {
+        await store.deleteSession(address);
+        await store.deleteRemoteIdentity(address);
+        await SessionBuilder(
+          localAddress: ProtocolAddress(name: owner, deviceId: deviceId),
+          sessionStore: store,
+          identityKeyStore: store,
+        ).processPreKeyBundle(address, bundle);
+        await store.commitVerifiedPeerRecovery();
+      } catch (_) {
+        await store.restorePendingVerifiedPeerRecovery();
+        rethrow;
+      }
+      });
     });
   }
 
@@ -291,7 +462,11 @@ class SignalE2eeService {
       ).decrypt(ProtocolAddress(name: remote, deviceId: deviceId), ciphertext);
       final value = jsonDecode(utf8.decode(decoded));
       if (value is! Map) throw const FormatException('Invalid E2EE payload');
-      unawaited(_ensurePreKeys());
+      unawaited(_ensurePreKeys().catchError((Object error, StackTrace stack) {
+        // A failed background refill must not surface as an unhandled Future.
+        // Awaited initialisation and bundle publishing still propagate errors.
+        developer.log('Background PreKey refill failed', name: 'FENYVO_E2EE');
+      }));
       return Map<String, dynamic>.from(value);
     });
   }

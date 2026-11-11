@@ -65,7 +65,7 @@ class AppRelease {
         final value = entry.value;
         if (value is List) {
           notes[entry.key.toString().toLowerCase()] = value
-              .map((item) => item.toString().trim())
+              .map((item) => repairMojibake(item.toString().trim()))
               .where((item) => item.isNotEmpty)
               .take(8)
               .toList(growable: false);
@@ -94,6 +94,149 @@ class AppRelease {
     if (value is int) return value;
     return int.tryParse(value?.toString() ?? '') ?? 0;
   }
+
+  /// Repairs UTF-8 release notes that were accidentally decoded as Windows-1251
+  /// before being placed in the update manifest.
+  ///
+  /// Correct text is returned unchanged. The repair is accepted only when the
+  /// source strongly resembles mojibake and the decoded result contains fewer
+  /// corruption markers.
+  static String repairMojibake(String value) {
+    final sourceScore = _mojibakeScore(value);
+    if (sourceScore < 2) return value;
+
+    final bytes = <int>[];
+    for (final rune in value.runes) {
+      final byte = _windows1251Byte(rune);
+      if (byte == null) return value;
+      bytes.add(byte);
+    }
+
+    try {
+      final repaired = utf8.decode(bytes);
+      return _mojibakeScore(repaired) < sourceScore ? repaired : value;
+    } on FormatException {
+      return value;
+    }
+  }
+
+  static int _mojibakeScore(String value) {
+    var score = 0;
+    for (final rune in value.runes) {
+      if (rune >= 0x80 && rune <= 0x9f) score += 3;
+      if (_windows1251SpecialRunes.contains(rune)) score += 2;
+    }
+    score += RegExp(r'[РС][\u0080-\u00ffА-Яа-яЁёІіЇїЄєҐґ]')
+        .allMatches(value)
+        .length;
+    return score;
+  }
+
+  static int? _windows1251Byte(int rune) {
+    if (rune <= 0x7f || (rune >= 0x80 && rune <= 0x9f)) return rune;
+    if (rune >= 0x0410 && rune <= 0x044f) return rune - 0x0410 + 0xc0;
+    return _windows1251SpecialBytes[rune];
+  }
+
+  static const Map<int, int> _windows1251SpecialBytes = {
+    0x0402: 0x80,
+    0x0403: 0x81,
+    0x201a: 0x82,
+    0x0453: 0x83,
+    0x201e: 0x84,
+    0x2026: 0x85,
+    0x2020: 0x86,
+    0x2021: 0x87,
+    0x20ac: 0x88,
+    0x2030: 0x89,
+    0x0409: 0x8a,
+    0x2039: 0x8b,
+    0x040a: 0x8c,
+    0x040c: 0x8d,
+    0x040b: 0x8e,
+    0x040f: 0x8f,
+    0x0452: 0x90,
+    0x2018: 0x91,
+    0x2019: 0x92,
+    0x201c: 0x93,
+    0x201d: 0x94,
+    0x2022: 0x95,
+    0x2013: 0x96,
+    0x2014: 0x97,
+    0x2122: 0x99,
+    0x0459: 0x9a,
+    0x203a: 0x9b,
+    0x045a: 0x9c,
+    0x045c: 0x9d,
+    0x045b: 0x9e,
+    0x045f: 0x9f,
+    0x00a0: 0xa0,
+    0x040e: 0xa1,
+    0x045e: 0xa2,
+    0x0408: 0xa3,
+    0x00a4: 0xa4,
+    0x0490: 0xa5,
+    0x00a6: 0xa6,
+    0x00a7: 0xa7,
+    0x0401: 0xa8,
+    0x00a9: 0xa9,
+    0x0404: 0xaa,
+    0x00ab: 0xab,
+    0x00ac: 0xac,
+    0x00ad: 0xad,
+    0x00ae: 0xae,
+    0x0407: 0xaf,
+    0x00b0: 0xb0,
+    0x00b1: 0xb1,
+    0x0406: 0xb2,
+    0x0456: 0xb3,
+    0x0491: 0xb4,
+    0x00b5: 0xb5,
+    0x00b6: 0xb6,
+    0x00b7: 0xb7,
+    0x0451: 0xb8,
+    0x2116: 0xb9,
+    0x0454: 0xba,
+    0x00bb: 0xbb,
+    0x0458: 0xbc,
+    0x0405: 0xbd,
+    0x0455: 0xbe,
+    0x0457: 0xbf,
+  };
+
+  static const Set<int> _windows1251SpecialRunes = {
+    0x0402,
+    0x0403,
+    0x0453,
+    0x0409,
+    0x040a,
+    0x040c,
+    0x040b,
+    0x040f,
+    0x0452,
+    0x0459,
+    0x045a,
+    0x045c,
+    0x045b,
+    0x045f,
+    0x040e,
+    0x045e,
+    0x0408,
+    0x0490,
+    0x0401,
+    0x0404,
+    0x0407,
+    0x0406,
+    0x0456,
+    0x0491,
+    0x0451,
+    0x2116,
+    0x0454,
+    0x0458,
+    0x0405,
+    0x0455,
+    0x0457,
+  };
 }
 
 class AppUpdateCheck {
@@ -119,7 +262,8 @@ class AppUpdateService {
 
   static final instance = AppUpdateService._();
 
-  final StreamController<void> _releaseSignals = StreamController<void>.broadcast();
+  final StreamController<void> _releaseSignals =
+      StreamController<void>.broadcast();
 
   Stream<void> get releaseSignals => _releaseSignals.stream;
 
@@ -146,7 +290,8 @@ class AppUpdateService {
     final preferences = await SharedPreferences.getInstance();
     String? source;
     final lastCheck = preferences.getInt(_lastCheckKey) ?? 0;
-    final cacheIsFresh = DateTime.now().millisecondsSinceEpoch - lastCheck <
+    final cacheIsFresh =
+        DateTime.now().millisecondsSinceEpoch - lastCheck <
         checkInterval.inMilliseconds;
 
     if (!force && cacheIsFresh) {
@@ -280,25 +425,25 @@ class AppUpdateService {
               ],
             }
           : const {
-        'ru': [
-          'Fenyvo автоматически проверяет наличие новых версий.',
-          'Обновление можно открыть прямо с экрана уведомления.',
-          'После установки один раз показывается понятный список изменений.',
-          'Проверка работает в фоне и не мешает входу, сообщениям и звонкам.',
-        ],
-        'uk': [
-          'Fenyvo автоматично перевіряє наявність нових версій.',
-          'Оновлення можна відкрити прямо з екрана сповіщення.',
-          'Після встановлення один раз показується зрозумілий список змін.',
-          'Перевірка працює у фоні й не заважає входу, повідомленням та дзвінкам.',
-        ],
-        'en': [
-          'Fenyvo now checks for new versions automatically.',
-          'Open the update directly from the release notification.',
-          'A clear change summary appears once after installation.',
-          'Background checks do not interrupt sign-in, messages, or calls.',
-        ],
-      },
+              'ru': [
+                'Fenyvo автоматически проверяет наличие новых версий.',
+                'Обновление можно открыть прямо с экрана уведомления.',
+                'После установки один раз показывается понятный список изменений.',
+                'Проверка работает в фоне и не мешает входу, сообщениям и звонкам.',
+              ],
+              'uk': [
+                'Fenyvo автоматично перевіряє наявність нових версій.',
+                'Оновлення можна відкрити прямо з екрана сповіщення.',
+                'Після встановлення один раз показується зрозумілий список змін.',
+                'Перевірка працює у фоні й не заважає входу, повідомленням та дзвінкам.',
+              ],
+              'en': [
+                'Fenyvo now checks for new versions automatically.',
+                'Open the update directly from the release notification.',
+                'A clear change summary appears once after installation.',
+                'Background checks do not interrupt sign-in, messages, or calls.',
+              ],
+            },
     );
   }
 
@@ -306,7 +451,9 @@ class AppUpdateService {
     final client = HttpClient()..connectionTimeout = requestTimeout;
     try {
       final uri = Uri.parse(manifestUrl).replace(
-        queryParameters: {'t': DateTime.now().millisecondsSinceEpoch.toString()},
+        queryParameters: {
+          't': DateTime.now().millisecondsSinceEpoch.toString(),
+        },
       );
       final request = await client.getUrl(uri).timeout(requestTimeout);
       request.headers.set(HttpHeaders.acceptHeader, 'application/json');

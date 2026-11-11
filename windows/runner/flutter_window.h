@@ -7,6 +7,8 @@
 #include <flutter/encodable_value.h>
 
 #include <memory>
+
+struct HexAudioReplyState;
 #include <shellapi.h>
 
 #include "win32_window.h"
@@ -41,6 +43,9 @@ class FlutterWindow : public Win32Window {
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>> window_channel_;
   std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
       screen_security_channel_;
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
+      hex_audio_channel_;
+  std::shared_ptr<HexAudioReplyState> hex_audio_reply_state_;
   NOTIFYICONDATAW tray_icon_{};
   UINT taskbar_created_message_ = 0;
   UINT restore_message_ = 0;

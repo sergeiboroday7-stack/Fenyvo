@@ -1,3 +1,11 @@
+import 'package:fenyvo/services/crypto/private_e2ee_edit_protocol.dart';
+
+import 'dart:math';
+
+import 'package:fenyvo/services/crypto/private_e2ee_edit_delivery_policy.dart';
+
+import 'crypto/e2ee_inbound_policy.dart';
+import 'crypto/e2ee_delivery_policy.dart';
 import 'socket_login_continuation_guard.dart';
 import 'socket_event_generation_guard.dart';
 import '../features/messages/domain/message_id_generator.dart';
@@ -87,6 +95,9 @@ class SocketService {
   Set<String> _e2eeActivePeers = <String>{};
   final Map<String, Completer<Map<String, dynamic>>> _e2eeBundleRequests = {};
   final Set<String> _e2eeSendingIds = <String>{};
+  final Set<String> _e2eeRecoveryPeers = <String>{};
+  // Limits repeated recovery attempts without changing Signal identities.
+  final Map<String, DateTime> _e2eeRecoveryAttempts = <String, DateTime>{};
   Completer<bool>? _e2eePublishRequest;
 
   bool get e2eeEnabled => _e2eeEnabled;
@@ -241,11 +252,13 @@ class SocketService {
             return;
           }
 
-          unawaited(_handleRawMessage(
-            rawMessage,
-            generation: generation,
-            channel: channel,
-          ));
+          unawaited(
+            _handleRawMessage(
+              rawMessage,
+              generation: generation,
+              channel: channel,
+            ),
+          );
         },
         onError: (Object error) {
           print('❌ Ошибка WebSocket: $error');
@@ -374,6 +387,11 @@ class SocketService {
           if (!loginStillCurrent()) return;
           _syncPresence();
 
+          // Authentication is already complete. Let the UI continue before
+          // platform and Signal bootstrap so secure-store/network latency does
+          // not make a valid login appear frozen.
+          _notifyHandlers(message);
+
           final mediaToken = data['mediaToken']?.toString().trim() ?? '';
           final mediaPort =
               int.tryParse(data['mediaPort']?.toString() ?? '') ?? 8081;
@@ -404,24 +422,27 @@ class SocketService {
           // The user might have logged out during call initialization.
           if (!loginStillCurrent()) return;
 
-          if (_e2eeEnabled) {
-            final loginPeers = await E2eeSettingsService.instance.activePeers(
-              username,
-            );
-
-            if (!loginStillCurrent()) return;
-            _e2eeActivePeers = loginPeers;
-
-            await _prepareE2ee(username);
-
-            // Never resynchronize messages for an obsolete login.
-            if (!loginStillCurrent()) return;
-          } else {
-            _e2eeActivePeers = <String>{};
-            _send('e2ee_remove_bundle', const {});
-          }
-
+          // Mandatory Signal E2EE. Preserve existing sessions.
+          _e2eeEnabled = true;
+          await E2eeSettingsService.instance.setEnabled(true);
           if (!loginStillCurrent()) return;
+
+          final loginPeers = await E2eeSettingsService.instance.activePeers(
+            username,
+          );
+          if (!loginStillCurrent()) return;
+          _e2eeActivePeers = loginPeers;
+
+          // Authentication must not wait for crypto bootstrap. Publishing the
+          // Signal bundle can legitimately take several seconds (or time out
+          // while the server is recovering), but the accepted login and the
+          // initial state sync must remain responsive. Private delivery still
+          // fails closed: the outbox is flushed only after E2EE is ready.
+          unawaited(() async {
+            final ready = await _prepareE2ee(username);
+            if (!ready || !loginStillCurrent()) return;
+            await _flushOutbox();
+          }());
 
           if (_needsResyncAfterLogin) {
             _needsResyncAfterLogin = false;
@@ -432,8 +453,8 @@ class SocketService {
             _send('get_users', const {});
             print('🔄 RELAY: состояние после переподключения синхронизировано');
           }
-
-          await _flushOutbox();
+          // login_success was delivered before asynchronous bootstrap.
+          return;
         }
       }
 
@@ -524,19 +545,147 @@ class SocketService {
         }
       }
 
+      if (type == 'e2ee_decrypt_failure') {
+        // Notification only: never reset trust or resend from this event.
+        if (!SocketEventGenerationGuard.isCurrent(
+              eventGeneration: generation,
+              currentGeneration: _connectionGeneration,
+              eventChannel: channel,
+              currentChannel: _channel,
+            ) ||
+            !isAuthenticated) {
+          return;
+        }
+
+        final owner = currentUser?.trim() ?? '';
+        final eventSender = data['from']?.toString().trim() ?? '';
+        final peer = data['to']?.toString().trim() ?? '';
+        final messageId = data['messageId']?.toString().trim() ?? '';
+
+        if (owner.isEmpty ||
+            eventSender != owner ||
+            peer.isEmpty ||
+            peer == owner ||
+            !RegExp(r'^[A-Za-z0-9_-]{6,120}$').hasMatch(messageId)) {
+          return;
+        }
+
+        final originalMessage = StorageService.getOutboxMessages(owner)
+            .where(
+              (item) =>
+                  item['id']?.toString().trim() == messageId &&
+                  item['from']?.toString().trim() == owner &&
+                  item['to']?.toString().trim() == peer &&
+                  item['e2ee'] == true &&
+                  item['status']?.toString() == 'server_accepted',
+            )
+            .toList();
+
+        if (originalMessage.length != 1) {
+          return;
+        }
+
+        // Preserve plaintext locally for a controlled future re-encryption.
+        // Do not send again or reset Signal trust here.
+        StorageService.updateOutboxStatus(owner, messageId, 'decrypt_failed');
+        // Confirmed failure: refresh the same trusted Signal identity.
+        // Never reset keys, delete history or automatically resend.
+        final recoveryKey = '$owner:$peer';
+        final recoveryNow = DateTime.now().toUtc();
+
+        // Expire old attempt records and bound memory usage.
+        _e2eeRecoveryAttempts.removeWhere(
+          (_, attemptedAt) =>
+              recoveryNow.difference(attemptedAt) >=
+              const Duration(minutes: 10),
+        );
+
+        final previousAttempt = _e2eeRecoveryAttempts[recoveryKey];
+        final cooldownActive =
+            previousAttempt != null &&
+            recoveryNow.difference(previousAttempt) <
+                const Duration(minutes: 10);
+
+        if (!cooldownActive && _e2eeRecoveryPeers.add(peer)) {
+          _e2eeRecoveryAttempts[recoveryKey] = recoveryNow;
+          if (_e2eeRecoveryAttempts.length > 128) {
+            _e2eeRecoveryAttempts.remove(_e2eeRecoveryAttempts.keys.first);
+          }
+          final recoveryGeneration = _connectionGeneration;
+          final recoveryChannel = _channel;
+          unawaited(() async {
+            try {
+              final refreshed = await requestFreshE2eeSession(peer);
+              if (!refreshed ||
+                  !SocketEventGenerationGuard.isCurrent(
+                    eventGeneration: recoveryGeneration,
+                    currentGeneration: _connectionGeneration,
+                    eventChannel: recoveryChannel,
+                    currentChannel: _channel,
+                  ) ||
+                  !isAuthenticated ||
+                  currentUser?.trim() != owner) {
+                return;
+              }
+              _notifyHandlers({
+                'type': 'e2ee_recovery_ready',
+                'data': {'to': peer, 'failedMessageId': messageId},
+              });
+            } catch (_) {
+              // The original failed message stays available for recovery.
+            } finally {
+              _e2eeRecoveryPeers.remove(peer);
+            }
+          }());
+        }
+
+        _notifyHandlers({
+          'type': 'e2ee_decrypt_failure',
+          'data': {'messageId': messageId, 'from': owner, 'to': peer},
+        });
+        return;
+      }
       if (type == 'e2ee_prekey_bundle') {
+        // Reject responses from an obsolete socket or account.
+        // This does not replace server-side request correlation.
+        if (!SocketEventGenerationGuard.isCurrent(
+              eventGeneration: generation,
+              currentGeneration: _connectionGeneration,
+              eventChannel: channel,
+              currentChannel: _channel,
+            ) ||
+            !isAuthenticated ||
+            currentUser?.trim().isNotEmpty != true) {
+          return;
+        }
         final username = data['username']?.toString().trim() ?? '';
+        final expectedRequestId = _e2eeBundleRequestIds[username];
+        final responseRequestId = data['requestId']?.toString() ?? '';
+        // Reject a mismatched echo. Empty echoes remain supported until
+        // the public server is updated and verified.
+        if ((_e2eePreviewPeers.contains(username) &&
+                responseRequestId != expectedRequestId) ||
+            (responseRequestId.isNotEmpty &&
+                responseRequestId != expectedRequestId)) {
+          return;
+        }
+        _e2eeBundleRequestIds.remove(username);
         final request = _e2eeBundleRequests.remove(username);
         if (request != null && !request.isCompleted) {
           if (data['available'] == true) {
-            try {
-              await SignalE2eeService.instance.processRemoteBundle(
-                username,
-                data,
-              );
+            if (_e2eePreviewPeers.remove(username)) {
+              // Never accept an identity while merely fetching a preview.
               request.complete(data);
-            } catch (error) {
-              request.completeError(error);
+            } else {
+              try {
+                await SignalE2eeService.instance.processRemoteBundle(
+                  username,
+                  data,
+                );
+                request.complete(data);
+              } catch (error) {
+                request.completeError(error);
+              }
             }
           } else {
             request.completeError(
@@ -572,7 +721,7 @@ class SocketService {
             accepted,
           );
           if (!accepted) {
-            await SignalE2eeService.instance.resetPeerSession(peer);
+            // Preserve Signal session and remote identity on legacy invite rejection.
             await E2eeSettingsService.instance.clearFingerprintVerification(
               user,
               peer,
@@ -586,17 +735,22 @@ class SocketService {
         final user = currentUser?.trim() ?? '';
         if (id.isNotEmpty && user.isNotEmpty) {
           _e2eeSendingIds.remove(id);
-          StorageService.updateOutboxStatus(user, id, 'failed');
+          final retryable =
+              data['retryable'] == true ||
+              data['code']?.toString() == 'e2ee_keys_pending';
+          final status = retryable ? 'queued' : 'failed';
+          StorageService.updateOutboxStatus(user, id, status);
           final local = StorageService.getOutboxMessages(user)
               .where((item) => item['id']?.toString() == id)
               .cast<Map<String, dynamic>?>()
               .firstWhere((item) => item != null, orElse: () => null);
           _notifyHandlers({
-            'type': 'outbox_failed',
+            'type': retryable ? 'outbox_queued' : 'outbox_failed',
             'data': {
               ...?local,
               'id': id,
-              'status': 'failed',
+              'status': status,
+              if (retryable) 'waitingForE2ee': true,
               'reason':
                   data['reason']?.toString() ??
                   'Защищённое сообщение не отправлено',
@@ -611,13 +765,19 @@ class SocketService {
       // ======================================
 
       if (type == 'message') {
+        // Never accept a live private message as plaintext.
+        // Existing local message history is not modified here.
+        if (!const E2eeInboundPolicy().allowsNetworkMessage(
+          e2eeMarker: data['e2ee'],
+        )) {
+          print('E2EE: plaintext private delivery rejected');
+          return;
+        }
         if (data['e2ee'] == true) {
           final from = data['from']?.toString().trim() ?? '';
           try {
-            if (!_e2eeEnabled ||
-                currentUser == null ||
-                !_e2eeActivePeers.contains(from)) {
-              throw StateError('E2EE is disabled on this device');
+            if (currentUser?.trim().isNotEmpty != true || from.isEmpty) {
+              throw StateError('E2EE sender or local identity is missing');
             }
             await SignalE2eeService.instance.initializeForUser(currentUser!);
             final decrypted = await SignalE2eeService.instance.decrypt(
@@ -639,19 +799,223 @@ class SocketService {
             if (data['cipherType'] == 3) {
               unawaited(_prepareE2ee(currentUser!));
             }
+            if (decrypted['kind'] == 'private_edit_v1') {
+              // Signal decrypt and envelope identity checks succeeded.
+              // Do not treat an edit as a new chat message.
+              // The chat consumer will validate the target and persist it.
+              // Signal decryption may outlive the WebSocket or account.
+              // Never deliver a stale edit into another active session.
+              if (!SocketEventGenerationGuard.isCurrent(
+                    eventGeneration: generation,
+                    currentGeneration: _connectionGeneration,
+                    eventChannel: channel,
+                    currentChannel: _channel,
+                  ) ||
+                  !isAuthenticated ||
+                  currentUser?.trim() != outerTo.trim() ||
+                  from == outerTo ||
+                  outerTo.trim().isEmpty) {
+                return;
+              }
+              // Persist the verified edit even when ChatScreen is closed.
+              // No UI listener is required for the durable mutation.
+              final owner = outerTo.trim();
+              final peer = from;
+              final targetId =
+                  decrypted['targetMessageId']?.toString().trim() ?? '';
+              final editId = decrypted['id']?.toString().trim() ?? '';
+              if (targetId.isEmpty || editId.isEmpty) return;
+
+              bool saved = false;
+              try {
+                saved = await StorageService.mutateMessagesDurably(
+                  owner,
+                  peer,
+                  (current) {
+                    Map<String, dynamic>? original;
+                    for (final item in current) {
+                      if (item['id']?.toString().trim() == targetId &&
+                          item['from']?.toString().trim() == peer &&
+                          item['to']?.toString().trim() == owner) {
+                        original = Map<String, dynamic>.from(item);
+                        break;
+                      }
+                    }
+
+                    if (original == null ||
+                        !PrivateE2eeEditProtocol.canApply(
+                          payload: decrypted,
+                          original: original,
+                          authenticatedFrom: from,
+                          localUser: owner,
+                          peer: peer,
+                        )) {
+                      return null;
+                    }
+
+                    for (final item in current) {
+                      if (item['id']?.toString().trim() == targetId &&
+                          item['from']?.toString().trim() == peer &&
+                          item['to']?.toString().trim() == owner) {
+                        item['text'] = decrypted['newText'];
+                        item['isEdited'] = true;
+                        item['editedAt'] = decrypted['editedAt'];
+                        item['lastEditEventId'] = editId;
+                      }
+
+                      final reply = item['replyTo'];
+                      if (reply is Map &&
+                          reply['id']?.toString().trim() == targetId) {
+                        item['replyTo'] = {
+                          ...Map<String, dynamic>.from(reply),
+                          'text': decrypted['newText'],
+                        };
+                      }
+                    }
+                    return current;
+                  },
+                );
+              } catch (_) {
+                // Do not disclose edited text or Signal session details.
+              }
+
+              // Duplicate delivery is safe if this exact edit was saved.
+              if (!saved) {
+                saved = StorageService.getMessagesVisibleForOwner(owner, peer)
+                    .any(
+                      (item) =>
+                          item['id']?.toString().trim() == targetId &&
+                          item['from']?.toString().trim() == peer &&
+                          item['to']?.toString().trim() == owner &&
+                          item['e2ee'] == true &&
+                          item['lastEditEventId']?.toString().trim() == editId,
+                    );
+              }
+
+              if (!saved ||
+                  !SocketEventGenerationGuard.isCurrent(
+                    eventGeneration: generation,
+                    currentGeneration: _connectionGeneration,
+                    eventChannel: channel,
+                    currentChannel: _channel,
+                  ) ||
+                  !isAuthenticated ||
+                  currentUser?.trim() != owner) {
+                return;
+              }
+
+              // Notify the open chat only after durable persistence.
+              _notifyHandlers({
+                'type': 'private_e2ee_edit',
+                'data': {...decrypted, 'authenticatedFrom': from},
+              });
+              return;
+            }
           } catch (error) {
+            final signalFailure = error.toString().toLowerCase();
+            final signalCategory = signalFailure.contains('identity')
+                ? 'IDENTITY'
+                : signalFailure.contains('session')
+                ? 'SESSION'
+                : signalFailure.contains('duplicate')
+                ? 'DUPLICATE'
+                : signalFailure.contains('mac') ||
+                      signalFailure.contains('authentication')
+                ? 'AUTHENTICATION'
+                : signalFailure.contains('prekey') ||
+                      signalFailure.contains('pre-key')
+                ? 'PREKEY'
+                : signalFailure.contains('cipher') ||
+                      signalFailure.contains('decrypt')
+                ? 'CIPHER'
+                : 'OTHER';
+            final signalDetail =
+                signalFailure.contains('untrusted identity') ||
+                    signalFailure.contains('identity changed')
+                ? 'IDENTITY_CHANGED'
+                : signalFailure.contains('invalid mac') ||
+                      signalFailure.contains('bad mac') ||
+                      signalFailure.contains('mac verification')
+                ? 'MAC_FAILURE'
+                : signalFailure.contains('duplicate')
+                ? 'DUPLICATE_MESSAGE'
+                : signalFailure.contains('invalid prekey') ||
+                      signalFailure.contains('invalid pre-key')
+                ? 'INVALID_PREKEY'
+                : signalFailure.contains('no session') ||
+                      signalFailure.contains('session not found')
+                ? 'MISSING_SESSION'
+                : signalFailure.contains('invalid message') ||
+                      signalFailure.contains('invalidmessage')
+                ? 'INVALID_MESSAGE'
+                : signalFailure.contains('invalid key')
+                ? 'INVALID_KEY'
+                : signalFailure.contains('decrypt')
+                ? 'GENERIC_DECRYPT'
+                : 'UNCLASSIFIED';
+            final messageTime = DateTime.tryParse(
+              data['time']?.toString() ?? '',
+            );
+            final messageAge = messageTime == null
+                ? 'UNKNOWN'
+                : DateTime.now().toUtc().difference(messageTime.toUtc()) >
+                      const Duration(minutes: 5)
+                ? 'OLDER_THAN_5_MIN'
+                : 'RECENT_OR_FUTURE';
+            print(
+              'FENYVO_E2EE_RX category=$signalCategory '
+              'detail=$signalDetail age=$messageAge '
+              'type=${error.runtimeType}',
+            );
             data
               ..['text'] = '🔒 Не удалось расшифровать сообщение'
               ..['e2eeError'] = true;
             message['data'] = data;
+            // Report only a verified connection and the failed message ID.
+            // No plaintext, ciphertext or key material leaves this handler.
+            final failureId = data['id']?.toString().trim() ?? '';
+            final failureTo = data['to']?.toString().trim() ?? '';
+            final failureOwner = currentUser?.trim() ?? '';
+            if (SocketEventGenerationGuard.isCurrent(
+                  eventGeneration: generation,
+                  currentGeneration: _connectionGeneration,
+                  eventChannel: channel,
+                  currentChannel: _channel,
+                ) &&
+                isAuthenticated &&
+                failureOwner.isNotEmpty &&
+                failureOwner == failureTo &&
+                from.isNotEmpty &&
+                from != failureOwner &&
+                data['e2ee'] == true &&
+                RegExp(r'^[A-Za-z0-9_-]{6,120}$').hasMatch(failureId)) {
+              _send('e2ee_decrypt_failed', {
+                'messageId': failureId,
+                'from': from,
+              });
+            }
+            // A local diagnostic UI event only; no key material, ciphertext,
+            // plaintext, or unverified recovery instruction is emitted.
+            if (from.isNotEmpty &&
+                from != (currentUser?.trim() ?? '') &&
+                SocketEventGenerationGuard.isCurrent(
+                  eventGeneration: generation,
+                  currentGeneration: _connectionGeneration,
+                  eventChannel: channel,
+                  currentChannel: _channel,
+                ) &&
+                isAuthenticated) {
+              _notifyHandlers({
+                'type': 'e2ee_local_decrypt_failure',
+                'data': {'peer': from},
+              });
+            }
             print('🔒 E2EE: сообщение не расшифровано');
+            return;
           }
         }
-        final id = data['id']?.toString().trim() ?? '';
 
         final from = data['from']?.toString().trim() ?? '';
-
-        final to = data['to']?.toString().trim() ?? '';
 
         final text = data['text']?.toString().trim() ?? '';
 
@@ -663,18 +1027,6 @@ class SocketService {
         );
 
         final fileName = data['fileName']?.toString().trim();
-
-        // Сообщение реально дошло до приложения.
-        // Подтверждаем доставку серверу.
-        if (id.isNotEmpty &&
-            from.isNotEmpty &&
-            to.isNotEmpty &&
-            currentUser != null &&
-            currentUser!.isNotEmpty &&
-            to == currentUser &&
-            from != currentUser) {
-          sendMessageDelivered(messageId: id, from: from, to: to);
-        }
 
         // Уведомление показываем только если:
         // 1. сообщение не от самого себя;
@@ -716,6 +1068,41 @@ class SocketService {
 
       if (type == 'message_delivered') {
         final messageId = data['messageId']?.toString().trim() ?? '';
+        // Only a validated recipient acknowledgement can retire
+        // an accepted, encrypted message from the recovery outbox.
+        if (SocketEventGenerationGuard.isCurrent(
+              eventGeneration: generation,
+              currentGeneration: _connectionGeneration,
+              eventChannel: channel,
+              currentChannel: _channel,
+            ) &&
+            isAuthenticated) {
+          final owner = currentUser?.trim() ?? '';
+          final ackFrom = data['from']?.toString().trim() ?? '';
+          final ackTo = data['to']?.toString().trim() ?? '';
+
+          if (owner.isNotEmpty &&
+              ackFrom == owner &&
+              ackTo.isNotEmpty &&
+              ackTo != owner &&
+              messageId.isNotEmpty) {
+            final matching = StorageService.getOutboxMessages(owner)
+                .where(
+                  (item) =>
+                      item['id']?.toString().trim() == messageId &&
+                      item['from']?.toString().trim() == owner &&
+                      item['to']?.toString().trim() == ackTo &&
+                      item['e2ee'] == true &&
+                      (item['status']?.toString() == 'server_accepted' ||
+                          item['status']?.toString() == 'decrypt_failed'),
+                )
+                .toList();
+
+            if (matching.length == 1) {
+              StorageService.removeOutboxMessage(owner, messageId);
+            }
+          }
+        }
 
         if (messageId.isNotEmpty) {
           print(
@@ -836,6 +1223,154 @@ class SocketService {
         final id = data['id']?.toString().trim() ?? '';
         final user = currentUser?.trim() ?? '';
         if (id.isNotEmpty && user.isNotEmpty) {
+          final editPolicy = const PrivateE2eeEditDeliveryPolicy();
+          final pending = StorageService.getOutboxMessages(user)
+              .where((item) => item['id']?.toString() == id)
+              .cast<Map<String, dynamic>?>()
+              .firstWhere((item) => item != null, orElse: () => null);
+
+          if (pending != null && editPolicy.isEditOperation(pending)) {
+            final peer = pending['to']?.toString().trim() ?? '';
+            final validAck =
+                data['e2ee'] == true &&
+                data['from']?.toString().trim() == user &&
+                data['to']?.toString().trim() == peer &&
+                editPolicy.suppressOrdinaryMessageForAck(
+                  queued: pending,
+                  acknowledgedId: id,
+                );
+
+            if (!validAck ||
+                !editPolicy.isValidEditOperation(pending) ||
+                peer.isEmpty ||
+                peer == user ||
+                pending['from']?.toString().trim() != user) {
+              _e2eeSendingIds.remove(id);
+              StorageService.updateOutboxStatus(user, id, 'failed');
+              return;
+            }
+
+            // Discard ACK from a replaced connection/account.
+            if (!SocketEventGenerationGuard.isCurrent(
+                  eventGeneration: generation,
+                  currentGeneration: _connectionGeneration,
+                  eventChannel: channel,
+                  currentChannel: _channel,
+                ) ||
+                currentUser?.trim() != user) {
+              return;
+            }
+
+            bool saved = false;
+            try {
+              saved = await StorageService.mutateMessagesDurably(user, peer, (
+                current,
+              ) {
+                Map<String, dynamic>? originalMessage;
+                final targetId =
+                    pending['targetMessageId']?.toString().trim() ?? '';
+
+                for (final item in current) {
+                  if (item['id']?.toString().trim() == targetId &&
+                      item['from']?.toString().trim() == user &&
+                      item['to']?.toString().trim() == peer) {
+                    originalMessage = Map<String, dynamic>.from(item);
+                    break;
+                  }
+                }
+
+                if (originalMessage == null ||
+                    !PrivateE2eeEditProtocol.canApply(
+                      payload: pending,
+                      original: originalMessage,
+                      authenticatedFrom: user,
+                      localUser: user,
+                      peer: peer,
+                    )) {
+                  return null;
+                }
+
+                for (final item in current) {
+                  if (item['id']?.toString().trim() == targetId &&
+                      item['from']?.toString().trim() == user &&
+                      item['to']?.toString().trim() == peer) {
+                    item['text'] = pending['newText'];
+                    item['isEdited'] = true;
+                    item['editedAt'] = pending['editedAt'];
+                    item['lastEditEventId'] = id;
+                  }
+
+                  final reply = item['replyTo'];
+                  if (reply is Map &&
+                      reply['id']?.toString().trim() == targetId) {
+                    item['replyTo'] = {
+                      ...Map<String, dynamic>.from(reply),
+                      'text': pending['newText'],
+                    };
+                  }
+                }
+                return current;
+              });
+            } catch (_) {
+              // Do not log edited text or encrypted session data.
+            }
+
+            // Persistence may already have completed on an earlier ACK.
+            // An already-applied event is a successful idempotent result.
+            if (!saved) {
+              saved = StorageService.getMessagesVisibleForOwner(user, peer).any(
+                (item) =>
+                    item['id']?.toString().trim() ==
+                        pending['targetMessageId']?.toString().trim() &&
+                    item['from']?.toString().trim() == user &&
+                    item['to']?.toString().trim() == peer &&
+                    item['e2ee'] == true &&
+                    item['lastEditEventId']?.toString().trim() == id,
+              );
+            }
+
+            // An asynchronous write must not finish against another login.
+            if (!SocketEventGenerationGuard.isCurrent(
+                  eventGeneration: generation,
+                  currentGeneration: _connectionGeneration,
+                  eventChannel: channel,
+                  currentChannel: _channel,
+                ) ||
+                currentUser?.trim() != user) {
+              return;
+            }
+
+            _e2eeSendingIds.remove(id);
+
+            if (!saved) {
+              // Retain pending operation rather than lose confirmed edit.
+              StorageService.updateOutboxStatus(user, id, 'queued');
+              return;
+            }
+
+            StorageService.removeOutboxMessage(user, id);
+
+            if (!SocketEventGenerationGuard.isCurrent(
+                  eventGeneration: generation,
+                  currentGeneration: _connectionGeneration,
+                  eventChannel: channel,
+                  currentChannel: _channel,
+                ) ||
+                currentUser?.trim() != user) {
+              return;
+            }
+
+            _notifyHandlers({
+              'type': 'private_e2ee_edit_sent',
+              'data': {
+                'id': id,
+                'to': peer,
+                'operation': Map<String, dynamic>.from(pending),
+              },
+            });
+            return;
+          }
+
           _e2eeSendingIds.remove(id);
           if (data['e2ee'] == true) {
             final local = StorageService.getOutboxMessages(user)
@@ -852,7 +1387,12 @@ class SocketService {
               message['data'] = data;
             }
           }
-          StorageService.removeOutboxMessage(user, id);
+          if (data['e2ee'] == true) {
+            // Server acceptance is not proof of successful decryption.
+            StorageService.updateOutboxStatus(user, id, 'server_accepted');
+          } else {
+            StorageService.removeOutboxMessage(user, id);
+          }
           _notifyHandlers({'type': 'outbox_sent', 'data': data});
         }
       }
@@ -919,6 +1459,18 @@ class SocketService {
         return;
       }
 
+      // Never trust an externally supplied internal edit event.
+      // Genuine edits are dispatched directly after Signal decryption.
+      // Internal edit acknowledgements originate only from the validated
+      // local outbox and an authenticated message_sent response.
+      if (type == 'private_e2ee_edit_sent') {
+        print('E2EE: unverified private edit ACK rejected');
+        return;
+      }
+      if (type == 'private_e2ee_edit') {
+        print('E2EE: unverified private edit event rejected');
+        return;
+      }
       _notifyHandlers(message);
     } catch (error) {
       print('❌ Ошибка обработки сообщения: $error');
@@ -1118,19 +1670,26 @@ class SocketService {
         final id = item['id']?.toString().trim() ?? '';
         final target = item['to']?.toString().trim() ?? '';
         if (id.isEmpty || target.isEmpty) continue;
-        StorageService.updateOutboxStatus(user, id, 'sending');
-        _notifyHandlers({'type': 'outbox_sending', 'data': item});
-        if (item['requiresE2ee'] == true) {
+        final recoveryStatus = item['status']?.toString() ?? '';
+        if (recoveryStatus == 'server_accepted' ||
+            recoveryStatus == 'decrypt_failed') {
+          continue;
+        }
+        final editPolicy = const PrivateE2eeEditDeliveryPolicy();
+        if (editPolicy.needsDedicatedRetry(item)) {
+          if (!editPolicy.isValidEditOperation(item)) {
+            StorageService.updateOutboxStatus(user, id, 'failed');
+            continue;
+          }
+          StorageService.updateOutboxStatus(user, id, 'sending');
           unawaited(_sendE2eeMessage(Map<String, dynamic>.from(item)));
           continue;
         }
-        final payload = Map<String, dynamic>.from(item)
-          ..remove('from')
-          ..remove('isMe')
-          ..remove('status');
-        if (!_send('message', payload)) {
-          StorageService.updateOutboxStatus(user, id, 'queued');
-          break;
+        StorageService.updateOutboxStatus(user, id, 'sending');
+        _notifyHandlers({'type': 'outbox_sending', 'data': item});
+        if (const E2eeDeliveryPolicy().mustEncryptOutboxMessage(item)) {
+          unawaited(_sendE2eeMessage(Map<String, dynamic>.from(item)));
+          continue;
         }
       }
     } finally {
@@ -1622,6 +2181,27 @@ class SocketService {
   // ПЕЧАТАЕТ / TYPING
   // ========================================
 
+  // Recording statuses are ephemeral; do not attach media data.
+  void sendRecordingActivity(
+    String to, {
+    required String kind,
+    required bool active,
+  }) {
+    final target = to.trim();
+    if (target.isEmpty ||
+        (kind != 'voice' && kind != 'video') ||
+        !isAuthenticated ||
+        currentUser == null ||
+        currentUser!.trim().isEmpty) {
+      return;
+    }
+    _send('chat_recording_activity', <String, dynamic>{
+      'to': target,
+      'kind': kind,
+      'active': active,
+    });
+  }
+
   void sendTyping(String to, bool isTyping) {
     final target = to.trim();
 
@@ -1700,8 +2280,11 @@ class SocketService {
     }
 
     final user = currentUser?.trim() ?? '';
+    if (user.isEmpty) return '';
     final connected = _isConnected && _channel != null;
-    final protectWithE2ee = isE2eeActiveWith(target);
+    final protectWithE2ee = const E2eeDeliveryPolicy().requiresEncryption(
+      isPrivateMessage: true,
+    );
     if (protectWithE2ee) {
       messageData['requiresE2ee'] = true;
       messageData['e2ee'] = true;
@@ -1716,53 +2299,24 @@ class SocketService {
       });
     }
 
-    if (protectWithE2ee && user.isNotEmpty) {
-      if (connected) {
-        unawaited(_sendE2eeMessage(Map<String, dynamic>.from(messageData)));
-      }
-      return messageData['id'].toString();
-    }
-
-    final payload = Map<String, dynamic>.from(messageData)
-      ..remove('isMe')
-      ..remove('status');
-    if (!_send('message', payload) && user.isNotEmpty) {
-      StorageService.updateOutboxStatus(
-        user,
-        messageData['id'].toString(),
-        'queued',
-      );
-      _notifyHandlers({'type': 'outbox_queued', 'data': messageData});
+    if (connected) {
+      unawaited(_sendE2eeMessage(Map<String, dynamic>.from(messageData)));
     }
     return messageData['id'].toString();
   }
 
   Future<bool> setE2eeEnabled(bool enabled) async {
+    // The old UI cannot disable mandatory private E2EE.
+    if (!enabled) return false;
+
     final user = currentUser?.trim() ?? '';
-    if (enabled && user.isNotEmpty && isAuthenticated) {
+    if (user.isNotEmpty && isAuthenticated) {
       final ready = await _prepareE2ee(user);
       if (!ready) return false;
-    } else if (!enabled && isAuthenticated) {
-      for (final peer in _e2eeActivePeers.toList()) {
-        _send('e2ee_invite_response', {
-          'to': peer,
-          'accepted': false,
-          'disabled': true,
-        });
-        await SignalE2eeService.instance.resetPeerSession(peer);
-        await E2eeSettingsService.instance.clearFingerprintVerification(
-          user,
-          peer,
-        );
-      }
-      _send('e2ee_remove_bundle', const {});
     }
-    await E2eeSettingsService.instance.setEnabled(enabled);
-    _e2eeEnabled = enabled;
-    if (!enabled) {
-      _e2eeActivePeers = <String>{};
-      await E2eeSettingsService.instance.clearActivePeers(user);
-    }
+
+    await E2eeSettingsService.instance.setEnabled(true);
+    _e2eeEnabled = true;
     return true;
   }
 
@@ -1792,7 +2346,7 @@ class SocketService {
     }
     await E2eeSettingsService.instance.setPeerActive(user, peer, accepted);
     if (!accepted) {
-      await SignalE2eeService.instance.resetPeerSession(peer);
+      // Preserve Signal session and remote identity on legacy invite rejection.
       await E2eeSettingsService.instance.clearFingerprintVerification(
         user,
         peer,
@@ -1875,22 +2429,94 @@ class SocketService {
       return false;
     }
   }
-  Future<void> _requestE2eeBundle(String username) async {
+
+  /// Requests a fresh Signal session using the existing trusted identity.
+  /// This method must be triggered only by an explicit, authenticated
+  /// recovery flow. It does not delete a session or an identity.
+  Future<bool> requestFreshE2eeSession(String username) async {
+    final peer = username.trim();
+    final owner = currentUser?.trim() ?? '';
+
+    if (!isAuthenticated || owner.isEmpty || peer.isEmpty || peer == owner) {
+      return false;
+    }
+
+    final generation = _connectionGeneration;
+    final channel = _channel;
+
+    try {
+      await _requestE2eeBundle(peer);
+    } catch (_) {
+      return false;
+    }
+
+    return isAuthenticated &&
+        currentUser?.trim() == owner &&
+        generation == _connectionGeneration &&
+        identical(channel, _channel);
+  }
+
+  // Correlation tokens are scoped to pending bundle requests.
+  final Map<String, String> _e2eeBundleRequestIds = {};
+  final Set<String> _e2eePreviewPeers = <String>{};
+  int _e2eeBundleSerial = 0;
+
+  /// Authenticated, single-use candidate preview: no session or trust writes.
+  Future<Map<String, dynamic>> previewE2eeCandidate(String username) async {
+    final owner = currentUser?.trim() ?? '';
+    final peer = username.trim();
+    if (!isAuthenticated ||
+        owner.isEmpty ||
+        peer.isEmpty ||
+        peer == owner ||
+        _e2eeBundleRequests.containsKey(peer)) {
+      throw StateError('E2EE preview not available');
+    }
+    final generation = _connectionGeneration;
+    final channel = _channel;
+    if (!_e2eePreviewPeers.add(peer)) {
+      throw StateError('E2EE preview already active');
+    }
+    try {
+      final data = await _requestE2eeBundle(peer);
+      if (!isAuthenticated ||
+          currentUser?.trim() != owner ||
+          generation != _connectionGeneration ||
+          !identical(channel, _channel)) {
+        throw StateError('E2EE preview owner changed');
+      }
+      return data;
+    } finally {
+      _e2eePreviewPeers.remove(peer);
+    }
+  }
+
+  Future<Map<String, dynamic>> _requestE2eeBundle(String username) async {
     final existing = _e2eeBundleRequests[username];
     if (existing != null) {
-      await existing.future;
-      return;
+      if (_e2eePreviewPeers.contains(username)) {
+        throw StateError('E2EE preview conflicts with another request');
+      }
+      return await existing.future.timeout(const Duration(seconds: 10));
     }
     final completer = Completer<Map<String, dynamic>>();
     _e2eeBundleRequests[username] = completer;
-    if (!_send('e2ee_get_bundle', {'username': username})) {
+    final requestId =
+        '${DateTime.now().microsecondsSinceEpoch}_${++_e2eeBundleSerial}';
+    _e2eeBundleRequestIds[username] = requestId;
+    if (!_send('e2ee_get_bundle', {
+      'username': username,
+      'requestId': requestId,
+    })) {
       _e2eeBundleRequests.remove(username);
+      _e2eeBundleRequestIds.remove(username);
       throw StateError('Нет соединения с сервером');
     }
-    await completer.future.timeout(
+    return await completer.future.timeout(
       const Duration(seconds: 10),
       onTimeout: () {
         _e2eeBundleRequests.remove(username);
+        _e2eeBundleRequestIds.remove(username);
         throw TimeoutException('E2EE key request timed out');
       },
     );
@@ -1942,11 +2568,30 @@ class SocketService {
         return;
       }
 
+      final editPolicy = const PrivateE2eeEditDeliveryPolicy();
+      final isPrivateEdit = editPolicy.isEditOperation(localMessage);
+
+      if (isPrivateEdit && !editPolicy.isValidEditOperation(localMessage)) {
+        throw StateError('Invalid encrypted edit operation');
+      }
+
+      final securePayload = isPrivateEdit
+          ? <String, dynamic>{
+              'kind': localMessage['kind'],
+              'id': id,
+              'from': user,
+              'to': target,
+              'targetMessageId': localMessage['targetMessageId'],
+              'newText': localMessage['newText'],
+              'editedAt': localMessage['editedAt'],
+            }
+          : _privateE2eePayload(localMessage, user);
+
       Map<String, dynamic> encrypted;
       try {
         encrypted = await SignalE2eeService.instance.encrypt(
           target,
-          _privateE2eePayload(localMessage, user),
+          securePayload,
         );
       } on E2eeSessionMissing {
         if (!sendStillCurrent()) {
@@ -1963,7 +2608,7 @@ class SocketService {
 
         encrypted = await SignalE2eeService.instance.encrypt(
           target,
-          _privateE2eePayload(localMessage, user),
+          securePayload,
         );
       }
       // Encryption can finish after logout or connection replacement.
@@ -1982,6 +2627,24 @@ class SocketService {
         throw StateError('Нет соединения с сервером');
       }
     } catch (error) {
+      final signalFailure = error.toString().toLowerCase();
+      final signalCategory = signalFailure.contains('identity')
+          ? 'IDENTITY'
+          : signalFailure.contains('session')
+          ? 'SESSION'
+          : signalFailure.contains('timed out') ||
+                signalFailure.contains('timeout')
+          ? 'TIMEOUT'
+          : signalFailure.contains('key') || signalFailure.contains('bundle')
+          ? 'KEY_BUNDLE'
+          : signalFailure.contains('connect') ||
+                signalFailure.contains('сервер')
+          ? 'CONNECTION'
+          : 'OTHER';
+      print(
+        'FENYVO_E2EE_TX category=$signalCategory '
+        'type=${error.runtimeType}',
+      );
       // A cancelled session is a retry condition, not a crypto failure.
       if (!sendStillCurrent()) {
         parkStaleSend();
@@ -1989,13 +2652,22 @@ class SocketService {
       }
 
       _e2eeSendingIds.remove(id);
-      StorageService.updateOutboxStatus(user, id, 'failed');
+      final retryable =
+          error is E2eeSessionMissing ||
+          signalCategory == 'TIMEOUT' ||
+          signalCategory == 'KEY_BUNDLE' ||
+          signalCategory == 'CONNECTION';
+      final status = retryable ? 'queued' : 'failed';
+      StorageService.updateOutboxStatus(user, id, status);
       _notifyHandlers({
-        'type': 'outbox_failed',
+        'type': retryable ? 'outbox_queued' : 'outbox_failed',
         'data': {
           ...localMessage,
-          'status': 'failed',
-          'reason': 'Контакт ещё не готов к защищённой переписке',
+          'status': status,
+          if (retryable) 'waitingForE2ee': true,
+          'reason': retryable
+              ? 'Ожидаем E2EE-ключ собеседника'
+              : 'Не удалось отправить защищённое сообщение',
         },
       });
       print('🔒 E2EE: сообщение не отправлено');
@@ -2077,6 +2749,7 @@ class SocketService {
     // Server approval must be determined from legacy_media_regrant_result.
     return true;
   }
+
   void sendMediaMessage(
     String to, {
     required String messageType,
@@ -2135,7 +2808,9 @@ class SocketService {
       data['forwardComment'] = comment;
     }
     final user = currentUser?.trim() ?? '';
-    final protectWithE2ee = isE2eeActiveWith(target);
+    final protectWithE2ee = const E2eeDeliveryPolicy().requiresEncryption(
+      isPrivateMessage: true,
+    );
     if (protectWithE2ee && (e2eeMedia == null || user.isEmpty)) {
       print('🔒 E2EE: незашифрованное вложение заблокировано');
       return;
@@ -2153,7 +2828,6 @@ class SocketService {
       unawaited(_sendE2eeMessage(Map<String, dynamic>.from(data)));
       return;
     }
-    _send('media_message', data);
   }
 
   // ========================================
@@ -2219,7 +2893,9 @@ class SocketService {
     }
 
     final user = currentUser?.trim() ?? '';
-    final protectWithE2ee = isE2eeActiveWith(target);
+    final protectWithE2ee = const E2eeDeliveryPolicy().requiresEncryption(
+      isPrivateMessage: true,
+    );
     if (protectWithE2ee && (e2eeMedia == null || user.isEmpty)) {
       print('🔒 E2EE: незашифрованное голосовое заблокировано');
       return;
@@ -2237,32 +2913,105 @@ class SocketService {
       unawaited(_sendE2eeMessage(Map<String, dynamic>.from(messageData)));
       return;
     }
-
-    _send('message', messageData);
   }
 
   // ========================================
   // РЕДАКТИРОВАНИЕ СООБЩЕНИЯ
   // ========================================
 
+  /// Creates a Signal-only edit operation for a message owned by this user.
+  ///
+  /// Returns false when validation fails. The operation must not be
+  /// rendered as a new chat message.
+  bool sendPrivateE2eeEdit({
+    required Map<String, dynamic> originalMessage,
+    required String to,
+    required String newText,
+  }) {
+    final owner = currentUser?.trim() ?? '';
+    final peer = to.trim();
+    final originalId = originalMessage['id']?.toString().trim() ?? '';
+    final originalFrom = originalMessage['from']?.toString().trim() ?? '';
+    final originalTo = originalMessage['to']?.toString().trim() ?? '';
+    final cleanText = newText.trim();
+    final existingText = originalMessage['text']?.toString().trim() ?? '';
+    final forwardedFrom =
+        originalMessage['forwardedFrom']?.toString().trim() ?? '';
+    final messageType =
+        originalMessage['messageType']?.toString().trim().toLowerCase() ??
+        'text';
+
+    // Never allow edits based on a different account or untrusted target.
+    if (!_isConnected ||
+        !isAuthenticated ||
+        owner.isEmpty ||
+        peer.isEmpty ||
+        owner == peer ||
+        originalId.isEmpty ||
+        originalFrom != owner ||
+        originalTo != peer ||
+        originalMessage['e2ee'] != true ||
+        forwardedFrom.isNotEmpty ||
+        messageType != 'text' ||
+        cleanText.isEmpty ||
+        cleanText == existingText ||
+        cleanText.length > PrivateE2eeEditProtocol.maxTextLength) {
+      return false;
+    }
+
+    Map<String, dynamic> edit;
+    try {
+      final random = Random.secure();
+      final eventId =
+          'edit_${DateTime.now().microsecondsSinceEpoch}_'
+          '${random.nextInt(1 << 32)}';
+
+      edit = PrivateE2eeEditProtocol.create(
+        eventId: eventId,
+        from: owner,
+        to: peer,
+        targetMessageId: originalId,
+        newText: cleanText,
+        editedAt: DateTime.now().toUtc(),
+      );
+
+      if (!PrivateE2eeEditProtocol.canApply(
+        payload: edit,
+        original: originalMessage,
+        authenticatedFrom: owner,
+        localUser: owner,
+        peer: peer,
+      )) {
+        return false;
+      }
+    } catch (_) {
+      return false;
+    }
+
+    // Only local outbox receives the clear operation. The network
+    // sender encrypts the dedicated payload with Signal.
+    final queuedEdit = <String, dynamic>{
+      ...edit,
+      'e2ee': true,
+      'requiresE2ee': true,
+      'status': 'queued',
+    };
+
+    StorageService.saveOutboxMessage(owner, queuedEdit);
+    unawaited(_sendE2eeMessage(Map<String, dynamic>.from(queuedEdit)));
+    return true;
+  }
+
   void editMessage({
     required String messageId,
     required String to,
     required String newText,
   }) {
-    final id = messageId.trim();
-
-    final target = to.trim();
-
-    final text = newText.trim();
-
-    if (id.isEmpty || target.isEmpty || text.isEmpty) {
-      return;
-    }
-
-    _send('edit_message', {'messageId': id, 'to': target, 'newText': text});
+    // Fail closed: the legacy edit protocol exposes newText.
+    // Restore editing only through a verified Signal E2EE protocol.
+    print('E2EE: plaintext private edit blocked');
+    return;
   }
-
   // ========================================
   // УДАЛЕНИЕ СООБЩЕНИЯ ДЛЯ ВСЕХ
   // ========================================

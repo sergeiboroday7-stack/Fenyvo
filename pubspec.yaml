@@ -2,7 +2,7 @@ name: fenyvo
 description: Fenyvo messenger for Android and Windows
 publish_to: "none"
 
-version: 1.8.2+4256
+version: 1.8.2+6296
 environment:
   sdk: ">=3.13.0 <4.0.0"
 
@@ -57,6 +57,8 @@ dependencies:
   cryptography: ^2.9.0
   crypto: ^3.0.7
   http: ^1.6.0
+  camera: 0.11.2+1
+  camera_windows: 0.2.6+5
 
 dev_dependencies:
   flutter_test:

@@ -21,6 +21,7 @@ class MainActivity: FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        HexVideoAudioLevels.register(flutterEngine.dartExecutor.binaryMessenger, applicationContext)
         callWindowChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger,
             "spartan_chat/call_window").also { channel ->
             channel.setMethodCallHandler { call, result ->

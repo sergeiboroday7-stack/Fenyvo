@@ -37,8 +37,8 @@ void main() {
       ),
     );
 
-    expect(find.text('МОЙ FENYVO'), findsOneWidget);
-    expect(find.byIcon(Icons.bolt_rounded), findsNWidgets(2));
+    expect(find.byKey(const ValueKey('my-fenyvo-hero')), findsOneWidget);
+    expect(find.byKey(const ValueKey('fenyvo-supporter-banner')), findsNothing);
     expect(find.text('SpartaFenix'), findsOneWidget);
     expect(find.text('Всегда открыт к новым идеям'), findsOneWidget);
     expect(find.text('+380 63 000 00 00'), findsOneWidget);

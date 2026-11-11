@@ -108,9 +108,16 @@ class SignalSecureStore
   ) async {
     final id = _addressKey(address);
     final old = await getIdentity(address);
-    final changed = old == null || !old.equals(other: identityKey);
-    await _writeBytes('remote_identity', id, identityKey.serialize());
-    return changed;
+    if (old != null && !old.equals(other: identityKey)) {
+      throw StateError(
+        'Signal remote identity changed; explicit verification required',
+      );
+    }
+    if (old == null) {
+      await _writeBytes('remote_identity', id, identityKey.serialize());
+      return true;
+    }
+    return false;
   }
 
   @override
@@ -169,6 +176,73 @@ class SignalSecureStore
   Future<void> deleteSession(ProtocolAddress address) =>
       _storage.delete(key: _key('session', _addressKey(address)));
 
+  /// Stores a crash-recovery snapshot *before* a verified identity change.
+  /// Journal data stays inside the account-scoped platform secure storage.
+  /// Only one verified recovery may be active at once.
+  Future<void> beginVerifiedPeerRecovery(
+    ProtocolAddress address,
+    SessionRecord? oldSession,
+    PublicKey? oldIdentity,
+  ) async {
+    final existing = await _read('verified_recovery', 'pending');
+    if (existing != null) {
+      throw StateError('Pending E2EE recovery must be restored first');
+    }
+    await _storage.write(
+      key: _key('verified_recovery', 'pending'),
+      value: jsonEncode(<String, Object?>{
+        'version': 1,
+        'peer': address.name(),
+        'device': address.deviceId(),
+        'session': oldSession == null ? null : base64Encode(oldSession.serialize()),
+        'identity': oldIdentity == null ? null : base64Encode(oldIdentity.serialize()),
+      }),
+    );
+  }
+
+  /// Repeated calls are safe after a process death halfway through restore.
+  /// Never clear a journal until both old records are durable again.
+  Future<void> restorePendingVerifiedPeerRecovery() async {
+    final raw = await _read('verified_recovery', 'pending');
+    if (raw == null) return;
+    final data = jsonDecode(raw);
+    if (data is! Map<String, dynamic> ||
+        data['version'] != 1 ||
+        data['peer'] is! String ||
+        (data['peer'] as String).trim().isEmpty ||
+        data['device'] is! int ||
+        (data['device'] as int) <= 0) {
+      throw StateError('Invalid pending E2EE recovery journal');
+    }
+    final sessionString = data['session'];
+    final identityString = data['identity'];
+    if ((sessionString != null && sessionString is! String) ||
+        (identityString != null && identityString is! String)) {
+      throw StateError('Invalid pending E2EE recovery snapshot');
+    }
+    // Deserialize all snapshots before modifying any trusted state.
+    final oldSession = sessionString == null
+        ? null
+        : SessionRecord.deserialize(bytes: base64Decode(sessionString as String));
+    final oldIdentity = identityString == null
+        ? null
+        : PublicKey.deserialize(bytes: base64Decode(identityString as String));
+    final address = ProtocolAddress(
+      name: data['peer'] as String,
+      deviceId: data['device'] as int,
+    );
+    await deleteSession(address);
+    await deleteRemoteIdentity(address);
+    if (oldIdentity != null) await saveIdentity(address, oldIdentity);
+    if (oldSession != null) await storeSession(address, oldSession);
+    await _storage.delete(key: _key('verified_recovery', 'pending'));
+  }
+
+  /// Commit only after successful prekey processing; an interrupted commit
+  /// conservatively restores the previous trusted state on next startup.
+  Future<void> commitVerifiedPeerRecovery() =>
+      _storage.delete(key: _key('verified_recovery', 'pending'));
+
   @override
   Future<void> deleteAllSessions(String name) async {
     final raw = await _read('session_names', 'all');
@@ -206,6 +280,29 @@ class SignalSecureStore
         .map((parts) => int.tryParse(parts.last))
         .whereType<int>()
         .toList();
+  }
+
+  /// Reserve IDs durably before generating key material.
+  /// Start above the legacy 1..N range to avoid reusing consumed IDs.
+  Future<int> reserveNextPreKeyId({required bool kyber}) async {
+    final kind = kyber ? 'kyber_prekey' : 'prekey';
+    final persisted =
+        int.tryParse(await _read('prekey_allocator', kind) ?? '') ?? 0;
+    final existing = await _readIds(kind);
+    final maximum = existing.isEmpty
+        ? 0
+        : existing.reduce((a, b) => a > b ? a : b);
+    final next = [persisted, maximum, 1000000]
+            .reduce((a, b) => a > b ? a : b) +
+        1;
+    if (next >= 0xFFFFFF) {
+      throw StateError('Signal PreKey ID space exhausted');
+    }
+    await _storage.write(
+      key: _key('prekey_allocator', kind),
+      value: next.toString(),
+    );
+    return next;
   }
 
   @override

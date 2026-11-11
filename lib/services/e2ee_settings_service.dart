@@ -1,6 +1,6 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// User-controlled E2EE switch.
+/// Mandatory E2EE policy for private messages.
 ///
 /// This preference is deliberately separate from key material. It is safe to
 /// keep here; identities and ratchet state are stored by [SignalSecureStore].
@@ -13,13 +13,13 @@ class E2eeSettingsService {
   static const _verifiedKeyPrefix = 'signal_e2ee_verified_v1_';
 
   Future<bool> isEnabled() async {
-    final preferences = await SharedPreferences.getInstance();
-    return preferences.getBool(_enabledKey) ?? false;
+    // E2EE is mandatory. Legacy disabled preferences are ignored.
+    return true;
   }
 
   Future<void> setEnabled(bool enabled) async {
     final preferences = await SharedPreferences.getInstance();
-    await preferences.setBool(_enabledKey, enabled);
+    await preferences.setBool(_enabledKey, true);
   }
 
   String _peerKey(String username) =>

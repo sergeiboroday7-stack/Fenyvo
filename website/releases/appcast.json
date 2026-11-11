@@ -1,62 +1,50 @@
 {
   "schemaVersion": 1,
-  "publishedAt": "2026-11-04T12:22:01.466904Z",
+  "publishedAt": "2026-11-11T09:41:16.459Z",
   "platforms": {
     "android": {
       "version": "1.8.2",
-      "build": 6259,
+      "build": 6296,
       "minimumSupportedBuild": 0,
       "downloadUrl": "https://fenyvo.com/download/Fenyvo-1.8.2-arm64.apk",
-      "sha256": "20c3d72c70aaf29624b8b63ff308460691da7811444fcb35fe027c34ba6b3abe",
-      "sizeBytes": 77817217,
-      "publishedAt": "2026-11-04T12:22:01.466904Z",
+      "sha256": "44b16a7ae0e64b2ac93a3ab14af09eff03bdc7cf4f8bf80935b0e0aad0e11994",
+      "sizeBytes": 79305296,
+      "publishedAt": "2026-11-10T17:02:55.312417Z",
       "notes": {
         "ru": [
-          "Исправлено отображение статуса онлайн при первом подключении и последующих изменениях в чатах и контактах.",
-          "Индикатор «ОНЛАЙН» теперь показывает фактическое число пользователей в сети.",
-          "После выхода пользователя статус онлайн исчезает примерно через одну секунду без ложного мигания.",
-          "Поиск сообщений, защита экрана и восстановление доступа к аккаунту остаются доступными."
-        ],
-        "uk": [
-          "Виправлено відображення статусу онлайн під час першого підключення та подальших змін у чатах і контактах.",
-          "Індикатор «ОНЛАЙН» тепер показує фактичну кількість користувачів у мережі.",
-          "Після виходу користувача статус онлайн зникає приблизно через одну секунду без хибного блимання.",
-          "Пошук повідомлень, захист екрана та відновлення доступу до облікового запису залишаються доступними."
+          "Обновлена обработка записи голосовых сообщений при отображении HEX VIDEO.",
+          "Улучшена координация аудиозаписи и воспроизведения видеосообщений.",
+          "Обновлена Android-сборка FENYVO до версии 6296."
         ],
         "en": [
-          "Fixed initial and subsequent online presence in chats and contacts.",
-          "The ONLINE indicator now shows the actual number of present users.",
-          "Presence turns off about one second after exit without false flicker.",
-          "Message search, screen protection, and account recovery remain available."
+          "Updated voice recording handling while HEX VIDEO messages are visible.",
+          "Improved coordination between audio recording and video playback.",
+          "Updated the FENYVO Android build to 6296."
+        ],
+        "uk": [
+          "Оновлено обробку запису голосових повідомлень під час відображення HEX VIDEO.",
+          "Покращено узгодження аудіозапису та відтворення відеоповідомлень.",
+          "Оновлено Android-збірку FENYVO до версії 6296."
         ]
       }
     },
     "windows": {
       "version": "1.8.2",
-      "build": 4256,
+      "build": 6296,
       "minimumSupportedBuild": 0,
       "downloadUrl": "https://fenyvo.com/download/Fenyvo-1.8.2-windows-x64.zip",
-      "sha256": "eab47d944ad369857837adb163e2477d38aa05040aec3a7bc59cb7b6ea26ee28",
-      "sizeBytes": 31519845,
-      "publishedAt": "2026-10-30T15:22:57Z",
+      "sha256": "24090dc82dd44984ab1327dcb0b5be9a9c272d2b331089945fda26ba82af54a2",
+      "sizeBytes": 31172850,
+      "publishedAt": "2026-11-11T09:41:16.459Z",
       "notes": {
         "ru": [
-          "Исправлено отображение статуса онлайн при первом подключении и последующих изменениях в чатах и контактах.",
-          "Индикатор «ОНЛАЙН» теперь показывает фактическое число пользователей в сети.",
-          "После выхода пользователя статус онлайн исчезает примерно через одну секунду без ложного мигания.",
-          "Поиск сообщений, защита экрана и восстановление доступа к аккаунту остаются доступными."
+          "Обновлена Windows-сборка FENYVO до 6296. Сквозное шифрование личных сообщений работает автоматически."
         ],
         "uk": [
-          "Виправлено відображення статусу онлайн під час першого підключення та подальших змін у чатах і контактах.",
-          "Індикатор «ОНЛАЙН» тепер показує фактичну кількість користувачів у мережі.",
-          "Після виходу користувача статус онлайн зникає приблизно через одну секунду без хибного блимання.",
-          "Пошук повідомлень, захист екрана та відновлення доступу до облікового запису залишаються доступними."
+          "Оновлено Windows-збірку FENYVO до 6296. Наскрізне шифрування особистих повідомлень працює автоматично."
         ],
         "en": [
-          "Fixed initial and subsequent online presence in chats and contacts.",
-          "The ONLINE indicator now shows the actual number of present users.",
-          "Presence turns off about one second after exit without false flicker.",
-          "Message search, screen protection, and account recovery remain available."
+          "Updated FENYVO for Windows to build 6296. End-to-end encryption of private messages works automatically."
         ]
       }
     }
