@@ -1,0 +1,53 @@
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:spartan_chat_final/services/account_identity_state.dart';
+
+void main() {
+  const one = '11111111-1111-4111-8111-111111111111';
+  const two = '22222222-2222-4222-8222-222222222222';
+  test('valid ID is available only to its owner', () {
+    final s = AccountIdentityState()..bind(username: 'Alice', accountId: one);
+    expect(s.accountIdFor('Alice'), one);
+    expect(s.accountIdFor('Bob'), isNull);
+    expect(s.accountIdFor(null), isNull);
+  });
+  test('old server without ID remains compatible', () {
+    final s = AccountIdentityState()..bind(username: 'Alice');
+    expect(s.accountIdFor('Alice'), isNull);
+  });
+  test('account switch clears previous ID', () {
+    final s = AccountIdentityState()..bind(username: 'Alice', accountId: one);
+    s.bind(username: 'Bob');
+    expect(s.accountIdFor('Alice'), isNull);
+    expect(s.accountIdFor('Bob'), isNull);
+    s.bind(username: 'Bob', accountId: two);
+    expect(s.accountIdFor('Bob'), two);
+  });
+  test('malformed values clear previous ID', () {
+    for (final value in <Object?>[
+      null,
+      '',
+      'invalid',
+      42,
+      <String>[],
+      'ABCDEFAB-1111-4111-8111-111111111111',
+    ]) {
+      final s = AccountIdentityState()..bind(username: 'Alice', accountId: one);
+      s.bind(username: 'Alice', accountId: value);
+      expect(s.accountIdFor('Alice'), isNull);
+    }
+  });
+  test('logout clears ID', () {
+    final s = AccountIdentityState()..bind(username: 'Alice', accountId: one);
+    s.clear();
+    expect(s.accountIdFor('Alice'), isNull);
+  });
+  test('empty owner cannot bind ID', () {
+    final s = AccountIdentityState()..bind(username: ' ', accountId: one);
+    expect(s.accountIdFor(' '), isNull);
+  });
+  test('case aliases are not guessed', () {
+    final s = AccountIdentityState()..bind(username: 'Alice', accountId: one);
+    expect(s.accountIdFor('alice'), isNull);
+  });
+}

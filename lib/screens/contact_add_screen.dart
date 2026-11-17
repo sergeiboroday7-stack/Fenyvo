@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../services/socket_service.dart';
+import 'temporary_contact_screen.dart';
 
 class ContactAddScreen extends StatefulWidget {
   const ContactAddScreen({super.key, this.initialUsername});
@@ -255,6 +256,18 @@ class _ContactAddScreenState extends State<ContactAddScreen> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
+          OutlinedButton.icon(
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const TemporaryContactScreen(),
+                ),
+              );
+            },
+            icon: const Icon(Icons.shield_outlined),
+            label: const Text('Временный контакт'),
+          ),
+          const SizedBox(height: 24),
           const Text(
             'Введите точное имя пользователя. '
             'Список зарегистрированных пользователей не показывается.',

@@ -23,10 +23,12 @@ import '../services/pulse_service.dart';
 import '../services/spartan_shield_service.dart';
 import '../services/spartan_trust_service.dart';
 import '../services/storage_service.dart';
+import '../services/screen_security_service.dart';
 import '../services/media_cache_service.dart';
 import '../services/download_service.dart';
 import '../services/media_transfer_service.dart';
 import '../services/app_language_service.dart';
+import '../services/message_search_service.dart';
 import '../services/e2ee_settings_service.dart';
 import '../services/crypto/signal_e2ee_service.dart';
 
@@ -545,6 +547,9 @@ class _ChatScreenState extends State<ChatScreen>
 
   final Map<String, GlobalKey> _messageItemKeys = <String, GlobalKey>{};
 
+  final TextEditingController _searchController = TextEditingController();
+  final FocusNode _searchFocusNode = FocusNode();
+
   final List<Map<String, dynamic>> _messages = [];
 
   Map<String, dynamic>? _replyToMessage;
@@ -590,6 +595,10 @@ class _ChatScreenState extends State<ChatScreen>
   int _newMessagesWhileScrolledUp = 0;
 
   String? _highlightedMessageId;
+  bool _searchMode = false;
+  String _searchQuery = '';
+  List<String> _searchMatchIds = <String>[];
+  int _searchMatchIndex = -1;
 
   final Map<String, Completer<String>> _chatGptCompleters =
       <String, Completer<String>>{};
@@ -617,7 +626,9 @@ class _ChatScreenState extends State<ChatScreen>
   bool _e2eeVerified = false;
   bool _e2eeKeyChanged = false;
   bool _e2eeKeyChangeWarningShown = false;
-  bool _changingE2ee = false;
+  int _autoDeleteSeconds = 0;
+  int _unreadAutoDeleteSeconds = 0;
+  bool _screenSecurityEnabled = false;
 
   Timer? _typingStopTimer;
   Timer? _remoteTypingTimeoutTimer;
@@ -792,6 +803,8 @@ class _ChatScreenState extends State<ChatScreen>
 
     _loadMessages();
     _loadBackgroundSettings();
+    unawaited(_loadAutoDeleteSetting());
+    unawaited(_loadScreenSecuritySetting());
     _loadContactAvatar();
     unawaited(_loadTrustState());
 
@@ -818,6 +831,7 @@ class _ChatScreenState extends State<ChatScreen>
     AppLanguageService.instance.code.removeListener(_refreshLanguage);
     CallHistoryService.changes.removeListener(_refreshCallHistory);
     SocketService.instance.clearActiveChatUser(widget.targetUser);
+    unawaited(ScreenSecurityService.setSecure(false));
 
     if (_typingSent) {
       SocketService.instance.sendTyping(widget.targetUser, false);
@@ -853,6 +867,8 @@ class _ChatScreenState extends State<ChatScreen>
     _messageScrollController.dispose();
 
     _messageFocusNode.dispose();
+    _searchController.dispose();
+    _searchFocusNode.dispose();
     _drafts[_draftKey] = _messageController.text;
     _messageController.dispose();
 
@@ -1559,106 +1575,306 @@ class _ChatScreenState extends State<ChatScreen>
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
   }
 
-  Future<void> _toggleChatE2ee() async {
-    if (_changingE2ee) return;
-    if (_e2eeActive) {
-      final disable = await showDialog<bool>(
-        context: context,
-        builder: (context) => AlertDialog(
-          title: Text(_chatText('e2eeChatDisable')),
-          content: Text(
-            '${widget.targetUser}: ${_chatText('e2eeChatDisable')}?',
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: Text(_chatText('cancel')),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: Text(_chatText('e2eeDisableAction')),
-            ),
-          ],
-        ),
-      );
-      if (disable != true || !mounted) return;
-      setState(() => _changingE2ee = true);
-      final sent = await SocketService.instance.respondToE2eeInvite(
-        widget.targetUser,
-        false,
-      );
-      if (!mounted) return;
-      setState(() {
-        _changingE2ee = false;
-        if (sent) _e2eeActive = false;
-      });
-      if (!sent) _showE2eeNotice(_chatText('noServerConnection'));
+  Future<void> _loadScreenSecuritySetting() async {
+    final currentUser = SocketService.instance.currentUser ?? '';
+
+    if (currentUser.isEmpty) {
       return;
     }
 
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        icon: const Icon(Icons.lock_rounded, color: _gold, size: 42),
-        title: Text(_chatText('e2eeBeforeTitle')),
-        content: SingleChildScrollView(
-          child: Text(_chatText('e2eeBeforeText')),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text(_chatText('e2eeNotNow')),
-          ),
-          FilledButton.icon(
-            onPressed: () => Navigator.pop(context, true),
-            icon: const Icon(Icons.lock_rounded),
-            label: Text(_chatText('e2eeEnable')),
-          ),
-        ],
-      ),
+    final enabled = await StorageService.getChatScreenSecurity(
+      currentUser,
+      widget.targetUser,
     );
-    if (confirmed != true || !mounted) return;
-    setState(() => _changingE2ee = true);
-    final sent = await SocketService.instance.inviteE2ee(widget.targetUser);
+
     if (!mounted) return;
-    setState(() => _changingE2ee = false);
-    _showE2eeNotice(
-      sent ? _chatText('e2eeInviteSent') : _chatText('e2eeEnableError'),
+
+    setState(() {
+      _screenSecurityEnabled = enabled;
+    });
+
+    await ScreenSecurityService.setSecure(enabled);
+  }
+
+  Future<void> _toggleScreenSecurity() async {
+    final currentUser = SocketService.instance.currentUser ?? '';
+    if (currentUser.isEmpty) return;
+
+    final enabled = !_screenSecurityEnabled;
+
+    await ScreenSecurityService.setSecure(enabled);
+    await StorageService.setChatScreenSecurity(
+      currentUser,
+      widget.targetUser,
+      enabled,
+    );
+
+    if (!mounted) return;
+
+    setState(() {
+      _screenSecurityEnabled = enabled;
+    });
+  }
+
+  Future<void> _loadAutoDeleteSetting() async {
+    final currentUser = SocketService.instance.currentUser ?? '';
+
+    if (currentUser.isEmpty) {
+      return;
+    }
+
+    final seconds = await StorageService.getChatAutoDeleteSeconds(
+      currentUser,
+      widget.targetUser,
+    );
+
+    final unreadSeconds = await StorageService.getChatUnreadAutoDeleteSeconds(
+      currentUser,
+      widget.targetUser,
+    );
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _autoDeleteSeconds = seconds;
+      _unreadAutoDeleteSeconds = unreadSeconds;
+    });
+  }
+
+  String _autoDeleteLabel(int seconds) {
+    switch (seconds) {
+      case 30:
+        return '30 \u0441\u0435\u043a\u0443\u043d\u0434';
+      case 300:
+        return '5 \u043c\u0438\u043d\u0443\u0442';
+      case 3600:
+        return '1 \u0447\u0430\u0441';
+      case 86400:
+        return '24 \u0447\u0430\u0441\u0430';
+      case 604800:
+        return '7 \u0434\u043d\u0435\u0439';
+      default:
+        return '\u0412\u044b\u043a\u043b.';
+    }
+  }
+
+  String _unreadAutoDeleteLabel(int seconds) {
+    switch (seconds) {
+      case 3600:
+        return '1 \u0447\u0430\u0441';
+      case 86400:
+        return '24 \u0447\u0430\u0441\u0430';
+      case 259200:
+        return '3 \u0434\u043d\u044f';
+      case 604800:
+        return '7 \u0434\u043d\u0435\u0439';
+      default:
+        return '\u0412\u044b\u043a\u043b.';
+    }
+  }
+
+  Future<int?> _pickAutoDeleteInterval({
+    required String title,
+    required int currentValue,
+    required List<int> options,
+    required String Function(int) labelBuilder,
+  }) {
+    return showModalBottomSheet<int>(
+      context: context,
+      backgroundColor: SpartanPalette.surface,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 4, 20, 10),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.timer_outlined,
+                      color: SpartanPalette.gold,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        title,
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              ...options.map(
+                (seconds) => ListTile(
+                  leading: Icon(
+                    seconds == currentValue
+                        ? Icons.radio_button_checked_rounded
+                        : Icons.radio_button_off_rounded,
+                    color: seconds == currentValue
+                        ? SpartanPalette.gold
+                        : SpartanPalette.secondary,
+                  ),
+                  title: Text(labelBuilder(seconds)),
+                  onTap: () {
+                    Navigator.of(sheetContext).pop(seconds);
+                  },
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
     );
   }
 
-  Future<void> _showIncomingE2eeInvite(String from) async {
-    final accepted = await showDialog<bool>(
+  Future<void> _showAutoDeleteSettings() async {
+    final setting = await showModalBottomSheet<String>(
       context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: Text(_chatText('e2eeInviteTitle')),
-        content: Text(_chatText('e2eeInviteText', {'user': from})),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text(_chatText('e2eeDecline')),
+      backgroundColor: SpartanPalette.surface,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Padding(
+                padding: EdgeInsets.fromLTRB(20, 4, 20, 8),
+                child: Row(
+                  children: [
+                    Icon(Icons.timer_outlined, color: SpartanPalette.gold),
+                    SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        '\u0410\u0432\u0442\u043e\u0443\u0434\u0430\u043b\u0435\u043d\u0438\u0435 \u0441\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u0439',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Padding(
+                padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
+                child: Text(
+                  '\u041c\u043e\u0436\u043d\u043e \u043d\u0430\u0441\u0442\u0440\u043e\u0438\u0442\u044c \u0441\u0440\u043e\u043a \u043e\u0442\u0434\u0435\u043b\u044c\u043d\u043e \u0434\u043b\u044f \u043f\u0440\u043e\u0447\u0438\u0442\u0430\u043d\u043d\u044b\u0445 \u0438 \u043d\u0435\u043f\u0440\u043e\u0447\u0438\u0442\u0430\u043d\u043d\u044b\u0445 \u0441\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u0439.',
+                  style: TextStyle(
+                    color: SpartanPalette.secondary,
+                    fontSize: 13,
+                    height: 1.35,
+                  ),
+                ),
+              ),
+              ListTile(
+                leading: const Icon(
+                  Icons.visibility_outlined,
+                  color: SpartanPalette.gold,
+                ),
+                title: const Text(
+                  '\u041f\u043e\u0441\u043b\u0435 \u043f\u0440\u043e\u0447\u0442\u0435\u043d\u0438\u044f',
+                ),
+                subtitle: Text(_autoDeleteLabel(_autoDeleteSeconds)),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () {
+                  Navigator.of(sheetContext).pop('read');
+                },
+              ),
+              ListTile(
+                leading: const Icon(
+                  Icons.mark_email_unread_outlined,
+                  color: SpartanPalette.gold,
+                ),
+                title: const Text(
+                  '\u0415\u0441\u043b\u0438 \u043d\u0435 \u043f\u0440\u043e\u0447\u0438\u0442\u0430\u043d\u043e',
+                ),
+                subtitle: Text(
+                  _unreadAutoDeleteLabel(_unreadAutoDeleteSeconds),
+                ),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () {
+                  Navigator.of(sheetContext).pop('unread');
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
           ),
-          FilledButton.icon(
-            onPressed: () => Navigator.pop(context, true),
-            icon: const Icon(Icons.lock_rounded),
-            label: Text(_chatText('e2eeAccept')),
-          ),
-        ],
-      ),
+        );
+      },
     );
-    if (!mounted) return;
-    setState(() => _changingE2ee = true);
-    final sent = await SocketService.instance.respondToE2eeInvite(
-      from,
-      accepted == true,
-    );
-    if (!mounted) return;
-    setState(() {
-      _changingE2ee = false;
-      if (sent) _e2eeActive = accepted == true;
-    });
-    if (!sent) _showE2eeNotice(_chatText('e2eeEnableError'));
+
+    if (setting == null || !mounted) {
+      return;
+    }
+
+    final currentUser = SocketService.instance.currentUser ?? '';
+    if (currentUser.isEmpty) {
+      return;
+    }
+
+    if (setting == 'read') {
+      final selected = await _pickAutoDeleteInterval(
+        title: '\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u043f\u043e\u0441\u043b\u0435 \u043f\u0440\u043e\u0447\u0442\u0435\u043d\u0438\u044f',
+        currentValue: _autoDeleteSeconds,
+        options: const [0, 30, 300, 3600, 86400, 604800],
+        labelBuilder: _autoDeleteLabel,
+      );
+
+      if (selected == null || !mounted) {
+        return;
+      }
+
+      await StorageService.setChatAutoDeleteSeconds(
+        currentUser,
+        widget.targetUser,
+        selected,
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _autoDeleteSeconds = selected;
+      });
+
+      return;
+    }
+
+    if (setting == 'unread') {
+      final selected = await _pickAutoDeleteInterval(
+        title: '\u0423\u0434\u0430\u043b\u0438\u0442\u044c, \u0435\u0441\u043b\u0438 \u043d\u0435 \u043f\u0440\u043e\u0447\u0438\u0442\u0430\u043d\u043e',
+        currentValue: _unreadAutoDeleteSeconds,
+        options: const [0, 3600, 86400, 259200, 604800],
+        labelBuilder: _unreadAutoDeleteLabel,
+      );
+
+      if (selected == null || !mounted) {
+        return;
+      }
+
+      await StorageService.setChatUnreadAutoDeleteSeconds(
+        currentUser,
+        widget.targetUser,
+        selected,
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _unreadAutoDeleteSeconds = selected;
+      });
+    }
   }
 
   Future<void> _refreshE2eeVerification({
@@ -1849,12 +2065,6 @@ class _ChatScreenState extends State<ChatScreen>
         : <String, dynamic>{};
 
     final currentUser = SocketService.instance.currentUser ?? '';
-
-    if (type == 'e2ee_invite' &&
-        data['from']?.toString().trim() == widget.targetUser) {
-      unawaited(_showIncomingE2eeInvite(widget.targetUser));
-      return;
-    }
 
     if (type == 'e2ee_invite_response' &&
         data['from']?.toString().trim() == widget.targetUser) {
@@ -2334,7 +2544,7 @@ class _ChatScreenState extends State<ChatScreen>
         _saveMessages();
       }
 
-      if (from == currentUser && mounted) {
+      if (from == currentUser && mounted && data['autoDeleted'] != true) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
@@ -4229,6 +4439,8 @@ class _ChatScreenState extends State<ChatScreen>
       widget.targetUser,
       text,
       replyTo: replyTo,
+      autoDeleteAfterReadSeconds: _autoDeleteSeconds,
+      autoDeleteUnreadSeconds: _unreadAutoDeleteSeconds,
     );
 
     if (!wasConnected && mounted) {
@@ -4757,6 +4969,164 @@ class _ChatScreenState extends State<ChatScreen>
 
   GlobalKey _messageItemKey(String messageId) {
     return _messageItemKeys.putIfAbsent(messageId, GlobalKey.new);
+  }
+
+  void _recalculateSearchMatches() {
+    final previousId =
+        _searchMatchIndex >= 0 && _searchMatchIndex < _searchMatchIds.length
+        ? _searchMatchIds[_searchMatchIndex]
+        : '';
+
+    _searchMatchIds = _messages
+        .where((message) => MessageSearchService.matches(message, _searchQuery))
+        .map(_getMessageId)
+        .where((id) => id.isNotEmpty)
+        .toList(growable: false);
+
+    if (_searchMatchIds.isEmpty) {
+      _searchMatchIndex = -1;
+      return;
+    }
+
+    final previousIndex = previousId.isEmpty
+        ? -1
+        : _searchMatchIds.indexOf(previousId);
+    _searchMatchIndex = previousIndex >= 0
+        ? previousIndex
+        : _searchMatchIds.length - 1;
+  }
+
+  void _openMessageSearch() {
+    setState(() {
+      _searchMode = true;
+      _searchQuery = _searchController.text.trim();
+      _recalculateSearchMatches();
+    });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _searchFocusNode.requestFocus();
+    });
+  }
+
+  void _closeMessageSearch() {
+    _searchController.clear();
+    _searchFocusNode.unfocus();
+    setState(() {
+      _searchMode = false;
+      _searchQuery = '';
+      _searchMatchIds = <String>[];
+      _searchMatchIndex = -1;
+    });
+  }
+
+  void _onMessageSearchChanged(String value) {
+    setState(() {
+      _searchQuery = value.trim();
+      _recalculateSearchMatches();
+    });
+
+    if (_searchMatchIndex >= 0) {
+      unawaited(_jumpToCurrentSearchMatch());
+    }
+  }
+
+  Future<void> _jumpToCurrentSearchMatch() async {
+    if (_searchMatchIndex < 0 || _searchMatchIndex >= _searchMatchIds.length) {
+      return;
+    }
+
+    final id = _searchMatchIds[_searchMatchIndex];
+    final index = _messages.indexWhere(
+      (message) => _getMessageId(message) == id,
+    );
+    if (index >= 0) await _jumpToPinnedMessage(_messages[index]);
+  }
+
+  Future<void> _nextMessageSearchMatch({required bool newer}) async {
+    if (_searchMatchIds.isEmpty) return;
+
+    setState(() {
+      if (_searchMatchIndex < 0) {
+        _searchMatchIndex = _searchMatchIds.length - 1;
+      } else if (newer) {
+        _searchMatchIndex = (_searchMatchIndex + 1) % _searchMatchIds.length;
+      } else {
+        _searchMatchIndex =
+            (_searchMatchIndex - 1 + _searchMatchIds.length) %
+            _searchMatchIds.length;
+      }
+    });
+
+    await _jumpToCurrentSearchMatch();
+  }
+
+  Widget _buildMessageSearchBar() {
+    final matchCount = _searchMatchIds.length;
+    final current = _searchMatchIndex >= 0 ? _searchMatchIndex + 1 : 0;
+
+    return Container(
+      color: SpartanPalette.surface,
+      padding: EdgeInsets.fromLTRB(
+        Platform.isWindows ? 16 : 10,
+        7,
+        Platform.isWindows ? 16 : 10,
+        7,
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: _searchController,
+              focusNode: _searchFocusNode,
+              onChanged: _onMessageSearchChanged,
+              textInputAction: TextInputAction.search,
+              style: const TextStyle(color: SpartanPalette.ink),
+              decoration: InputDecoration(
+                hintText: _chatText('searchConversationHint'),
+                hintStyle: const TextStyle(color: SpartanPalette.muted),
+                prefixIcon: const Icon(Icons.search_rounded, color: _gold),
+                suffixText: _searchQuery.isEmpty
+                    ? null
+                    : '$current/$matchCount',
+                suffixStyle: const TextStyle(
+                  color: _gold,
+                  fontWeight: FontWeight.w700,
+                ),
+                filled: true,
+                fillColor: SpartanPalette.canvasDeep,
+                isDense: true,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(20),
+                  borderSide: BorderSide.none,
+                ),
+              ),
+            ),
+          ),
+          IconButton(
+            tooltip: _chatText('previousMatch'),
+            onPressed: matchCount == 0
+                ? null
+                : () => unawaited(_nextMessageSearchMatch(newer: false)),
+            icon: const Icon(Icons.keyboard_arrow_up_rounded, color: _gold),
+          ),
+          IconButton(
+            tooltip: _chatText('nextMatch'),
+            onPressed: matchCount == 0
+                ? null
+                : () => unawaited(_nextMessageSearchMatch(newer: true)),
+            icon: const Icon(Icons.keyboard_arrow_down_rounded, color: _gold),
+          ),
+          IconButton(
+            tooltip: _chatText('closeSearch'),
+            onPressed: _closeMessageSearch,
+            icon: const Icon(
+              Icons.close_rounded,
+              color: SpartanPalette.secondary,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   bool _isMessagePinned(Map<String, dynamic> message) {
@@ -10170,6 +10540,51 @@ class _ChatScreenState extends State<ChatScreen>
     }
   }
 
+  Future<void> _showFeatureIntro({
+    required String feature,
+    required String title,
+    required String description,
+  }) async {
+    final currentUser = SocketService.instance.currentUser ?? '';
+    if (currentUser.isEmpty) return;
+
+    final shouldShow = await StorageService.shouldShowFeatureIntro(
+      currentUser,
+      feature,
+    );
+    if (!shouldShow || !mounted) return;
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(
+          children: [
+            const Icon(Icons.info_outline_rounded, color: SpartanPalette.gold),
+            const SizedBox(width: 10),
+            Expanded(child: Text(title)),
+          ],
+        ),
+        content: Text(description),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: Text(_chatText('gotIt')),
+          ),
+          TextButton(
+            onPressed: () async {
+              await StorageService.markFeatureIntroSeen(currentUser, feature);
+              if (dialogContext.mounted) {
+                Navigator.pop(dialogContext);
+              }
+            },
+            child: Text(_chatText('gotItDontShow')),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _showTrustExplanation({bool firstTime = false}) async {
     await showDialog<void>(
       context: context,
@@ -11143,9 +11558,14 @@ class _ChatScreenState extends State<ChatScreen>
     final keyboardHeight = MediaQuery.viewInsetsOf(context).bottom;
 
     return PopScope(
-      canPop: !_emojiVisible,
+      canPop: !_emojiVisible && !_searchMode,
       onPopInvokedWithResult: (didPop, result) {
-        if (!didPop && _emojiVisible) setState(() => _emojiVisible = false);
+        if (didPop) return;
+        if (_emojiVisible) {
+          setState(() => _emojiVisible = false);
+        } else if (_searchMode) {
+          _closeMessageSearch();
+        }
       },
       child: Scaffold(
         backgroundColor: SpartanPalette.canvas,
@@ -11323,9 +11743,61 @@ class _ChatScreenState extends State<ChatScreen>
               tooltip: _chatText('more'),
               icon: const Icon(Icons.more_vert_rounded),
               onSelected: (value) {
-                if (value == 'ai') unawaited(_showSpartanAiSheet());
-                if (value == 'auto') unawaited(_showAutoReplySettings());
-                if (value == 'e2ee') unawaited(_toggleChatE2ee());
+                if (value == 'search') {
+                  _openMessageSearch();
+                }
+                if (value == 'ai') {
+                  unawaited(() async {
+                    await _showFeatureIntro(
+                      feature: 'ai',
+                      title: 'FENYVO AI',
+                      description: _chatText('aiMenuDescription'),
+                    );
+                    if (!mounted) return;
+                    await _showSpartanAiSheet();
+                  }());
+                }
+                if (value == 'auto') {
+                  unawaited(() async {
+                    await _showFeatureIntro(
+                      feature: 'auto_reply',
+                      title: _autoReplyEnabled
+                          ? _chatText('autoRepliesOn')
+                          : _chatText('configureAutoReplies'),
+                      description: _chatText('autoReplyMenuDescription'),
+                    );
+                    if (!mounted) return;
+                    await _showAutoReplySettings();
+                  }());
+                }
+                if (value == 'auto_delete') {
+                  unawaited(() async {
+                    await _showFeatureIntro(
+                      feature: 'auto_delete',
+                      title: 'Автоудаление сообщений',
+                      description: _chatText('autoDeleteMenuDescription', {
+                        'value': _autoDeleteLabel(_autoDeleteSeconds),
+                      }),
+                    );
+                    if (!mounted) return;
+                    await _showAutoDeleteSettings();
+                  }());
+                }
+                if (value == 'screen_security') {
+                  unawaited(() async {
+                    await _showFeatureIntro(
+                      feature: 'screen_security',
+                      title: 'Защита экрана',
+                      description: _chatText(
+                        _screenSecurityEnabled
+                            ? 'screenSecurityOnDescription'
+                            : 'screenSecurityOffDescription',
+                      ),
+                    );
+                    if (!mounted) return;
+                    await _toggleScreenSecurity();
+                  }());
+                }
                 if (value == 'e2ee_verify') {
                   unawaited(_showE2eeSafetyNumber());
                 }
@@ -11342,22 +11814,42 @@ class _ChatScreenState extends State<ChatScreen>
               },
               itemBuilder: (_) => [
                 PopupMenuItem(
-                  value: 'e2ee',
-                  enabled: !_changingE2ee,
+                  value: 'search',
                   child: Row(
                     children: [
-                      Icon(
-                        _e2eeActive
-                            ? Icons.lock_rounded
-                            : Icons.lock_open_rounded,
-                        color: _e2eeActive ? _gold : null,
-                      ),
+                      const Icon(Icons.search_rounded),
                       const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          _e2eeActive
-                              ? _chatText('e2eeChatOn')
-                              : _chatText('e2eeChatInvite'),
+                      Expanded(child: Text(_chatText('searchMessages'))),
+                    ],
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'e2ee_status',
+                  enabled: false,
+                  child: Row(
+                    children: [
+                      const Icon(Icons.lock_rounded, color: Colors.greenAccent),
+                      const SizedBox(width: 12),
+                      const Expanded(child: Text('E2EE')),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 5,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.green.withValues(alpha: .14),
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: Colors.green.withValues(alpha: .55),
+                          ),
+                        ),
+                        child: const Text(
+                          'Защищено',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.greenAccent,
+                          ),
                         ),
                       ),
                     ],
@@ -11395,25 +11887,140 @@ class _ChatScreenState extends State<ChatScreen>
                   ),
                 PopupMenuItem(
                   value: 'trust',
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                  child: Row(
                     children: [
-                      Text(_chatText('trustContact')),
-                      Text(
-                        _chatText('trustSubtitle'),
-                        style: const TextStyle(fontSize: 11),
+                      const Icon(Icons.shield_outlined),
+                      const SizedBox(width: 12),
+                      Expanded(child: Text(_chatText('trustContact'))),
+                    ],
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'auto_delete',
+                  child: Row(
+                    children: [
+                      const Icon(Icons.timer_outlined),
+                      const SizedBox(width: 12),
+                      const Expanded(child: Text('Автоудаление')),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 5,
+                        ),
+                        decoration: BoxDecoration(
+                          color: _autoDeleteSeconds > 0
+                              ? _gold.withValues(alpha: .12)
+                              : SpartanPalette.canvasDeep,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: _autoDeleteSeconds > 0
+                                ? _gold.withValues(alpha: .45)
+                                : SpartanPalette.secondary.withValues(
+                                    alpha: .45,
+                                  ),
+                          ),
+                        ),
+                        child: Text(
+                          _autoDeleteLabel(_autoDeleteSeconds),
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: _autoDeleteSeconds > 0
+                                ? _gold
+                                : SpartanPalette.secondary,
+                          ),
+                        ),
                       ),
                     ],
                   ),
                 ),
-                const PopupMenuItem(value: 'ai', child: Text('FENYVO AI')),
+                PopupMenuItem(
+                  value: 'screen_security',
+                  child: Row(
+                    children: [
+                      const Icon(Icons.security_rounded),
+                      const SizedBox(width: 12),
+                      const Expanded(child: Text('Защита экрана')),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 5,
+                        ),
+                        decoration: BoxDecoration(
+                          color: _screenSecurityEnabled
+                              ? Colors.green.withValues(alpha: .14)
+                              : SpartanPalette.canvasDeep,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: _screenSecurityEnabled
+                                ? Colors.green.withValues(alpha: .55)
+                                : SpartanPalette.secondary.withValues(
+                                    alpha: .45,
+                                  ),
+                          ),
+                        ),
+                        child: Text(
+                          _screenSecurityEnabled ? 'Вкл.' : 'Выкл.',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: _screenSecurityEnabled
+                                ? Colors.greenAccent
+                                : SpartanPalette.secondary,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                PopupMenuItem(
+                  value: 'ai',
+                  child: Row(
+                    children: [
+                      const Icon(Icons.auto_awesome_rounded),
+                      const SizedBox(width: 12),
+                      const Expanded(child: Text('FENYVO AI')),
+                    ],
+                  ),
+                ),
                 PopupMenuItem(
                   value: 'auto',
                   enabled: !_autoReplyLoading,
-                  child: Text(
-                    _autoReplyEnabled
-                        ? _chatText('autoRepliesOn')
-                        : _chatText('configureAutoReplies'),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.quickreply_outlined),
+                      const SizedBox(width: 12),
+                      const Expanded(child: Text('Автоответы')),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 5,
+                        ),
+                        decoration: BoxDecoration(
+                          color: _autoReplyEnabled
+                              ? Colors.green.withValues(alpha: .14)
+                              : SpartanPalette.canvasDeep,
+                          borderRadius: BorderRadius.circular(14),
+                          border: Border.all(
+                            color: _autoReplyEnabled
+                                ? Colors.green.withValues(alpha: .55)
+                                : SpartanPalette.secondary.withValues(
+                                    alpha: .45,
+                                  ),
+                          ),
+                        ),
+                        child: Text(
+                          _autoReplyEnabled ? 'Вкл.' : 'Выкл.',
+                          style: TextStyle(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: _autoReplyEnabled
+                                ? Colors.greenAccent
+                                : SpartanPalette.secondary,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ],
@@ -11451,6 +12058,7 @@ class _ChatScreenState extends State<ChatScreen>
               ),
               child: Column(
                 children: [
+                  if (_searchMode) _buildMessageSearchBar(),
                   _buildBlockedBanner(),
                   _buildShieldBanner(),
                   _buildPinnedMessageBanner(),

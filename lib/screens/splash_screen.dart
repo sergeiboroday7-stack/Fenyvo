@@ -1,3 +1,4 @@
+import '../widgets/device_transfer_approval_host.dart';
 import '../theme/spartan_theme.dart';
 
 import 'package:flutter/material.dart';
@@ -167,7 +168,7 @@ class _SplashScreenState extends State<SplashScreen> {
 
     Navigator.pushReplacement(
       context,
-      MaterialPageRoute(builder: (_) => const ChatListScreen()),
+      MaterialPageRoute(builder: (_) => const DeviceTransferApprovalHost(child: ChatListScreen())),
     );
   }
 

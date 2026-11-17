@@ -156,6 +156,11 @@ const OFFLINE_MESSAGE_STATUS_FILE = path.join(
   'offline_message_status.json',
 );
 
+const MESSAGE_EXPIRATIONS_FILE = path.join(
+  DATA_DIR,
+  'message_expirations.json',
+);
+
 const AUTO_REPLY_SETTINGS_FILE = path.join(
   DATA_DIR,
   'auto_reply_settings.json',
@@ -180,6 +185,11 @@ const TRUST_DECISIONS_FILE = path.join(
 const COMMUNICATION_REQUESTS_FILE = path.join(
   __dirname,
   'communication_requests.json',
+);
+
+const TEMPORARY_CONTACTS_FILE = path.join(
+  DATA_DIR,
+  'temporary_contacts.json',
 );
 
 // Public Signal pre-key bundles only. Private keys never leave devices.
@@ -291,6 +301,112 @@ const communicationRequests =
     'запросов связи',
   );
 
+const temporaryContacts = loadJsonObjectFile(
+  TEMPORARY_CONTACTS_FILE,
+  'временных контактов',
+);
+
+const temporaryContactSessions = new Map();
+const temporaryE2eeBundles = new Map();
+function getTemporaryContactSessionForUser(sessionId, username) {
+  const id = sessionId?.toString().trim() || '';
+  const user = username?.toString().trim() || '';
+
+  if (!id || !user) {
+    return null;
+  }
+
+  let session = temporaryContactSessions.get(id);
+
+  if (!session) {
+    for (const [token, record] of Object.entries(temporaryContacts)) {
+      if (
+        !record ||
+        typeof record !== 'object' ||
+        Array.isArray(record)
+      ) {
+        continue;
+      }
+
+      const storedSessionId =
+        record.sessionId?.toString().trim() || '';
+
+      if (storedSessionId !== id) {
+        continue;
+      }
+
+      if (record.revoked === true) {
+        return null;
+      }
+
+      const owner = record.owner?.toString().trim() || '';
+      const guest = record.guest?.toString().trim() || '';
+      const expiresAtMs = Date.parse(record.expiresAt || '');
+
+      if (
+        !owner ||
+        !guest ||
+        !Number.isFinite(expiresAtMs) ||
+        expiresAtMs <= Date.now()
+      ) {
+        return null;
+      }
+
+      session = {
+        id,
+        token,
+        owner,
+        guest,
+        createdAt:
+          record.joinedAt ||
+          record.createdAt ||
+          new Date().toISOString(),
+        expiresAt: record.expiresAt,
+        allowMessages: record.allowMessages !== false,
+        allowCalls: record.allowCalls === true,
+        allowFiles: record.allowFiles === true,
+      };
+
+      temporaryContactSessions.set(id, session);
+      break;
+    }
+  }
+
+  if (!session) {
+    return null;
+  }
+
+  const expiresAtMs = Date.parse(session.expiresAt || '');
+
+  if (!Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) {
+    temporaryContactSessions.delete(id);
+    return null;
+  }
+
+  const userLower = user.toLowerCase();
+  const ownerLower =
+    session.owner?.toString().toLowerCase() || '';
+  const guestLower =
+    session.guest?.toString().toLowerCase() || '';
+
+  if (userLower === ownerLower) {
+    return {
+      session,
+      role: 'owner',
+      peer: session.guest,
+    };
+  }
+
+  if (userLower === guestLower) {
+    return {
+      session,
+      role: 'guest',
+      peer: session.owner,
+    };
+  }
+
+  return null;
+}
 function getAcceptedCommunicationContacts(username) {
   const user = username?.toString().trim();
 
@@ -887,6 +1003,63 @@ function saveOfflineMessages(
   }
 }
 
+function loadMessageExpirations() {
+  try {
+    if (!fs.existsSync(MESSAGE_EXPIRATIONS_FILE)) {
+      fs.writeFileSync(
+        MESSAGE_EXPIRATIONS_FILE,
+        JSON.stringify({}, null, 2),
+        'utf8',
+      );
+
+      return {};
+    }
+
+    const data = JSON.parse(
+      fs.readFileSync(
+        MESSAGE_EXPIRATIONS_FILE,
+        'utf8',
+      ),
+    );
+
+    if (
+      !data ||
+      typeof data !== 'object' ||
+      Array.isArray(data)
+    ) {
+      return {};
+    }
+
+    return data;
+  } catch (error) {
+    console.error(
+      'Failed to load message expirations:',
+      error,
+    );
+
+    return {};
+  }
+}
+
+function saveMessageExpirations(expirations) {
+  try {
+    fs.writeFileSync(
+      MESSAGE_EXPIRATIONS_FILE,
+      JSON.stringify(
+        expirations,
+        null,
+        2,
+      ),
+      'utf8',
+    );
+  } catch (error) {
+    console.error(
+      'Failed to save message expirations:',
+      error,
+    );
+  }
+}
+
 function queueOfflineMessage(
   username,
   messageData,
@@ -1167,6 +1340,110 @@ function purgeOfflineMessageArtifacts(
   }
 
   return removedQueuedOriginal;
+}
+
+function deletePrivateMessageForEveryone({
+  messageId,
+  from,
+  to,
+  senderSocket = null,
+  automatic = false,
+}) {
+  const deletedAt =
+    new Date().toISOString();
+
+  const deleteData = {
+    messageId,
+    from,
+    to,
+    deletedAt,
+    ...(automatic
+      ? { autoDeleted: true }
+      : {}),
+  };
+
+  const removedQueuedOriginal =
+    purgeOfflineMessageArtifacts(
+      to,
+      messageId,
+    );
+
+  purgeOfflineMessageArtifacts(
+    from,
+    messageId,
+  );
+
+  messageReactions.delete(
+    messageId,
+  );
+
+  if (
+    Object.prototype.hasOwnProperty.call(
+      messageExpirations,
+      messageId,
+    )
+  ) {
+    delete messageExpirations[
+      messageId
+    ];
+
+    saveMessageExpirations(
+      messageExpirations,
+    );
+  }
+
+  const receiver =
+    onlineUsers.get(to);
+
+  if (
+    receiver?.readyState ===
+    WebSocket.OPEN
+  ) {
+    send(
+      receiver,
+      'message_deleted',
+      deleteData,
+    );
+  } else if (
+    !removedQueuedOriginal
+  ) {
+    queueOfflineEvent(
+      to,
+      'message_deleted',
+      deleteData,
+    );
+  }
+
+  const sender =
+    senderSocket?.readyState ===
+      WebSocket.OPEN
+      ? senderSocket
+      : onlineUsers.get(from);
+
+  if (
+    sender?.readyState ===
+    WebSocket.OPEN
+  ) {
+    send(
+      sender,
+      'message_deleted',
+      deleteData,
+    );
+  } else {
+    queueOfflineEvent(
+      from,
+      'message_deleted',
+      deleteData,
+    );
+  }
+
+  console.log(
+    automatic
+      ? `Auto-deleted message ${messageId}`
+      : `Deleted message ${messageId}`,
+  );
+
+  return deleteData;
 }
 
 function deliverOfflineMessages(
@@ -2311,6 +2588,72 @@ const offlineMessages =
 
 const offlineMessageStatus =
   loadOfflineMessageStatus();
+
+const messageExpirations =
+  loadMessageExpirations();
+
+function processExpiredPrivateMessages() {
+  const now = Date.now();
+
+  for (
+    const [messageId, expiration]
+    of Object.entries(messageExpirations)
+  ) {
+    if (
+      !expiration ||
+      typeof expiration !== 'object'
+    ) {
+      continue;
+    }
+
+    const from =
+      expiration.from?.toString().trim() || '';
+
+    const to =
+      expiration.to?.toString().trim() || '';
+
+    const expiresAt =
+      expiration.expiresAt
+        ?.toString()
+        .trim() || '';
+
+    if (
+      !messageId ||
+      !from ||
+      !to ||
+      !expiresAt
+    ) {
+      continue;
+    }
+
+    const expiresAtMs =
+      Date.parse(expiresAt);
+
+    if (
+      !Number.isFinite(expiresAtMs) ||
+      expiresAtMs > now
+    ) {
+      continue;
+    }
+
+    deletePrivateMessageForEveryone({
+      messageId,
+      from,
+      to,
+      automatic: true,
+    });
+  }
+}
+
+processExpiredPrivateMessages();
+
+const messageExpirationCleanup =
+  setInterval(
+    processExpiredPrivateMessages,
+    5000,
+  );
+
+messageExpirationCleanup.unref?.();
 
 const autoReplySettings =
   loadAutoReplySettings();
@@ -4599,6 +4942,543 @@ wss.on(
             msg.data ||
             {};
 
+          // ====================================
+          // TEMPORARY CONTACTS
+          // ====================================
+
+          if (type === 'temporary_contact_create') {
+            if (!currentUser) {
+              send(ws, 'temporary_contact_created', {
+                success: false,
+                reason: 'Требуется вход',
+              });
+              return;
+            }
+
+            const requestId = data.requestId?.toString().trim() || '';
+            const requestedMinutes = Number(
+              data.durationMinutes ?? data.expiresInMinutes,
+            );
+            const allowedMinutes = [15, 60, 1440];
+
+            const expiresInMinutes = allowedMinutes.includes(requestedMinutes)
+              ? requestedMinutes
+              : 60;
+
+            const token = crypto.randomBytes(32).toString('hex');
+
+            const createdAt = new Date();
+            const expiresAt = new Date(
+              createdAt.getTime() + expiresInMinutes * 60 * 1000,
+            );
+
+            temporaryContacts[token] = {
+              owner: currentUser,
+              createdAt: createdAt.toISOString(),
+              expiresAt: expiresAt.toISOString(),
+              allowMessages: data.allowMessages !== false,
+              allowCalls: data.allowCalls === true,
+              allowFiles: data.allowFiles === true,
+              revoked: false,
+            };
+
+            saveJsonObjectFile(
+              TEMPORARY_CONTACTS_FILE,
+              temporaryContacts,
+              'временных контактов',
+            );
+
+            send(ws, 'temporary_contact_created', {
+              success: true,
+              requestId,
+              token,
+              link: 'https://fenyvo.com/t/' + token,
+              expiresAt: expiresAt.toISOString(),
+              allowMessages: temporaryContacts[token].allowMessages,
+              allowCalls: temporaryContacts[token].allowCalls,
+              allowFiles: temporaryContacts[token].allowFiles,
+            });
+
+            return;
+          }
+          if (type === 'temporary_contact_resolve') {
+            if (!currentUser) {
+              send(ws, 'temporary_contact_resolved', {
+                success: false,
+                reason: 'Требуется вход',
+              });
+              return;
+            }
+
+            const token = data.token?.toString().trim() || '';
+
+            if (!/^[a-f0-9]{64}$/.test(token)) {
+              send(ws, 'temporary_contact_resolved', {
+                success: false,
+                reason: 'Некорректный временный контакт',
+              });
+              return;
+            }
+
+            const record = temporaryContacts[token];
+
+            if (!record || record.revoked === true) {
+              send(ws, 'temporary_contact_resolved', {
+                success: false,
+                reason: 'Временный контакт недоступен',
+              });
+              return;
+            }
+
+            const expiresAtMs = Date.parse(record.expiresAt || '');
+
+            if (!Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) {
+              send(ws, 'temporary_contact_resolved', {
+                success: false,
+                expired: true,
+                reason: 'Срок временного контакта истёк',
+              });
+              return;
+            }
+
+            if (
+              record.owner?.toString().toLowerCase() ===
+              currentUser.toLowerCase()
+            ) {
+              send(ws, 'temporary_contact_resolved', {
+                success: false,
+                reason: 'Нельзя открыть собственный временный контакт',
+              });
+              return;
+            }
+
+            send(ws, 'temporary_contact_resolved', {
+              success: true,
+              token,
+              expiresAt: record.expiresAt,
+              allowMessages: record.allowMessages !== false,
+              allowCalls: record.allowCalls === true,
+              allowFiles: record.allowFiles === true,
+            });
+
+            return;
+          }
+          if (type === 'temporary_contact_join') {
+            if (!currentUser) {
+              send(ws, 'temporary_contact_joined', {
+                success: false,
+                reason: 'Требуется вход',
+              });
+              return;
+            }
+
+            const token = data.token?.toString().trim() || '';
+
+            if (!/^[a-f0-9]{64}$/.test(token)) {
+              send(ws, 'temporary_contact_joined', {
+                success: false,
+                reason: 'Некорректный временный контакт',
+              });
+              return;
+            }
+
+            const record = temporaryContacts[token];
+
+            if (!record || record.revoked === true) {
+              send(ws, 'temporary_contact_joined', {
+                success: false,
+                reason: 'Временный контакт недоступен',
+              });
+              return;
+            }
+
+            const expiresAtMs = Date.parse(record.expiresAt || '');
+
+            if (!Number.isFinite(expiresAtMs) || expiresAtMs <= Date.now()) {
+              send(ws, 'temporary_contact_joined', {
+                success: false,
+                expired: true,
+                reason: 'Срок временного контакта истёк',
+              });
+              return;
+            }
+
+            const owner = record.owner?.toString().trim() || '';
+
+            if (
+              !owner ||
+              owner.toLowerCase() === currentUser.toLowerCase()
+            ) {
+              send(ws, 'temporary_contact_joined', {
+                success: false,
+                reason: 'Нельзя присоединиться к этому временному контакту',
+              });
+              return;
+            }
+
+            const existingGuest =
+              record.guest?.toString().trim() || '';
+
+            if (
+              existingGuest &&
+              existingGuest.toLowerCase() !== currentUser.toLowerCase()
+            ) {
+              send(ws, 'temporary_contact_joined', {
+                success: false,
+                reason: 'Временный контакт уже используется',
+              });
+              return;
+            }
+
+            let sessionId =
+              record.sessionId?.toString().trim() || '';
+
+            if (!/^[a-f0-9]{48}$/.test(sessionId)) {
+              sessionId = crypto.randomBytes(24).toString('hex');
+            }
+
+            const guest = existingGuest || currentUser;
+
+            if (
+              record.sessionId !== sessionId ||
+              record.guest !== guest
+            ) {
+              record.sessionId = sessionId;
+              record.guest = guest;
+              record.joinedAt =
+                record.joinedAt || new Date().toISOString();
+
+              saveJsonObjectFile(
+                TEMPORARY_CONTACTS_FILE,
+                temporaryContacts,
+                'временных контактов',
+              );
+            }
+
+            const session = {
+              id: sessionId,
+              token,
+              owner,
+              guest,
+              createdAt:
+                record.joinedAt ||
+                record.createdAt ||
+                new Date().toISOString(),
+              expiresAt: record.expiresAt,
+              allowMessages: record.allowMessages !== false,
+              allowCalls: record.allowCalls === true,
+              allowFiles: record.allowFiles === true,
+            };
+
+            temporaryContactSessions.set(sessionId, session);
+            send(ws, 'temporary_contact_joined', {
+              success: true,
+              sessionId,
+              role: 'guest',
+              expiresAt: session.expiresAt,
+              allowMessages: session.allowMessages,
+              allowCalls: session.allowCalls,
+              allowFiles: session.allowFiles,
+            });
+
+            const ownerSocket = onlineUsers.get(owner);
+
+            if (ownerSocket?.readyState === WebSocket.OPEN) {
+              send(ownerSocket, 'temporary_contact_joined', {
+                success: true,
+                sessionId,
+                role: 'owner',
+                expiresAt: session.expiresAt,
+                allowMessages: session.allowMessages,
+                allowCalls: session.allowCalls,
+                allowFiles: session.allowFiles,
+              });
+            }
+
+            return;
+          }
+          if (type === 'temporary_message') {
+            if (!currentUser) {
+              send(ws, 'temporary_message_status', {
+                success: false,
+                reason: 'Требуется вход',
+              });
+              return;
+            }
+
+            const sessionId = data.sessionId?.toString().trim() || '';
+
+            const access = getTemporaryContactSessionForUser(
+              sessionId,
+              currentUser,
+            );
+
+            if (!access) {
+              send(ws, 'temporary_message_status', {
+                success: false,
+                reason: 'Временная сессия недоступна',
+              });
+              return;
+            }
+
+            if (access.session.allowMessages !== true) {
+              send(ws, 'temporary_message_status', {
+                success: false,
+                sessionId,
+                reason: 'Сообщения для этого временного контакта отключены',
+              });
+              return;
+            }
+
+            const messageId =
+              data.messageId?.toString().trim() ||
+              crypto.randomUUID();
+
+            const cipherType = Number(data.cipherType);
+            const ciphertext =
+              data.ciphertext?.toString().trim() || '';
+
+            if (
+              !/^[a-zA-Z0-9_-]{6,120}$/.test(messageId) ||
+              ![2, 3].includes(cipherType) ||
+              !isBase64Value(ciphertext, 1024 * 1024)
+            ) {
+              send(ws, 'temporary_message_status', {
+                success: false,
+                sessionId,
+                reason: 'Некорректное зашифрованное сообщение',
+              });
+              return;
+            }
+
+            const peerRole =
+              access.role === 'owner'
+                ? 'guest'
+                : 'owner';
+
+            const envelope = {
+              sessionId,
+              messageId,
+              e2ee: true,
+              e2eeVersion: 2,
+              e2eeProtocol: 'signal',
+              cipherType,
+              ciphertext,
+              time: data.time || new Date().toISOString(),
+              role: peerRole,
+            };
+
+            const peerSocket = onlineUsers.get(access.peer);
+
+            if (peerSocket?.readyState === WebSocket.OPEN) {
+              send(peerSocket, 'temporary_message', envelope);
+            }
+
+            send(ws, 'temporary_message_status', {
+              success: true,
+              sessionId,
+              messageId,
+              delivered: peerSocket?.readyState === WebSocket.OPEN,
+            });
+
+            return;
+          }
+          if (type === 'temporary_e2ee_bundle_publish') {
+            if (!currentUser) {
+              send(ws, 'temporary_e2ee_bundle_published', {
+                ok: false,
+                reason: 'Требуется вход',
+              });
+              return;
+            }
+
+            const sessionId = data.sessionId?.toString().trim() || '';
+
+            const access = getTemporaryContactSessionForUser(
+              sessionId,
+              currentUser,
+            );
+
+            if (!access) {
+              send(ws, 'temporary_e2ee_bundle_published', {
+                ok: false,
+                reason: 'Временная сессия недоступна',
+              });
+              return;
+            }
+
+            const deviceId = positiveKeyId(data.deviceId);
+            const registrationId = positiveKeyId(data.registrationId);
+            const identityKey = data.identityKey;
+
+            const signedRaw = data.signedPreKey;
+            const signedId = positiveKeyId(signedRaw?.id);
+
+            const signedPreKey =
+              signedId &&
+              isBase64Value(signedRaw?.publicKey, 256) &&
+              isBase64Value(signedRaw?.signature, 256)
+                ? {
+                    id: signedId,
+                    publicKey: signedRaw.publicKey,
+                    signature: signedRaw.signature,
+                  }
+                : null;
+
+            const submittedPreKeys = Array.isArray(data.preKeys)
+              ? data.preKeys
+                  .slice(0, 100)
+                  .map((item) => validPublicPreKey(item))
+                  .filter(Boolean)
+              : [];
+
+            const submittedKyberKeys = Array.isArray(data.kyberPreKeys)
+              ? data.kyberPreKeys
+                  .slice(0, 100)
+                  .map((item) => validPublicPreKey(item, true))
+                  .filter(Boolean)
+              : [];
+
+            if (
+              data.version !== 2 ||
+              data.protocol !== 'signal-pqxdh-double-ratchet' ||
+              !deviceId ||
+              !registrationId ||
+              !isBase64Value(identityKey, 256) ||
+              !signedPreKey ||
+              submittedPreKeys.length === 0 ||
+              submittedKyberKeys.length === 0
+            ) {
+              send(ws, 'temporary_e2ee_bundle_published', {
+                ok: false,
+                sessionId,
+                reason: 'Некорректный комплект временных E2EE-ключей',
+              });
+              return;
+            }
+
+            const preKeys = {};
+            for (const item of submittedPreKeys) {
+              preKeys[item.id] = item;
+            }
+
+            const kyberPreKeys = {};
+            for (const item of submittedKyberKeys) {
+              kyberPreKeys[item.id] = item;
+            }
+
+            const bundleKey = `${sessionId}:${access.role}`;
+
+            temporaryE2eeBundles.set(bundleKey, {
+              version: 2,
+              protocol: 'signal-pqxdh-double-ratchet',
+              deviceId,
+              registrationId,
+              identityKey,
+              signedPreKey,
+              preKeys,
+              kyberPreKeys,
+              updatedAt: new Date().toISOString(),
+            });
+
+            send(ws, 'temporary_e2ee_bundle_published', {
+              ok: true,
+              sessionId,
+              preKeyCount: Object.keys(preKeys).length,
+              kyberPreKeyCount: Object.keys(kyberPreKeys).length,
+            });
+
+            const peerSocket = onlineUsers.get(access.peer);
+
+            if (peerSocket?.readyState === WebSocket.OPEN) {
+              send(peerSocket, 'temporary_e2ee_bundle_available', {
+                sessionId,
+                available: true,
+              });
+            }
+
+            return;
+          }
+          if (type === 'temporary_e2ee_bundle_get') {
+            if (!currentUser) {
+              send(ws, 'temporary_e2ee_prekey_bundle', {
+                available: false,
+                reason: 'Требуется вход',
+              });
+              return;
+            }
+
+            const sessionId = data.sessionId?.toString().trim() || '';
+
+            const access = getTemporaryContactSessionForUser(
+              sessionId,
+              currentUser,
+            );
+
+            if (!access) {
+              send(ws, 'temporary_e2ee_prekey_bundle', {
+                sessionId,
+                available: false,
+                reason: 'Временная сессия недоступна',
+              });
+              return;
+            }
+
+            const peerRole =
+              access.role === 'owner'
+                ? 'guest'
+                : 'owner';
+
+            const bundleKey = `${sessionId}:${peerRole}`;
+            const record = temporaryE2eeBundles.get(bundleKey);
+
+            if (!record) {
+              send(ws, 'temporary_e2ee_prekey_bundle', {
+                sessionId,
+                available: false,
+                reason: 'У временного контакта пока нет E2EE-ключей',
+              });
+              return;
+            }
+
+            const preKeyId = Object.keys(record.preKeys || {})
+              .map(Number)
+              .sort((a, b) => a - b)[0];
+
+            const kyberPreKeyId = Object.keys(record.kyberPreKeys || {})
+              .map(Number)
+              .sort((a, b) => a - b)[0];
+
+            if (!preKeyId || !kyberPreKeyId) {
+              send(ws, 'temporary_e2ee_prekey_bundle', {
+                sessionId,
+                available: false,
+                reason: 'У временного контакта закончились E2EE-ключи',
+              });
+              return;
+            }
+
+            const preKey = record.preKeys[preKeyId];
+            const kyberPreKey = record.kyberPreKeys[kyberPreKeyId];
+
+            delete record.preKeys[preKeyId];
+            delete record.kyberPreKeys[kyberPreKeyId];
+
+            send(ws, 'temporary_e2ee_prekey_bundle', {
+              sessionId,
+              available: true,
+              version: record.version,
+              protocol: record.protocol,
+              deviceId: record.deviceId,
+              registrationId: record.registrationId,
+              identityKey: record.identityKey,
+              signedPreKey: record.signedPreKey,
+              preKey,
+              kyberPreKey,
+            });
+
+            return;
+          }
           // ====================================
           // COMMUNICATION REQUESTS
           // ====================================
@@ -7696,6 +8576,7 @@ wss.on(
             }
             const to = data.to?.toString().trim() || '';
             const accepted = data.accepted === true;
+            const disabled = data.disabled === true;
             const receiver = onlineUsers.get(to);
             if (
               !to ||
@@ -7710,7 +8591,7 @@ wss.on(
               });
               return;
             }
-            if (!receiver) {
+            if (!receiver && !disabled) {
               send(ws, 'e2ee_invite_status', {
                 to,
                 sent: false,
@@ -7718,13 +8599,18 @@ wss.on(
               });
               return;
             }
-            send(receiver, 'e2ee_invite_response', {
+            const responseData = {
               from: currentUser,
               to,
               accepted,
-              disabled: data.disabled === true,
+              disabled,
               time: new Date().toISOString(),
-            });
+            };
+            if (receiver?.readyState === WebSocket.OPEN) {
+              send(receiver, 'e2ee_invite_response', responseData);
+            } else if (disabled) {
+              queueOfflineEvent(to, 'e2ee_invite_response', responseData);
+            }
             console.log(
               `🔐 E2EE: ${currentUser} ${accepted ? 'принял' : 'отклонил'} приглашение ${to}`,
             );
@@ -7820,18 +8706,77 @@ wss.on(
               });
               return;
             }
+            const allowedAfterReadSeconds =
+              new Set([0, 30, 300, 3600, 86400, 604800]);
+
+            const allowedUnreadSeconds =
+              new Set([0, 3600, 86400, 259200, 604800]);
+
+            const requestedAfterReadSeconds =
+              Number(data.autoDeleteAfterReadSeconds);
+
+            const requestedUnreadSeconds =
+              Number(data.autoDeleteUnreadSeconds);
+
+            const autoDeleteAfterReadSeconds =
+              allowedAfterReadSeconds.has(requestedAfterReadSeconds)
+                ? requestedAfterReadSeconds
+                : 0;
+
+            const autoDeleteUnreadSeconds =
+              allowedUnreadSeconds.has(requestedUnreadSeconds)
+                ? requestedUnreadSeconds
+                : 0;
+
+            const serverSentAtMs = Date.now();
+            const serverSentAt =
+              new Date(serverSentAtMs).toISOString();
+
+            const expiresUnreadAt =
+              autoDeleteUnreadSeconds > 0
+                ? new Date(
+                    serverSentAtMs +
+                      autoDeleteUnreadSeconds * 1000,
+                  ).toISOString()
+                : null;
+
             const messageData = {
               id: requestedId,
               from: currentUser,
               to,
-              time: data.time || new Date().toISOString(),
+              time: data.time || serverSentAt,
               messageType: 'text',
               e2ee: true,
               e2eeVersion: 2,
               e2eeProtocol: 'signal',
               cipherType,
               ciphertext,
+              autoDeleteAfterReadSeconds,
+              autoDeleteUnreadSeconds,
             };
+
+            if (
+              autoDeleteAfterReadSeconds > 0 ||
+              autoDeleteUnreadSeconds > 0
+            ) {
+              if (!messageExpirations[requestedId]) {
+                messageExpirations[requestedId] = {
+                  messageId: requestedId,
+                  from: currentUser,
+                  to,
+                  autoDeleteAfterReadSeconds,
+                  autoDeleteUnreadSeconds,
+                  sentAt: serverSentAt,
+                  expiresUnreadAt,
+                  readAt: null,
+                  expiresAt: expiresUnreadAt,
+                };
+
+                saveMessageExpirations(
+                  messageExpirations,
+                );
+              }
+            }
             messageReactions.set(messageData.id, {
               from: currentUser,
               to,
@@ -8106,6 +9051,40 @@ wss.on(
               }
             }
 
+            const allowedAfterReadSeconds =
+              new Set([0, 30, 300, 3600, 86400, 604800]);
+
+            const allowedUnreadSeconds =
+              new Set([0, 3600, 86400, 259200, 604800]);
+
+            const requestedAfterReadSeconds =
+              Number(data.autoDeleteAfterReadSeconds);
+
+            const requestedUnreadSeconds =
+              Number(data.autoDeleteUnreadSeconds);
+
+            const autoDeleteAfterReadSeconds =
+              allowedAfterReadSeconds.has(requestedAfterReadSeconds)
+                ? requestedAfterReadSeconds
+                : 0;
+
+            const autoDeleteUnreadSeconds =
+              allowedUnreadSeconds.has(requestedUnreadSeconds)
+                ? requestedUnreadSeconds
+                : 0;
+
+            const serverSentAtMs = Date.now();
+            const serverSentAt =
+              new Date(serverSentAtMs).toISOString();
+
+            const expiresUnreadAt =
+              autoDeleteUnreadSeconds > 0
+                ? new Date(
+                    serverSentAtMs +
+                      autoDeleteUnreadSeconds * 1000,
+                  ).toISOString()
+                : null;
+
             const messageData = {
               id:
                 data.id ||
@@ -8177,7 +9156,33 @@ wss.on(
                 data.forwardComment.trim()
                   ? data.forwardComment.trim()
                   : null,
+
+              autoDeleteAfterReadSeconds,
+              autoDeleteUnreadSeconds,
             };
+
+            if (
+              autoDeleteAfterReadSeconds > 0 ||
+              autoDeleteUnreadSeconds > 0
+            ) {
+              if (!messageExpirations[messageData.id]) {
+                messageExpirations[messageData.id] = {
+                  messageId: messageData.id,
+                  from: currentUser,
+                  to,
+                  autoDeleteAfterReadSeconds,
+                  autoDeleteUnreadSeconds,
+                  sentAt: serverSentAt,
+                  expiresUnreadAt,
+                  readAt: null,
+                  expiresAt: expiresUnreadAt,
+                };
+
+                saveMessageExpirations(
+                  messageExpirations,
+                );
+              }
+            }
 
             messageReactions.set(
               messageData.id,
@@ -8308,6 +9313,59 @@ wss.on(
               });
             }
 
+            return;
+          }
+
+          // ====================================
+          // E2EE EDIT MESSAGE
+          // ====================================
+
+          if (type === 'e2ee_edit_message') {
+            if (!currentUser) {
+              send(ws, 'error', { reason: 'Сначала необходимо войти' });
+              return;
+            }
+            const messageId = data.messageId?.toString().trim() || '';
+            const to = data.to?.toString().trim() || '';
+            const cipherType = Number(data.cipherType);
+            const ciphertext = data.ciphertext?.toString().trim() || '';
+            if (
+              !messageId ||
+              !registeredUsers[to] ||
+              !e2eeBundles[currentUser] ||
+              !e2eeBundles[to] ||
+              ![2, 3].includes(cipherType) ||
+              !isBase64Value(ciphertext, 1024 * 1024)
+            ) {
+              send(ws, 'error', { reason: 'Некорректное защищённое редактирование' });
+              return;
+            }
+            const knownMessage = messageReactions.get(messageId);
+            if (
+              knownMessage &&
+              (knownMessage.from !== currentUser || knownMessage.to !== to)
+            ) {
+              send(ws, 'error', { reason: 'Нельзя изменить чужое сообщение' });
+              return;
+            }
+            const editData = {
+              messageId,
+              from: currentUser,
+              to,
+              e2ee: true,
+              e2eeVersion: 2,
+              e2eeProtocol: 'signal',
+              cipherType,
+              ciphertext,
+            };
+            const receiver = onlineUsers.get(to);
+            if (receiver?.readyState === WebSocket.OPEN) {
+              send(receiver, 'e2ee_message_edited', editData);
+            } else {
+              queueOfflineEvent(to, 'e2ee_message_edited', editData);
+            }
+            send(ws, 'e2ee_message_edited_sent', { messageId, to });
+            console.log(`🔐 ${currentUser} → ${to}: Signal E2EE edit`);
             return;
           }
 
@@ -8556,67 +9614,13 @@ wss.on(
               return;
             }
 
-            const deletedAt =
-              new Date()
-                .toISOString();
-
-            const deleteData = {
+            deletePrivateMessageForEveryone({
               messageId,
-              from:
-                currentUser,
+              from: currentUser,
               to,
-              deletedAt,
-            };
-
-            const removedQueuedOriginal =
-              purgeOfflineMessageArtifacts(
-                to,
-                messageId,
-              );
-
-            purgeOfflineMessageArtifacts(
-              currentUser,
-              messageId,
-            );
-
-            messageReactions.delete(
-              messageId,
-            );
-
-            const receiver =
-              onlineUsers.get(
-                to,
-              );
-
-            if (
-              receiver &&
-              receiver.readyState ===
-                WebSocket.OPEN
-            ) {
-              send(
-                receiver,
-                'message_deleted',
-                deleteData,
-              );
-            } else if (
-              !removedQueuedOriginal
-            ) {
-              queueOfflineEvent(
-                to,
-                'message_deleted',
-                deleteData,
-              );
-            }
-
-            send(
-              ws,
-              'message_deleted',
-              deleteData,
-            );
-
-            console.log(
-              `🗑️ ${currentUser} удалил без следов сообщение ${messageId}`,
-            );
+              senderSocket: ws,
+              automatic: false,
+            });
 
             return;
           }
@@ -8868,15 +9872,60 @@ wss.on(
               return;
             }
 
+            const readAt =
+              new Date().toISOString();
+
+            const expiration =
+              messageExpirations[messageId];
+
+            if (
+              expiration &&
+              expiration.from === messageFrom &&
+              expiration.to === messageTo &&
+              !expiration.readAt
+            ) {
+              expiration.readAt = readAt;
+
+              const afterReadSeconds =
+                Number(
+                  expiration.autoDeleteAfterReadSeconds,
+                ) || 0;
+
+              if (afterReadSeconds > 0) {
+                const afterReadExpiresAt =
+                  new Date(
+                    Date.parse(readAt) +
+                      afterReadSeconds * 1000,
+                  ).toISOString();
+
+                const unreadExpiresAt =
+                  expiration.expiresUnreadAt;
+
+                if (
+                  unreadExpiresAt &&
+                  Date.parse(unreadExpiresAt) <
+                    Date.parse(afterReadExpiresAt)
+                ) {
+                  expiration.expiresAt =
+                    unreadExpiresAt;
+                } else {
+                  expiration.expiresAt =
+                    afterReadExpiresAt;
+                }
+              }
+
+              saveMessageExpirations(
+                messageExpirations,
+              );
+            }
+
             const statusData = {
               messageId,
               from:
                 messageFrom,
               to:
                 messageTo,
-              readAt:
-                new Date()
-                  .toISOString(),
+              readAt,
             };
 
             sendOrQueueMessageStatus(

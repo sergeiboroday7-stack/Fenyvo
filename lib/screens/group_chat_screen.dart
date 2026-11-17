@@ -1004,7 +1004,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
       }
     } else {
       if (!MediaTransferService.isReady) {
-        _mediaSnack('�����-������ �� �����. ����������� � �������.');
+        _mediaSnack('Медиа-сервер не готов. Перезайдите в аккаунт.');
         return;
       }
 
@@ -1111,7 +1111,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
     final text = rawText.isNotEmpty
         ? rawText
         : messageType == 'voice'
-        ? '?? ��������� ���������'
+        ? '🎤 Голосовое сообщение'
         : messageType == 'image'
         ? '📷 Фото'
         : messageType == 'video'
@@ -1184,7 +1184,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                           Icon(Icons.forward_rounded, color: _gold),
                           SizedBox(width: 10),
                           Text(
-                            '��������� ���������',
+                            'Переслать сообщение',
                             style: TextStyle(
                               color: SpartanPalette.ink,
                               fontSize: 18,
@@ -1204,7 +1204,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                         },
                         style: const TextStyle(color: SpartanPalette.ink),
                         decoration: InputDecoration(
-                          hintText: '����� ����������',
+                          hintText: 'Поиск получателя',
                           hintStyle: const TextStyle(
                             color: SpartanPalette.muted,
                           ),
@@ -1236,7 +1236,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            '? ��������� �� $_groupName � $forwardedFrom',
+                            '↪ Переслано из $_groupName • $forwardedFrom',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(
@@ -1481,7 +1481,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
               onChanged: _onSearchChanged,
               style: const TextStyle(color: SpartanPalette.ink),
               decoration: InputDecoration(
-                hintText: '����� �� ������',
+                hintText: 'Поиск по группе',
                 hintStyle: const TextStyle(color: SpartanPalette.muted),
                 prefixIcon: const Icon(Icons.search_rounded, color: _gold),
                 suffixText: _searchQuery.isEmpty
@@ -1502,7 +1502,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
             ),
           ),
           IconButton(
-            tooltip: '����������',
+            tooltip: 'Предыдущее',
             onPressed: matchCount == 0
                 ? null
                 : () {
@@ -2253,7 +2253,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
         path: file.path,
         fileName: _basename(path),
         mimeType: 'audio/mp4',
-        text: '??? ��������� ���������',
+        text: '🎙️ Голосовое сообщение',
         maxBytes: 20 * 1024 * 1024,
         voiceDurationMs: durationMs,
       );
@@ -2286,7 +2286,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
       return;
     }
     if (!MediaTransferService.isReady) {
-      _mediaSnack('�����-������ �� �����. ����������� � �������.');
+      _mediaSnack('Медиа-сервер не готов. Перезайдите в аккаунт.');
       return;
     }
 
@@ -2496,7 +2496,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
           (bytes == null || bytes.isEmpty) &&
           networkUrl == null) {
         return Text(
-          '?? ���� ����������',
+          '📷 Фото недоступно',
           style: TextStyle(
             color: isMe ? SpartanPalette.ink : SpartanPalette.ink,
           ),
@@ -2617,7 +2617,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
           (bytes == null || bytes.isEmpty) &&
           networkUrl == null) {
         return Text(
-          '?? ����� ����������',
+          '🎥 Видео недоступно',
           style: TextStyle(
             color: isMe ? SpartanPalette.ink : SpartanPalette.ink,
           ),
@@ -3074,7 +3074,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
             content: Text(
-              '�� ������� ���������. ��������� ����������� ��������.',
+              'Не удалось сохранить. Проверьте доступность вложения.',
             ),
           ),
         );
@@ -3156,7 +3156,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
                 ),
                 action(
                   icon: Icons.forward_rounded,
-                  title: '���������',
+                  title: 'Переслать',
                   onTap: () {
                     Navigator.of(sheetContext).pop();
                     Future<void>.delayed(const Duration(milliseconds: 80), () {
@@ -4135,7 +4135,7 @@ class _GroupChatScreenState extends State<GroupChatScreen> {
             icon: const Icon(Icons.videocam_rounded, color: _gold),
           ),
           IconButton(
-            tooltip: '�����',
+            tooltip: 'Поиск',
             onPressed: _searchMode ? _closeSearch : _openSearch,
             icon: Icon(
               _searchMode ? Icons.search_off_rounded : Icons.search_rounded,

@@ -38,6 +38,7 @@ class ChatListScreen extends StatefulWidget {
 class _ChatListScreenState extends State<ChatListScreen> {
   List<String> _chats = [];
   List<String> _onlineUsers = [];
+  List<String> _contacts = [];
   // SPARTAN_STAGE24_GROUPS
   List<Map<String, dynamic>> _groups = <Map<String, dynamic>>[];
 
@@ -196,7 +197,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
 
     combined.addAll(storedChats);
 
-    combined.addAll(_onlineUsers);
+    combined.addAll(_contacts);
 
     combined.remove(currentUser);
 
@@ -372,38 +373,6 @@ class _ChatListScreenState extends State<ChatListScreen> {
     );
   }
 
-  Future<void> _showIncomingE2eeInvite(String from) async {
-    if (!mounted || SocketService.instance.activeChatUser != null) return;
-    final t = AppLanguageService.instance.text;
-    final accepted = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => AlertDialog(
-        title: Text(t('e2eeInviteTitle')),
-        content: Text(t('e2eeInviteText').replaceAll('{user}', from)),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: Text(t('e2eeDecline')),
-          ),
-          FilledButton.icon(
-            onPressed: () => Navigator.pop(context, true),
-            icon: const Icon(Icons.lock_rounded),
-            label: Text(t('e2eeAccept')),
-          ),
-        ],
-      ),
-    );
-    if (!mounted) return;
-    final sent = await SocketService.instance.respondToE2eeInvite(
-      from,
-      accepted == true,
-    );
-    if (!mounted || sent) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(t('e2eeEnableError'))));
-  }
-
   void _handleMessage(Map<String, dynamic> msg) {
     final type = msg['type']?.toString() ?? '';
 
@@ -412,14 +381,6 @@ class _ChatListScreenState extends State<ChatListScreen> {
     final data = rawData is Map
         ? Map<String, dynamic>.from(rawData)
         : <String, dynamic>{};
-
-    if (type == 'e2ee_invite') {
-      final from = data['from']?.toString().trim() ?? '';
-      if (from.isNotEmpty && SocketService.instance.activeChatUser == null) {
-        unawaited(_showIncomingE2eeInvite(from));
-      }
-      return;
-    }
 
     if (type == 'communication_request') {
       final from = data['from']?.toString().trim() ?? '';
@@ -517,6 +478,27 @@ class _ChatListScreenState extends State<ChatListScreen> {
       _loadChats();
       return;
     }
+    if (type == 'contact_list') {
+      final rawContacts = data['contacts'];
+
+      if (rawContacts is! List) {
+        return;
+      }
+
+      final currentUser = SocketService.instance.currentUser ?? '';
+
+      _contacts = rawContacts
+          .whereType<String>()
+          .map((user) => user.trim())
+          .where((user) => user.isNotEmpty && user != currentUser)
+          .toSet()
+          .toList();
+
+      _loadChats();
+      _requestMissingAvatars(_contacts);
+      return;
+    }
+
     if (type == 'users') {
       final rawUsers = data['users'];
 

@@ -116,6 +116,26 @@ test('encrypted call signaling is relayed without plaintext SDP or ICE', () => {
   assert.equal(f.sent.at(-1).data.sdp, undefined);
   f.api.dispose();
 });
+test('E2EE rejection frees the call and permits a silent same-id retry', () => {
+  const f = fixture();
+  f.offer('secure');
+  f.sent.length = 0;
+
+  f.send('Bob', 'call_reject', {
+    to: 'Alice', callId: 'secure', reason: 'e2ee_signal_error'
+  });
+
+  assert.deepEqual(f.sent.map(item => item.type), ['call_reject']);
+  assert.equal(f.sent[0].ws, 'a');
+  assert.equal(f.sent[0].data.reason, 'e2ee_signal_error');
+  assert.equal(f.pushes.length, 1);
+
+  f.offer('secure');
+  assert.equal(f.sent.at(-1).type, 'call_offer');
+  assert.equal(f.sent.at(-1).ws, 'b');
+  assert.equal(f.pushes.length, 2);
+  f.api.dispose();
+});
 test('callee suspension keeps ringing; caller disconnect cancels', () => {
   const f = fixture(); f.offer(); const count = f.timers.length;
   f.onlineUsers.delete('Bob'); f.api.disconnected('Bob'); assert.equal(f.timers.length, count);

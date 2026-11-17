@@ -1,0 +1,11 @@
+  
+analyzer:  
+  exclude:  
+    - "third_party/**"  
+    - "**/*.g.dart"  
+    - "**/*.freezed.dart"  
+    - "build/**"  
+    - "windows/**"  
+    - "linux/**"  
+    - "macos/**" 
+    - android/**

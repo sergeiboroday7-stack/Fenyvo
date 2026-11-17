@@ -713,6 +713,121 @@ class StorageService {
   // УДАЛЕНИЕ ЧАТА
   // ========================================
 
+  static String _autoDeleteKey(String currentUser, String contact) {
+    final owner = Uri.encodeComponent(currentUser.trim().toLowerCase());
+    final peer = Uri.encodeComponent(contact.trim().toLowerCase());
+    return 'auto_delete_${owner}_$peer';
+  }
+
+  static Future<int> getChatAutoDeleteSeconds(
+    String currentUser,
+    String contact,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt(_autoDeleteKey(currentUser, contact)) ?? 0;
+  }
+
+  static Future<void> setChatAutoDeleteSeconds(
+    String currentUser,
+    String contact,
+    int seconds,
+  ) async {
+    const allowed = <int>{0, 30, 300, 3600, 86400, 604800};
+
+    if (!allowed.contains(seconds)) {
+      throw ArgumentError.value(
+        seconds,
+        'seconds',
+        'Unsupported auto-delete interval',
+      );
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_autoDeleteKey(currentUser, contact), seconds);
+  }
+
+  static String _screenSecurityKey(String currentUser, String contact) {
+    final owner = Uri.encodeComponent(currentUser.trim().toLowerCase());
+    final peer = Uri.encodeComponent(contact.trim().toLowerCase());
+    return 'screen_security_${owner}_$peer';
+  }
+
+  static Future<bool> getChatScreenSecurity(
+    String currentUser,
+    String contact,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getBool(_screenSecurityKey(currentUser, contact)) ?? false;
+  }
+
+  static Future<void> setChatScreenSecurity(
+    String currentUser,
+    String contact,
+    bool enabled,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(
+      _screenSecurityKey(currentUser, contact),
+      enabled,
+    );
+  }
+
+  static String _unreadAutoDeleteKey(String currentUser, String contact) {
+    final owner = Uri.encodeComponent(currentUser.trim().toLowerCase());
+    final peer = Uri.encodeComponent(contact.trim().toLowerCase());
+    return 'auto_delete_unread_${owner}_$peer';
+  }
+
+  static Future<int> getChatUnreadAutoDeleteSeconds(
+    String currentUser,
+    String contact,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt(_unreadAutoDeleteKey(currentUser, contact)) ?? 0;
+  }
+
+  static Future<void> setChatUnreadAutoDeleteSeconds(
+    String currentUser,
+    String contact,
+    int seconds,
+  ) async {
+    const allowed = <int>{0, 3600, 86400, 259200, 604800};
+
+    if (!allowed.contains(seconds)) {
+      throw ArgumentError.value(
+        seconds,
+        'seconds',
+        'Unsupported unread auto-delete interval',
+      );
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+
+    await prefs.setInt(_unreadAutoDeleteKey(currentUser, contact), seconds);
+  }
+
+  static String _featureIntroSeenKey(String currentUser, String feature) {
+    final owner = Uri.encodeComponent(currentUser.trim().toLowerCase());
+    final item = Uri.encodeComponent(feature.trim().toLowerCase());
+    return 'feature_intro_seen_${owner}_$item';
+  }
+
+  static Future<bool> shouldShowFeatureIntro(
+    String currentUser,
+    String feature,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+    return !(prefs.getBool(_featureIntroSeenKey(currentUser, feature)) ?? false);
+  }
+
+  static Future<void> markFeatureIntroSeen(
+    String currentUser,
+    String feature,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(_featureIntroSeenKey(currentUser, feature), true);
+  }
+
   static Future<void> removeChat(String currentUser, String targetUser) async {
     final chatKey = _getChatKey(currentUser, targetUser);
 

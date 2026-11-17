@@ -2,7 +2,7 @@ name: spartan_chat_final
 description: Spartan Chat messenger
 publish_to: "none"
 
-version: 1.8.0+4226
+version: 1.8.1+4234
 
 environment:
   sdk: ">=3.13.0 <4.0.0"
@@ -16,6 +16,7 @@ dependencies:
   cupertino_icons: ^1.0.9
 
   shared_preferences: ^2.5.5
+  package_info_plus: ^9.0.1
   image_picker: 1.1.2
   file_picker: ^10.3.3
   public_file_saver: ^1.1.0
@@ -26,6 +27,7 @@ dependencies:
   hive_flutter: ^1.1.0
 
   encrypt: ^5.0.3
+  crypto: ^3.0.6
   pointycastle: ^3.9.1
 
   path_provider: 2.1.5
@@ -49,6 +51,7 @@ dependencies:
   flutter_secure_storage: 9.2.4
   synchronized: ^3.4.1+2
   # Local QR rendering for Signal safety-number verification.
+  mobile_scanner: 7.5.0
   qr_flutter: ^4.1.0
   wakelock_plus: ^1.5.2
   app_links: ^7.2.1

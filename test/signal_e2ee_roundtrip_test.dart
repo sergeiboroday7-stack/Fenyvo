@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:libsignal/libsignal.dart';
+import 'package:spartan_chat_final/services/crypto/signal_e2ee_service.dart';
 import 'package:spartan_chat_final/services/crypto/signal_secure_store.dart';
 
 void main() {
@@ -143,5 +144,43 @@ void main() {
       ),
       isTrue,
     );
+  });
+
+  test('an existing Signal session is not replaced by a late bundle', () async {
+    final service = SignalE2eeService.instance;
+    await service.initializeForUser('bob-session-reuse-test');
+    final published = await service.createPublicBundle();
+    final bundle = <String, dynamic>{
+      ...published,
+      'preKey': (published['preKeys'] as List).first,
+      'kyberPreKey': (published['kyberPreKeys'] as List).first,
+    };
+
+    await service.initializeForUser('alice-session-reuse-test');
+    expect(
+      await service.processRemoteBundleIfMissing(
+        'bob-session-reuse-test',
+        bundle,
+      ),
+      isTrue,
+    );
+    expect(await service.hasSession('bob-session-reuse-test'), isTrue);
+
+    // If this late response were processed it would fail because the bundle is
+    // deliberately incomplete. A healthy session must make it a no-op.
+    expect(
+      await service.processRemoteBundleIfMissing(
+        'bob-session-reuse-test',
+        const <String, dynamic>{'deviceId': 1},
+      ),
+      isFalse,
+    );
+    expect(await service.hasSession('bob-session-reuse-test'), isTrue);
+
+    final safetyBefore = await service.safetyNumber('bob-session-reuse-test');
+    expect(await service.resetAllRatchetSessions(), 1);
+    expect(await service.hasSession('bob-session-reuse-test'), isFalse);
+    final safetyAfter = await service.safetyNumber('bob-session-reuse-test');
+    expect(safetyAfter.display, safetyBefore.display);
   });
 }

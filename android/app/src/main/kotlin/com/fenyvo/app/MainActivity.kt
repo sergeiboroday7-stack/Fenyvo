@@ -13,6 +13,7 @@ class MainActivity: FlutterActivity() {
     private var alertChannel: MethodChannel? = null
     private var callWindowChannel: MethodChannel? = null
     private var ringbackChannel: MethodChannel? = null
+    private var screenSecurityChannel: MethodChannel? = null
     private var ringback: OutgoingRingbackController? = null
     private var visibleCallId: String? = null
 
@@ -62,6 +63,26 @@ class MainActivity: FlutterActivity() {
                 }
             }
         }
+        screenSecurityChannel = MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "fenyvo/screen_security",
+        ).also { channel ->
+            channel.setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "setSecure" -> {
+                        val enabled = call.argument<Boolean>("enabled") ?: false
+                        if (enabled) {
+                            window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                        } else {
+                            window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+                        }
+                        result.success(null)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+        }
+
         ringback = OutgoingRingbackController()
         ringbackChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger,
             "spartan_chat/outgoing_call_tone").also { channel ->
@@ -89,6 +110,8 @@ class MainActivity: FlutterActivity() {
         alertChannel = null
         alert?.stop()
         alert = null
+        screenSecurityChannel?.setMethodCallHandler(null)
+        screenSecurityChannel = null
         ringbackChannel?.setMethodCallHandler(null)
         ringbackChannel = null
         ringback?.stop()

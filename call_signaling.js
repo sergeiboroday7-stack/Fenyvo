@@ -18,14 +18,18 @@ function createCallSignaling({ send, onlineUsers, registeredUsers, push,
     call.timer = later(() => finish(call, 'timeout'), ms);
     call.timer?.unref?.();
   };
-  function finish(call, reason = 'ended') {
-    if (calls.get(call.id) !== call) return;
+  function release(call) {
+    if (calls.get(call.id) !== call) return false;
     calls.delete(call.id);
     for (const user of [call.from, call.to]) {
       if (byUser.get(user) === call.id) byUser.delete(user);
     }
     cancel(call.timer);
     cancel(call.disconnectTimer);
+    return true;
+  }
+  function finish(call, reason = 'ended') {
+    if (!release(call)) return;
     emit(call.from, 'call_end', { callId: call.id, from: call.to, reason });
     emit(call.to, 'call_end', { callId: call.id, from: call.from, reason });
     void push(call.to, { type: 'call_cancel', callId: call.id, to: call.to,
@@ -103,7 +107,21 @@ function createCallSignaling({ send, onlineUsers, registeredUsers, push,
     } else if (type === 'call_connected') {
       if (call.state !== 'ringing') { call.state = 'active'; cancel(call.timer); }
     } else {
-      if (type === 'call_reject') emit(to, type, { callId: id, from: user, reason: data.reason === 'busy' ? 'busy' : 'declined' });
+      if (type === 'call_reject') {
+        const reason = data.reason === 'busy'
+          ? 'busy'
+          : data.reason === 'e2ee_signal_error'
+            ? 'e2ee_signal_error'
+            : 'declined';
+        emit(to, type, { callId: id, from: user, reason });
+        // The caller will immediately recreate its Signal session and resend
+        // the same offer. Free both users without racing that retry with the
+        // ordinary call_end/call_cancel events.
+        if (reason === 'e2ee_signal_error') {
+          release(call);
+          return true;
+        }
+      }
       finish(call, type === 'call_reject' ? 'declined' : 'ended');
     }
     return true;

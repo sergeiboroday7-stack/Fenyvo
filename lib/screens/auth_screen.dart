@@ -1,3 +1,7 @@
+import '../services/new_device_transfer_v2_client.dart';
+import '../widgets/device_transfer_approval_host.dart';
+import '../widgets/device_transfer_pairing_screen.dart';
+import 'new_device_transfer_screen.dart';
 import '../theme/spartan_theme.dart';
 
 import 'dart:async';
@@ -37,6 +41,7 @@ class _AuthScreenState extends State<AuthScreen> {
 
   bool _isNavigating = false;
   bool _legalPromptOpen = false;
+  bool _openingDeviceTransfer = false;
 
   @override
   void initState() {
@@ -94,7 +99,7 @@ class _AuthScreenState extends State<AuthScreen> {
   // ========================================
 
   void _handleMessage(Map<String, dynamic> message) {
-    if (!mounted || _isNavigating) {
+    if (!mounted || _isNavigating || _openingDeviceTransfer) {
       return;
     }
 
@@ -330,7 +335,7 @@ class _AuthScreenState extends State<AuthScreen> {
     _loginTimeout?.cancel();
 
     _loginTimeout = Timer(const Duration(seconds: 10), () {
-      if (!mounted || _isNavigating) {
+      if (!mounted || _isNavigating || _openingDeviceTransfer) {
         return;
       }
 
@@ -375,7 +380,7 @@ class _AuthScreenState extends State<AuthScreen> {
 
     Navigator.pushReplacement(
       context,
-      MaterialPageRoute(builder: (_) => const ChatListScreen()),
+      MaterialPageRoute(builder: (_) => const DeviceTransferApprovalHost(child: ChatListScreen())),
     );
   }
 
@@ -426,6 +431,83 @@ class _AuthScreenState extends State<AuthScreen> {
       }
 
       _stopLoadingWithError('Не удалось подключиться к серверу');
+    }
+  }
+
+  Future<void> _openDeviceTransfer() async {
+    if (!const bool.fromEnvironment('FENYVO_DEVICE_TRANSFER_UI_ENABLED') ||
+        _openingDeviceTransfer ||
+        _isLoading ||
+        _isNavigating ||
+        SocketService.instance.isAuthenticated)
+      return;
+    final language = AppLanguageService.instance.code.value,
+        username = _usernameController.text.trim(),
+        password = _passwordController.text;
+    if (username.isEmpty || password.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            transferText(
+              language,
+              'Сначала введи логин и пароль',
+              'Спочатку введи логін і пароль',
+              'Enter your username and password first',
+            ),
+          ),
+        ),
+      );
+      return;
+    }
+    setState(() {
+      _openingDeviceTransfer = true;
+      _isLoading = true;
+    });
+    _loginTimeout?.cancel();
+    try {
+      // Stop ordinary reconnect/login while the isolated pending channel is active.
+      await SocketService.instance
+          .disconnect(clearUser: false)
+          .timeout(const Duration(seconds: 5));
+      if (!mounted) return;
+      final transferred = await Navigator.of(context)
+          .push<TransferredDeviceConnection>(
+            MaterialPageRoute<TransferredDeviceConnection>(
+              builder: (_) => NewDeviceTransferScreen(
+                username: username,
+                password: password,
+                language: language,
+              ),
+            ),
+          );
+      if (transferred != null) {
+        if (!mounted) {
+          await transferred.abort();
+          return;
+        }
+        _openingDeviceTransfer = false;
+        await SocketService.instance.adoptTransferredConnection(
+          transferred,
+          password: password,
+        );
+      }
+    } catch (_) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              transferText(
+                language,
+                'Не удалось открыть перенос. Повтори попытку.',
+                'Не вдалося відкрити перенесення. Повтори спробу.',
+                'Unable to open transfer. Please retry.',
+              ),
+            ),
+          ),
+        );
+    } finally {
+      _openingDeviceTransfer = false;
+      if (mounted) setState(() => _isLoading = false);
     }
   }
 
@@ -846,6 +928,43 @@ class _AuthScreenState extends State<AuthScreen> {
                                           ),
                                     child: const Text('Конфиденциальность'),
                                   ),
+                                  if (!_isRegisterMode && const bool.fromEnvironment('FENYVO_DEVICE_TRANSFER_UI_ENABLED')) ...[
+                                    const SizedBox(height: 2),
+                                    OutlinedButton.icon(
+                                      onPressed: _openDeviceTransfer,
+                                      icon: const Icon(
+                                        Icons.phonelink_lock_outlined,
+                                      ),
+                                      label: const Text(
+                                        'ПЕРЕНЕСТИ АККАУНТ НА ЭТО УСТРОЙСТВО',
+                                        textAlign: TextAlign.center,
+                                      ),
+                                      style: OutlinedButton.styleFrom(
+                                        foregroundColor: SpartanPalette.ink,
+                                        side: BorderSide(
+                                          color: SpartanPalette.ink.withValues(
+                                            alpha: 0.55,
+                                          ),
+                                        ),
+                                        minimumSize: const Size.fromHeight(48),
+                                        shape: RoundedRectangleBorder(
+                                          borderRadius: BorderRadius.circular(
+                                            14,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      'Используйте, если аккаунт открыт на старом телефоне.',
+                                      textAlign: TextAlign.center,
+                                      style: TextStyle(
+                                        color: SpartanPalette.secondary
+                                            .withValues(alpha: 0.85),
+                                        fontSize: 11,
+                                      ),
+                                    ),
+                                  ],
                                 ],
                               ),
                               CheckboxListTile(
@@ -884,7 +1003,9 @@ class _AuthScreenState extends State<AuthScreen> {
                                   const SizedBox(height: 15),
 
                                   Text(
-                                    _isAutoLogin
+                                    _openingDeviceTransfer
+                                        ? 'Ожидаем подтверждение на старом устройстве…'
+                                        : _isAutoLogin
                                         ? 'Автоматический вход...'
                                         : _isRegisterMode
                                         ? 'Регистрация...'

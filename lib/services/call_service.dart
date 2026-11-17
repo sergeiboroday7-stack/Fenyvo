@@ -33,8 +33,11 @@ class CallService extends ChangeNotifier {
   MediaStream? _localStream;
   MediaStream? _fallbackRemoteStream;
   Map<String, dynamic>? _pendingOffer;
+  Map<String, dynamic>? _outgoingOffer;
+  final Set<String> _e2eeRecoveryAttempted = <String>{};
   final List<Map<String, dynamic>> _pendingCandidates = [];
   final List<Map<String, dynamic>> _localCandidates = [];
+  final List<Map<String, dynamic>> _outgoingCandidates = [];
   Future<void>? _rendererInitialization;
   Timer? _timeout;
   Timer? _disconnectTimeout;
@@ -52,6 +55,7 @@ class CallService extends ChangeNotifier {
   bool _localDescriptionSent = false;
   bool _answerApplying = false;
   bool _cleaning = false;
+  Completer<void>? _cleanupCompleter;
   CallPhase phase = CallPhase.idle;
   String? callId;
   String? peerUser;
@@ -177,6 +181,7 @@ class CallService extends ChangeNotifier {
       if (!_isCurrent(id)) return;
       await connection.setLocalDescription(description);
       if (!_isCurrent(id)) return;
+      _outgoingOffer = {'type': description.type, 'sdp': description.sdp};
       final sent = await SocketService.instance.sendCallOffer(
         to: target,
         callId: id,
@@ -424,6 +429,7 @@ class CallService extends ChangeNotifier {
     final connection = await createPeerConnection({
       'sdpSemantics': 'unified-plan',
       'iceServers': TurnCredentialService.iceServers,
+      'iceTransportPolicy': TurnCredentialService.iceTransportPolicy,
     });
     if (!_isCurrent(id)) {
       await connection.close();
@@ -438,6 +444,9 @@ class CallService extends ChangeNotifier {
         'sdpMid': candidate.sdpMid,
         'sdpMLineIndex': candidate.sdpMLineIndex,
       };
+      if (_outgoingCandidates.length < 256) {
+        _outgoingCandidates.add({...data});
+      }
       if (!_localDescriptionSent) {
         if (_localCandidates.length < 256) _localCandidates.add(data);
       } else {
@@ -577,6 +586,75 @@ class CallService extends ChangeNotifier {
     _localCandidates.clear();
   }
 
+  Future<void> _recoverE2eeCall(String id) async {
+    if (!_isCurrent(id) || isIncoming) return;
+    final peer = peerUser;
+    final offer = _outgoingOffer;
+    if (peer == null || offer == null) return;
+    if (!_e2eeRecoveryAttempted.add(id)) return;
+
+    statusText = 'Восстанавливаем защищённый звонок…';
+    notifyListeners();
+    final ready = await SocketService.instance.refreshPeerE2eeSession(peer);
+    if (!ready || !_isCurrent(id) || peerUser != peer) {
+      if (_isCurrent(id)) {
+        await _finishWithMessage(
+          'Не удалось восстановить защищённое соединение',
+        );
+      }
+      return;
+    }
+
+    final sent = await SocketService.instance.sendCallOffer(
+      to: peer,
+      callId: id,
+      video: isVideo,
+      sdp: Map<String, dynamic>.from(offer),
+    );
+    if (!sent || !_isCurrent(id)) {
+      if (_isCurrent(id)) {
+        await _finishWithMessage(
+          'Не удалось повторно отправить защищённый звонок',
+        );
+      }
+      return;
+    }
+
+    for (final candidate in List<Map<String, dynamic>>.from(
+      _outgoingCandidates,
+    )) {
+      if (!_isCurrent(id)) return;
+      await SocketService.instance.sendCallIceCandidate(
+        to: peer,
+        callId: id,
+        candidate: candidate,
+      );
+    }
+
+    if (_isCurrent(id)) {
+      statusText = 'Ожидание ответа…';
+      notifyListeners();
+    }
+  }
+
+  Future<void> _recoverE2eeAnswer(String id) async {
+    if (!_isCurrent(id) || isIncoming) return;
+    final peer = peerUser;
+    if (peer == null || !_e2eeRecoveryAttempted.add(id)) return;
+
+    unawaited(_stopRingback());
+    statusText = 'Обновляем защищённое соединение…';
+    notifyListeners();
+    final ready = await SocketService.instance.refreshPeerE2eeSession(peer);
+    if (!_isCurrent(id) || peerUser != peer) return;
+
+    await _finishWithMessage(
+      ready
+          ? 'Защита обновлена — позвоните ещё раз'
+          : 'Не удалось обновить защищённое соединение',
+    );
+  }
+
   void _handleSocketMessage(Map<String, dynamic> message) {
     final type = message['type']?.toString() ?? '';
     final rawData = message['data'];
@@ -585,7 +663,7 @@ class CallService extends ChangeNotifier {
         : <String, dynamic>{};
     switch (type) {
       case 'call_offer':
-        _handleIncomingOffer(data);
+        unawaited(_handleIncomingOffer(data));
         break;
       case 'login_success':
         unawaited(SystemCallService.instance.restorePending());
@@ -610,7 +688,20 @@ class CallService extends ChangeNotifier {
       case 'call_ice_candidate':
         unawaited(_handleIceCandidate(data));
         break;
+      case 'call_e2ee_answer_error':
+        if (_matchesCurrentCall(data) && !isIncoming) {
+          final id = data['callId']?.toString() ?? '';
+          unawaited(_recoverE2eeAnswer(id));
+        }
+        break;
       case 'call_reject':
+        if (data['reason'] == 'e2ee_signal_error' &&
+            _matchesCurrentCall(data) &&
+            !isIncoming) {
+          final id = data['callId']?.toString() ?? '';
+          unawaited(_recoverE2eeCall(id));
+          break;
+        }
         if (_matchesCurrentCall(data)) {
           unawaited(
             _playCallProgressTone(
@@ -654,7 +745,11 @@ class CallService extends ChangeNotifier {
     }
   }
 
-  void _handleIncomingOffer(Map<String, dynamic> data) {
+  Future<void> _handleIncomingOffer(Map<String, dynamic> data) async {
+    final pendingCleanup = _cleanupCompleter;
+    if (pendingCleanup != null) {
+      await pendingCleanup.future;
+    }
     final id = data['callId']?.toString().trim() ?? '';
     final from = data['from']?.toString().trim() ?? '';
     if (_dismissedCalls.contains(id)) {
@@ -1003,7 +1098,13 @@ class CallService extends ChangeNotifier {
   }
 
   Future<void> _cleanup() async {
-    if (_cleaning) return;
+    final existing = _cleanupCompleter;
+    if (existing != null) {
+      await existing.future;
+      return;
+    }
+    final completer = Completer<void>();
+    _cleanupCompleter = completer;
     _cleaning = true;
     final endingCallId = callId;
     try {
@@ -1032,6 +1133,9 @@ class CallService extends ChangeNotifier {
     } finally {
       clock.reset();
       _pendingOffer = null;
+      _outgoingOffer = null;
+      _outgoingCandidates.clear();
+      if (endingCallId != null) _e2eeRecoveryAttempted.remove(endingCallId);
       _incomingData = null;
       avatarBytes = null;
       _pendingCandidates.clear();
@@ -1053,6 +1157,8 @@ class CallService extends ChangeNotifier {
       statusText = '';
       phase = CallPhase.idle;
       _cleaning = false;
+      _cleanupCompleter = null;
+      if (!completer.isCompleted) completer.complete();
       notifyListeners();
     }
   }

@@ -252,8 +252,7 @@ class SystemCallService {
           backgroundUrl: avatar,
           actionColor: '#D4AF37',
           textColor: '#FFFFFF',
-          incomingCallNotificationChannelName:
-              'Р вЂ”Р Р†Р С•Р Р…Р С”Р С‘ SPARTAN',
+          incomingCallNotificationChannelName: 'Звонки SPARTAN',
           missedCallNotificationChannelName: '\u041f\u0440\u043e\u043f\u0443\u0449\u0435\u043d\u043d\u044b\u0435 \u0437\u0432\u043e\u043d\u043a\u0438',
           textAccept: '\u041f\u0440\u0438\u043d\u044f\u0442\u044c',
           textDecline: '\u041e\u0442\u043a\u043b\u043e\u043d\u0438\u0442\u044c',

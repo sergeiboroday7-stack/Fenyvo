@@ -3,6 +3,14 @@ class TurnCredentialService {
 
   static Map<String, dynamic>? _turn;
 
+  static bool get hasTurn => _turn != null;
+
+  /// Mobile carrier and symmetric NATs can advertise host/srflx candidates
+  /// that exchange checks but never become a usable media path. Once the
+  /// authenticated Fenyvo TURN service is available, use its relay path for
+  /// private calls instead of racing those unstable candidates.
+  static String get iceTransportPolicy => hasTurn ? 'relay' : 'all';
+
   static void configure(Map<String, dynamic>? turn) {
     if (turn == null) {
       _turn = null;

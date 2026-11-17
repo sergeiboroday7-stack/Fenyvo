@@ -101,6 +101,8 @@ android/keystore/
 media/
 avatars/
 communication_requests.json
+message_expirations.json
+temporary_contacts.json
 e2ee_prekey_bundles.json
 e2ee_public_keys.json
 fcm_tokens.json
@@ -112,3 +114,9 @@ auto_reply_history.json
 auto_reply_settings.json
 assets/images/114f901a-bcae-468c-a5be-e7ca385fec28.png
 assets/images/adcfeb10-a5b8-4fb2-9f1d-5d68f2365fba.png
+
+# Local review artifacts and generated native build output
+*.backup_*
+*.diff
+/tool/temporary_socket_e2e_token.txt
+**/.cxx/

@@ -1,9 +1,9 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// User-controlled E2EE switch.
+/// Non-secret E2EE preferences and completed migration markers.
 ///
-/// This preference is deliberately separate from key material. It is safe to
-/// keep here; identities and ratchet state are stored by [SignalSecureStore].
+/// E2EE is always enabled by the transport. Key material and ratchet state are
+/// stored separately by SignalSecureStore.
 class E2eeSettingsService {
   E2eeSettingsService._();
 
@@ -11,6 +11,7 @@ class E2eeSettingsService {
   static const _enabledKey = 'signal_e2ee_enabled_v2';
   static const _peerKeyPrefix = 'signal_e2ee_active_peers_v1_';
   static const _verifiedKeyPrefix = 'signal_e2ee_verified_v1_';
+  static const _ratchetMigrationKeyPrefix = 'signal_e2ee_ratchet_migration_v1_';
 
   Future<bool> isEnabled() async {
     final preferences = await SharedPreferences.getInstance();
@@ -86,5 +87,25 @@ class E2eeSettingsService {
     if (username.trim().isEmpty || peer.trim().isEmpty) return;
     final preferences = await SharedPreferences.getInstance();
     await preferences.remove(_verifiedKey(username, peer));
+  }
+
+  String _ratchetMigrationKey(String username, String migration) =>
+      '$_ratchetMigrationKeyPrefix${username.trim().toLowerCase()}_$migration';
+
+  Future<bool> hasCompletedRatchetMigration(
+    String username,
+    String migration,
+  ) async {
+    final preferences = await SharedPreferences.getInstance();
+    return preferences.getBool(_ratchetMigrationKey(username, migration)) ==
+        true;
+  }
+
+  Future<void> markRatchetMigrationCompleted(
+    String username,
+    String migration,
+  ) async {
+    final preferences = await SharedPreferences.getInstance();
+    await preferences.setBool(_ratchetMigrationKey(username, migration), true);
   }
 }
