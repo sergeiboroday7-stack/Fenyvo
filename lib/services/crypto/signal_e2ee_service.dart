@@ -8,6 +8,13 @@ import 'package:synchronized/synchronized.dart';
 
 import 'signal_secure_store.dart';
 
+import 'package:crypto/crypto.dart' as transfer_hash;
+
+import 'device_transfer_request.dart';
+import 'old_device_pin.dart';
+import 'device_key_transition.dart';
+import 'device_transfer_approval.dart';
+
 class E2eeSessionMissing implements Exception {
   const E2eeSessionMissing(this.username);
   final String username;
@@ -52,9 +59,7 @@ class SignalE2eeService {
     final pending = _initializationInFlight;
     if (pending != null) {
       if (_initializingUser != user) {
-        throw StateError(
-          'Signal initialization is active for another account',
-        );
+        throw StateError('Signal initialization is active for another account');
       }
       await pending;
       return;
@@ -80,10 +85,7 @@ class SignalE2eeService {
 
   Future<void> _initializeForUserInternal(String user) async {
     try {
-      if (!_libraryReady) {
-        await LibSignal.init();
-        _libraryReady = true;
-      }
+      await _ensureLibraryReady();
 
       if (_username == user && _store != null) return;
 
@@ -102,6 +104,58 @@ class SignalE2eeService {
       rethrow;
     }
   }
+
+  Future<void>? _libraryInitialization;
+  Future<void> _ensureLibraryReady() async {
+    if (_libraryReady) return;
+    final pending = _libraryInitialization;
+    if (pending != null) {
+      await pending;
+      return;
+    }
+    final future = LibSignal.init();
+    _libraryInitialization = future;
+    try {
+      await future;
+      _libraryReady = true;
+    } finally {
+      if (identical(_libraryInitialization, future))
+        _libraryInitialization = null;
+    }
+  }
+
+  /// Memory-only candidate: no account, session or secure-store mutation.
+  Future<void> prepareDeviceTransferCrypto() => _ensureLibraryReady();
+
+  Future<IdentityKeyPair> createDeviceTransferCandidate() async {
+    await _ensureLibraryReady();
+    return IdentityKeyPair.generate();
+  }
+
+  Future<OldDevicePin> deviceTransferPublicPin({
+    required String accountId,
+    required String username,
+    required bool Function() isSessionCurrent,
+  }) async {
+    if (!isReady || _username != username || !isSessionCurrent())
+      throw StateError('Inactive account');
+    final store = _requireStore(),
+        identity = await _requireStore().readExistingIdentityForTransfer();
+    try {
+      if (!identical(store, _store) ||
+          _username != username ||
+          !isSessionCurrent())
+        throw StateError('Account changed');
+      return OldDevicePin.create(
+        accountId: accountId,
+        username: username,
+        publicKey: identity.publicKey,
+      );
+    } finally {
+      identity.dispose();
+    }
+  }
+
   Lock _lockFor(String username) =>
       _peerLocks.putIfAbsent(username.trim(), Lock.new);
 
@@ -228,6 +282,8 @@ class SignalE2eeService {
     if (remote.isEmpty) throw const FormatException('Missing remote user');
     await _lockFor(remote).synchronized(() async {
       final store = _requireStore();
+      final address = ProtocolAddress(name: remote, deviceId: _positiveInt(data['deviceId']));
+      if (await store.containsSession(address)) return;
       final signed = Map<String, dynamic>.from(data['signedPreKey'] as Map);
       final pre = Map<String, dynamic>.from(data['preKey'] as Map);
       final kyber = Map<String, dynamic>.from(data['kyberPreKey'] as Map);
@@ -364,53 +420,204 @@ class SignalE2eeService {
 
     await _verifiedRecoveryLock.synchronized(() async {
       await _lockFor(remote).synchronized(() async {
-      if (_username != owner) throw StateError('Signal owner changed');
-      final store = _requireStore();
-      final address = ProtocolAddress(name: remote, deviceId: deviceId);
-      final originalSession = await store.loadSession(address);
-      final originalIdentity = await store.getIdentity(address);
-      final signed = Map<String, dynamic>.from(bundleData['signedPreKey'] as Map);
-      final pre = Map<String, dynamic>.from(bundleData['preKey'] as Map);
-      final kyber = Map<String, dynamic>.from(bundleData['kyberPreKey'] as Map);
-      final bundle = PreKeyBundle(
-        registrationId: _positiveInt(bundleData['registrationId']),
-        deviceId: _positiveInt(bundleData['deviceId']),
-        preKeyId: _positiveInt(pre['id']),
-        preKeyPublic: base64Decode(pre['publicKey'].toString()),
-        signedPreKeyId: _positiveInt(signed['id']),
-        signedPreKeyPublic: base64Decode(signed['publicKey'].toString()),
-        signedPreKeySignature: base64Decode(signed['signature'].toString()),
-        identityKey: base64Decode(encodedIdentity),
-        kyberPreKeyId: _positiveInt(kyber['id']),
-        kyberPreKeyPublic: base64Decode(kyber['publicKey'].toString()),
-        kyberPreKeySignature: base64Decode(kyber['signature'].toString()),
-      );
-      if (_positiveInt(bundleData['deviceId']) != deviceId) {
-        throw StateError('Unexpected E2EE peer device');
-      }
-      final current = await candidateSafetyNumber(remote, encodedIdentity);
-      if (current.display != verifiedSafetyNumber) {
-        throw StateError('Candidate identity changed during confirmation');
-      }
-      // Persist the pre-change state before the first destructive write.
-      // An Android process death cannot run catch/finally; the initializer
-      // restores this journal before making Signal usable again.
-      await store.beginVerifiedPeerRecovery(
-        address, originalSession, originalIdentity,
-      );
-      try {
-        await store.deleteSession(address);
-        await store.deleteRemoteIdentity(address);
-        await SessionBuilder(
-          localAddress: ProtocolAddress(name: owner, deviceId: deviceId),
-          sessionStore: store,
-          identityKeyStore: store,
-        ).processPreKeyBundle(address, bundle);
-        await store.commitVerifiedPeerRecovery();
-      } catch (_) {
-        await store.restorePendingVerifiedPeerRecovery();
-        rethrow;
-      }
+        if (_username != owner) throw StateError('Signal owner changed');
+        final store = _requireStore();
+        final address = ProtocolAddress(name: remote, deviceId: deviceId);
+        final originalSession = await store.loadSession(address);
+        final originalIdentity = await store.getIdentity(address);
+        final signed = Map<String, dynamic>.from(
+          bundleData['signedPreKey'] as Map,
+        );
+        final pre = Map<String, dynamic>.from(bundleData['preKey'] as Map);
+        final kyber = Map<String, dynamic>.from(
+          bundleData['kyberPreKey'] as Map,
+        );
+        final bundle = PreKeyBundle(
+          registrationId: _positiveInt(bundleData['registrationId']),
+          deviceId: _positiveInt(bundleData['deviceId']),
+          preKeyId: _positiveInt(pre['id']),
+          preKeyPublic: base64Decode(pre['publicKey'].toString()),
+          signedPreKeyId: _positiveInt(signed['id']),
+          signedPreKeyPublic: base64Decode(signed['publicKey'].toString()),
+          signedPreKeySignature: base64Decode(signed['signature'].toString()),
+          identityKey: base64Decode(encodedIdentity),
+          kyberPreKeyId: _positiveInt(kyber['id']),
+          kyberPreKeyPublic: base64Decode(kyber['publicKey'].toString()),
+          kyberPreKeySignature: base64Decode(kyber['signature'].toString()),
+        );
+        if (_positiveInt(bundleData['deviceId']) != deviceId) {
+          throw StateError('Unexpected E2EE peer device');
+        }
+        final current = await candidateSafetyNumber(remote, encodedIdentity);
+        if (current.display != verifiedSafetyNumber) {
+          throw StateError('Candidate identity changed during confirmation');
+        }
+        // Persist the pre-change state before the first destructive write.
+        // An Android process death cannot run catch/finally; the initializer
+        // restores this journal before making Signal usable again.
+        await store.beginVerifiedPeerRecovery(
+          address,
+          originalSession,
+          originalIdentity,
+        );
+        try {
+          await store.deleteSession(address);
+          await store.deleteRemoteIdentity(address);
+          await SessionBuilder(
+            localAddress: ProtocolAddress(name: owner, deviceId: deviceId),
+            sessionStore: store,
+            identityKeyStore: store,
+          ).processPreKeyBundle(address, bundle);
+          await store.commitVerifiedPeerRecovery();
+        } catch (_) {
+          await store.restorePendingVerifiedPeerRecovery();
+          rethrow;
+        }
+      });
+    });
+  }
+
+  /// Installs a new bundle only after continuity from the locally pinned key.
+  /// Network routing remains disabled until the server transition flow is complete.
+  Future<void> acceptContinuityVerifiedRemoteBundle(
+    String username,
+    Map<String, dynamic> bundleData, {
+    required String expectedAccountId,
+    required List<Map<String, dynamic>> certificates,
+    required bool Function() isSessionCurrent,
+  }) async {
+    final remote = username.trim(), owner = _username;
+    if (remote.isEmpty ||
+        owner == null ||
+        remote == owner ||
+        certificates.isEmpty ||
+        certificates.length > 32 ||
+        !isSessionCurrent()) {
+      throw StateError('Invalid continuity owner or session');
+    }
+    // Snapshot public inputs before entering an asynchronous lock.
+    final encodedBundle = jsonEncode(bundleData),
+        encodedCertificates = jsonEncode(certificates);
+    if (encodedBundle.length > 32768 || encodedCertificates.length > 65536)
+      throw StateError('Continuity payload too large');
+    final bundleCopy = Map<String, dynamic>.from(
+      jsonDecode(encodedBundle) as Map,
+    );
+    final certificateCopy = (jsonDecode(encodedCertificates) as List)
+        .map((entry) => Map<String, dynamic>.from(entry as Map))
+        .toList();
+    await _verifiedRecoveryLock.synchronized(() async {
+      await _lockFor(remote).synchronized(() async {
+        final store = _requireStore();
+        void check() {
+          if (_username != owner ||
+              !identical(store, _store) ||
+              !isSessionCurrent()) {
+            throw StateError('Continuity account or session changed');
+          }
+        }
+
+        check();
+        final address = ProtocolAddress(name: remote, deviceId: deviceId);
+        final oldIdentity = await store.getIdentity(address);
+        if (oldIdentity == null)
+          throw StateError('Continuity requires a pinned old key');
+        try {
+          final oldSession = await store.loadSession(address),
+              metadata = await store.readPeerContinuity(address);
+          check();
+          if (metadata != null &&
+              (metadata['accountId'] != expectedAccountId ||
+                  metadata['identityHash'] !=
+                      transfer_hash.sha256
+                          .convert(oldIdentity.serialize())
+                          .toString())) {
+            throw StateError(
+              'Continuity metadata disagrees with existing trust',
+            );
+          }
+          final chain = verifyDeviceKeyTransitionChain(
+            certificates: certificateCopy,
+            trustedOldIdentityKey: oldIdentity.serialize(),
+            accountId: expectedAccountId,
+            username: remote,
+            storedEpoch: metadata?['epoch'] as int? ?? 0,
+            nowMs: DateTime.now().millisecondsSinceEpoch,
+          );
+          if (chain == null ||
+              bundleCopy['identityKey'] !=
+                  base64Encode(chain.finalIdentityKey) ||
+              _positiveInt(bundleCopy['deviceId']) != deviceId) {
+            throw StateError('Certificate chain or bundle identity mismatch');
+          }
+          final signed = Map<String, dynamic>.from(
+                bundleCopy['signedPreKey'] as Map,
+              ),
+              pre = Map<String, dynamic>.from(bundleCopy['preKey'] as Map),
+              kyber = Map<String, dynamic>.from(
+                bundleCopy['kyberPreKey'] as Map,
+              );
+          final bundle = PreKeyBundle(
+            registrationId: _positiveInt(bundleCopy['registrationId']),
+            deviceId: deviceId,
+            preKeyId: _positiveInt(pre['id']),
+            preKeyPublic: base64Decode(pre['publicKey'].toString()),
+            signedPreKeyId: _positiveInt(signed['id']),
+            signedPreKeyPublic: base64Decode(signed['publicKey'].toString()),
+            signedPreKeySignature: base64Decode(signed['signature'].toString()),
+            identityKey: chain.finalIdentityKey,
+            kyberPreKeyId: _positiveInt(kyber['id']),
+            kyberPreKeyPublic: base64Decode(kyber['publicKey'].toString()),
+            kyberPreKeySignature: base64Decode(kyber['signature'].toString()),
+          );
+          check();
+          await store.beginVerifiedPeerRecovery(
+            address,
+            oldSession,
+            oldIdentity,
+            preserveRetiredSession: true,
+          );
+          try {
+            check();
+            if (oldSession != null)
+              await store.preserveRetiredPeerSession(
+                address,
+                oldSession,
+                oldIdentity,
+                accountId: expectedAccountId,
+                fromEpoch: metadata?['epoch'] as int? ?? 0,
+                toEpoch: chain.finalEpoch,
+              );
+            check();
+            await store.deleteSession(address);
+            check();
+            await store.deleteRemoteIdentity(address);
+            check();
+            await SessionBuilder(
+              localAddress: ProtocolAddress(name: owner, deviceId: deviceId),
+              sessionStore: store,
+              identityKeyStore: store,
+            ).processPreKeyBundle(address, bundle);
+            check();
+            await store.saveVerifiedPeerContinuity(address, chain);
+            check();
+            await store.commitVerifiedPeerRecovery();
+          } catch (_) {
+            try {
+              await store.restorePendingVerifiedPeerRecovery();
+            } catch (_) {
+              // A failed restore leaves a durable journal; block this store until recovery succeeds.
+              if (identical(store, _store)) {
+                _store = null;
+                _username = null;
+              }
+              rethrow;
+            }
+            rethrow;
+          }
+        } finally {
+          oldIdentity.dispose();
+        }
       });
     });
   }
@@ -441,6 +648,38 @@ class SignalE2eeService {
     });
   }
 
+  /// Explicit receive-only recovery; not wired into ordinary delivery or UI.
+  Future<Map<String, dynamic>> decryptRetiredContactMessage(
+    String username,
+    Map<String, dynamic> envelope, {
+    required bool Function() isSessionCurrent,
+  }) async {
+    final remote = username.trim();
+    return _lockFor(remote).synchronized(() async {
+      final store = _requireStore(), owner = _username;
+      bool current() =>
+          isSessionCurrent() && identical(store, _store) && owner == _username;
+      if (!current() ||
+          envelope['cipherType'] != 2 ||
+          envelope['ciphertext'] is! String ||
+          (envelope['ciphertext'] as String).length > 1048576)
+        throw StateError('Retired receive not permitted');
+      final decoded = await store.decryptRetiredPeerMessage(
+        ProtocolAddress(name: remote, deviceId: deviceId),
+        CiphertextMessage(
+          type: CiphertextMessageType.fromValue(2),
+          ciphertext: base64Decode(envelope['ciphertext'] as String),
+        ),
+        isCurrent: current,
+      );
+      if (!current()) throw StateError('Retired receive owner changed');
+      final value = jsonDecode(utf8.decode(decoded));
+      if (value is! Map)
+        throw const FormatException('Invalid retired E2EE payload');
+      return Map<String, dynamic>.from(value);
+    });
+  }
+
   Future<Map<String, dynamic>> decrypt(
     String username,
     Map<String, dynamic> envelope,
@@ -462,11 +701,13 @@ class SignalE2eeService {
       ).decrypt(ProtocolAddress(name: remote, deviceId: deviceId), ciphertext);
       final value = jsonDecode(utf8.decode(decoded));
       if (value is! Map) throw const FormatException('Invalid E2EE payload');
-      unawaited(_ensurePreKeys().catchError((Object error, StackTrace stack) {
-        // A failed background refill must not surface as an unhandled Future.
-        // Awaited initialisation and bundle publishing still propagate errors.
-        developer.log('Background PreKey refill failed', name: 'FENYVO_E2EE');
-      }));
+      unawaited(
+        _ensurePreKeys().catchError((Object error, StackTrace stack) {
+          // A failed background refill must not surface as an unhandled Future.
+          // Awaited initialisation and bundle publishing still propagate errors.
+          developer.log('Background PreKey refill failed', name: 'FENYVO_E2EE');
+        }),
+      );
       return Map<String, dynamic>.from(value);
     });
   }
@@ -479,6 +720,115 @@ class SignalE2eeService {
     signedPreKeyStore: store,
     kyberPreKeyStore: store,
   );
+
+  /// Public pinned peer state; never bootstraps identity or trust.
+  Future<Map<String, dynamic>> contactContinuityHead(
+    String peer, {
+    required bool Function() isSessionCurrent,
+  }) async {
+    final owner = _username, store = _requireStore();
+    void check() {
+      if (!isSessionCurrent() ||
+          owner != _username ||
+          !identical(store, _store))
+        throw StateError('Continuity owner changed');
+    }
+
+    check();
+    final address = ProtocolAddress(name: peer, deviceId: deviceId);
+    final identity = await store.getIdentity(address);
+    try {
+      final metadata = await store.readPeerContinuity(address);
+      check();
+      if (metadata != null && identity == null)
+        throw StateError('Continuity metadata without pinned key');
+      return {
+        'identityKey': identity == null
+            ? null
+            : base64Encode(identity.serialize()),
+        'epoch': metadata?['epoch'] ?? 0,
+        'accountId': metadata?['accountId'],
+      };
+    } finally {
+      identity?.dispose();
+    }
+  }
+
+  /// Signs only an explicit, current request with the existing local identity.
+  Future<Map<String, dynamic>> signConfirmedDeviceTransfer(
+    DeviceTransferRequest request, {
+    required bool userConfirmed,
+    required bool Function() isSessionCurrent,
+  }) async {
+    if (!userConfirmed ||
+        !isReady ||
+        _username != request.username ||
+        !isSessionCurrent() ||
+        !request.validAt(DateTime.now().millisecondsSinceEpoch)) {
+      throw StateError('Transfer approval is no longer current');
+    }
+    final store = _requireStore();
+    final identity = await store.readExistingIdentityForTransfer();
+    try {
+      if (!identical(store, _store) ||
+          _username != request.username ||
+          !isSessionCurrent()) {
+        throw StateError('Transfer account changed');
+      }
+      final payload = <String, dynamic>{
+        ...request.data,
+        'oldIdentityHash': transfer_hash.sha256
+            .convert(identity.publicKey)
+            .toString(),
+      };
+      final signature = signDeviceTransferApproval(
+        payload: payload,
+        identity: identity,
+        accountId: request.accountId,
+        username: request.username,
+        newIdentityKey: request.newIdentityKey,
+        nonce: request.nonce,
+        nowMs: DateTime.now().millisecondsSinceEpoch,
+      );
+      if (!isSessionCurrent()) throw StateError('Transfer session changed');
+      if (request.fromEpoch != null) {
+        final epoch = request.fromEpoch!;
+        final certificate = <String, dynamic>{
+          'purpose': 'fenyvo-device-key-transition-v1',
+          'accountId': request.accountId,
+          'username': request.username,
+          'oldIdentityHash': payload['oldIdentityHash'],
+          'newIdentityKey': payload['newIdentityKey'],
+          'fromEpoch': epoch,
+          'toEpoch': epoch + 1,
+          'issuedAt': payload['issuedAt'],
+          'transferNonce': request.nonce,
+        };
+        final certificateSignature = signDeviceKeyTransition(
+          payload: certificate,
+          identity: identity,
+          accountId: request.accountId,
+          username: request.username,
+          fromEpoch: epoch,
+          newIdentityKey: request.newIdentityKey,
+          transferNonce: request.nonce,
+          nowMs: DateTime.now().millisecondsSinceEpoch,
+          userConfirmed: userConfirmed,
+        );
+        if (!isSessionCurrent()) throw StateError('Transfer session changed');
+        return {
+          'approval': {'payload': payload, 'signature': signature},
+          'certificate': {
+            'payload': certificate,
+            'signature': certificateSignature,
+          },
+        };
+      }
+      return {'payload': payload, 'signature': signature};
+    } finally {
+      identity.dispose();
+    }
+  }
 
   SignalSecureStore _requireStore() {
     final store = _store;

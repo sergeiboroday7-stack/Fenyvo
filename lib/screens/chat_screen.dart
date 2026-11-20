@@ -420,6 +420,8 @@ class _ChatScreenState extends State<ChatScreen>
   bool _e2eeDecryptWarningShown = false;
   bool _changingE2ee = false;
   bool _screenSecurityEnabled = false;
+  int _autoDeleteSeconds = 0;
+  int _unreadAutoDeleteSeconds = 0;
 
   Timer? _typingStopTimer;
   Timer? _remoteTypingTimeoutTimer;
@@ -618,6 +620,7 @@ class _ChatScreenState extends State<ChatScreen>
 
     _loadMessages();
     _loadBackgroundSettings();
+    unawaited(_loadAutoDeleteSetting());
     if (Platform.isAndroid || Platform.isWindows) {
       unawaited(_loadScreenSecuritySetting());
     }
@@ -4555,6 +4558,267 @@ class _ChatScreenState extends State<ChatScreen>
   // \u041E\u0422\u041F\u0420\u0410\u0412\u041A\u0410 \u0421\u041E\u041E\u0411\u0429\u0415\u041D\u0418\u042F
   // ========================================
 
+  Future<void> _loadAutoDeleteSetting() async {
+    final currentUser = SocketService.instance.currentUser ?? '';
+
+    if (currentUser.isEmpty) {
+      return;
+    }
+
+    final seconds = await StorageService.getChatAutoDeleteSeconds(
+      currentUser,
+      widget.targetUser,
+    );
+
+    final unreadSeconds = await StorageService.getChatUnreadAutoDeleteSeconds(
+      currentUser,
+      widget.targetUser,
+    );
+
+    if (!mounted) {
+      return;
+    }
+
+    setState(() {
+      _autoDeleteSeconds = seconds;
+      _unreadAutoDeleteSeconds = unreadSeconds;
+    });
+  }
+
+  String _autoDeleteLabel(int seconds) {
+    switch (seconds) {
+      case 30:
+        return '30 \u0441\u0435\u043a\u0443\u043d\u0434';
+      case 300:
+        return '5 \u043c\u0438\u043d\u0443\u0442';
+      case 3600:
+        return '1 \u0447\u0430\u0441';
+      case 86400:
+        return '24 \u0447\u0430\u0441\u0430';
+      case 604800:
+        return '7 \u0434\u043d\u0435\u0439';
+      default:
+        return '\u0412\u044b\u043a\u043b.';
+    }
+  }
+
+  String _unreadAutoDeleteLabel(int seconds) {
+    switch (seconds) {
+      case 3600:
+        return '1 \u0447\u0430\u0441';
+      case 86400:
+        return '24 \u0447\u0430\u0441\u0430';
+      case 259200:
+        return '3 \u0434\u043d\u044f';
+      case 604800:
+        return '7 \u0434\u043d\u0435\u0439';
+      default:
+        return '\u0412\u044b\u043a\u043b.';
+    }
+  }
+
+  Future<int?> _pickAutoDeleteInterval({
+    required String title,
+    required int currentValue,
+    required List<int> options,
+    required String Function(int) labelBuilder,
+  }) {
+    return showModalBottomSheet<int>(
+      context: context,
+      backgroundColor: FenyvoPalette.surface,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 4, 20, 10),
+                child: Row(
+                  children: [
+                    const Icon(
+                      Icons.timer_outlined,
+                      color: FenyvoPalette.gold,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        title,
+                        style: const TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              ...options.map(
+                (seconds) => ListTile(
+                  leading: Icon(
+                    seconds == currentValue
+                        ? Icons.radio_button_checked_rounded
+                        : Icons.radio_button_off_rounded,
+                    color: seconds == currentValue
+                        ? FenyvoPalette.gold
+                        : FenyvoPalette.secondary,
+                  ),
+                  title: Text(labelBuilder(seconds)),
+                  onTap: () {
+                    Navigator.of(sheetContext).pop(seconds);
+                  },
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _showAutoDeleteSettings() async {
+    final setting = await showModalBottomSheet<String>(
+      context: context,
+      backgroundColor: FenyvoPalette.surface,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Padding(
+                padding: EdgeInsets.fromLTRB(20, 4, 20, 8),
+                child: Row(
+                  children: [
+                    Icon(Icons.timer_outlined, color: FenyvoPalette.gold),
+                    SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        '\u0410\u0432\u0442\u043e\u0443\u0434\u0430\u043b\u0435\u043d\u0438\u0435 \u0441\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u0439',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Padding(
+                padding: EdgeInsets.fromLTRB(20, 0, 20, 8),
+                child: Text(
+                  '\u041c\u043e\u0436\u043d\u043e \u043d\u0430\u0441\u0442\u0440\u043e\u0438\u0442\u044c \u0441\u0440\u043e\u043a \u043e\u0442\u0434\u0435\u043b\u044c\u043d\u043e \u0434\u043b\u044f \u043f\u0440\u043e\u0447\u0438\u0442\u0430\u043d\u043d\u044b\u0445 \u0438 \u043d\u0435\u043f\u0440\u043e\u0447\u0438\u0442\u0430\u043d\u043d\u044b\u0445 \u0441\u043e\u043e\u0431\u0449\u0435\u043d\u0438\u0439.',
+                  style: TextStyle(
+                    color: FenyvoPalette.secondary,
+                    fontSize: 13,
+                    height: 1.35,
+                  ),
+                ),
+              ),
+              ListTile(
+                leading: const Icon(
+                  Icons.visibility_outlined,
+                  color: FenyvoPalette.gold,
+                ),
+                title: const Text(
+                  '\u041f\u043e\u0441\u043b\u0435 \u043f\u0440\u043e\u0447\u0442\u0435\u043d\u0438\u044f',
+                ),
+                subtitle: Text(_autoDeleteLabel(_autoDeleteSeconds)),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () {
+                  Navigator.of(sheetContext).pop('read');
+                },
+              ),
+              ListTile(
+                leading: const Icon(
+                  Icons.mark_email_unread_outlined,
+                  color: FenyvoPalette.gold,
+                ),
+                title: const Text(
+                  '\u0415\u0441\u043b\u0438 \u043d\u0435 \u043f\u0440\u043e\u0447\u0438\u0442\u0430\u043d\u043e',
+                ),
+                subtitle: Text(
+                  _unreadAutoDeleteLabel(_unreadAutoDeleteSeconds),
+                ),
+                trailing: const Icon(Icons.chevron_right_rounded),
+                onTap: () {
+                  Navigator.of(sheetContext).pop('unread');
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (setting == null || !mounted) {
+      return;
+    }
+
+    final currentUser = SocketService.instance.currentUser ?? '';
+    if (currentUser.isEmpty) {
+      return;
+    }
+
+    if (setting == 'read') {
+      final selected = await _pickAutoDeleteInterval(
+        title: '\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u043f\u043e\u0441\u043b\u0435 \u043f\u0440\u043e\u0447\u0442\u0435\u043d\u0438\u044f',
+        currentValue: _autoDeleteSeconds,
+        options: const [0, 30, 300, 3600, 86400, 604800],
+        labelBuilder: _autoDeleteLabel,
+      );
+
+      if (selected == null || !mounted) {
+        return;
+      }
+
+      await StorageService.setChatAutoDeleteSeconds(
+        currentUser,
+        widget.targetUser,
+        selected,
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _autoDeleteSeconds = selected;
+      });
+
+      return;
+    }
+
+    if (setting == 'unread') {
+      final selected = await _pickAutoDeleteInterval(
+        title: '\u0423\u0434\u0430\u043b\u0438\u0442\u044c, \u0435\u0441\u043b\u0438 \u043d\u0435 \u043f\u0440\u043e\u0447\u0438\u0442\u0430\u043d\u043e',
+        currentValue: _unreadAutoDeleteSeconds,
+        options: const [0, 3600, 86400, 259200, 604800],
+        labelBuilder: _unreadAutoDeleteLabel,
+      );
+
+      if (selected == null || !mounted) {
+        return;
+      }
+
+      await StorageService.setChatUnreadAutoDeleteSeconds(
+        currentUser,
+        widget.targetUser,
+        selected,
+      );
+
+      if (!mounted) {
+        return;
+      }
+
+      setState(() {
+        _unreadAutoDeleteSeconds = selected;
+      });
+    }
+  }
+
   void _sendMessage() {
     final text = _messageController.text.trim();
 
@@ -4592,6 +4856,8 @@ class _ChatScreenState extends State<ChatScreen>
       widget.targetUser,
       text,
       replyTo: replyTo,
+      autoDeleteAfterReadSeconds: _autoDeleteSeconds,
+      autoDeleteUnreadSeconds: _unreadAutoDeleteSeconds,
     );
 
     if (!wasConnected && mounted) {
@@ -8270,6 +8536,9 @@ class _ChatScreenState extends State<ChatScreen>
                 if (value == 'search') _openMessageSearch();
                 if (value == 'ai') unawaited(_showFenyvoAiSheet());
                 if (value == 'auto') unawaited(_showAutoReplySettings());
+                if (value == 'auto_delete') {
+                  unawaited(_showAutoDeleteSettings());
+                }
                 if (value == 'screen_security' &&
                     (Platform.isAndroid || Platform.isWindows)) {
                   unawaited(_toggleScreenSecurity());
@@ -8311,9 +8580,9 @@ class _ChatScreenState extends State<ChatScreen>
                         const SizedBox(width: 12),
                         Expanded(
                           child: Text(_videoNoteText(
-                            'Восстановить защищённую переписку',
-                            'Відновити захищене листування',
-                            'Recover encrypted chat',
+                            'Восстановить E2EE (проверка нового ключа)',
+                            'Відновити E2EE (перевірка нового ключа)',
+                            'Recover E2EE (verify new key)',
                           )),
                         ),
                       ],
@@ -8386,6 +8655,17 @@ class _ChatScreenState extends State<ChatScreen>
                       ],
                     ),
                   ),
+                PopupMenuItem<String>(
+                  value: 'auto_delete',
+                  child: Row(
+                    children: [
+                      const Icon(Icons.timer_outlined),
+                      const SizedBox(width: 12),
+                      const Expanded(child: Text('Автоудаление')),
+                      Text(_autoDeleteLabel(_autoDeleteSeconds)),
+                    ],
+                  ),
+                ),
                 const PopupMenuItem(value: 'ai', child: Text('FENYVO AI')),
                 PopupMenuItem(
                   value: 'auto',

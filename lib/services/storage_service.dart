@@ -16,6 +16,75 @@ import 'message_status_persistence_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 class StorageService {
+  static String _autoDeleteKey(String currentUser, String contact) {
+    final owner = Uri.encodeComponent(currentUser.trim().toLowerCase());
+    final peer = Uri.encodeComponent(contact.trim().toLowerCase());
+    return 'auto_delete_${owner}_$peer';
+  }
+
+  static Future<int> getChatAutoDeleteSeconds(
+    String currentUser,
+    String contact,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt(_autoDeleteKey(currentUser, contact)) ?? 0;
+  }
+
+  static Future<void> setChatAutoDeleteSeconds(
+    String currentUser,
+    String contact,
+    int seconds,
+  ) async {
+    const allowed = <int>{0, 30, 300, 3600, 86400, 604800};
+
+    if (!allowed.contains(seconds)) {
+      throw ArgumentError.value(
+        seconds,
+        'seconds',
+        'Unsupported auto-delete interval',
+      );
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_autoDeleteKey(currentUser, contact), seconds);
+  }
+
+
+  static String _unreadAutoDeleteKey(String currentUser, String contact) {
+    final owner = Uri.encodeComponent(currentUser.trim().toLowerCase());
+    final peer = Uri.encodeComponent(contact.trim().toLowerCase());
+    return 'auto_delete_unread_${owner}_$peer';
+  }
+
+  static Future<int> getChatUnreadAutoDeleteSeconds(
+    String currentUser,
+    String contact,
+  ) async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getInt(_unreadAutoDeleteKey(currentUser, contact)) ?? 0;
+  }
+
+  static Future<void> setChatUnreadAutoDeleteSeconds(
+    String currentUser,
+    String contact,
+    int seconds,
+  ) async {
+    const allowed = <int>{0, 3600, 86400, 259200, 604800};
+
+    if (!allowed.contains(seconds)) {
+      throw ArgumentError.value(
+        seconds,
+        'seconds',
+        'Unsupported unread auto-delete interval',
+      );
+    }
+
+    final prefs = await SharedPreferences.getInstance();
+
+    await prefs.setInt(_unreadAutoDeleteKey(currentUser, contact), seconds);
+  }
+
+
   static String _screenSecurityKey(String currentUser, String contact) {
     final owner = Uri.encodeComponent(currentUser.trim().toLowerCase());
     final peer = Uri.encodeComponent(contact.trim().toLowerCase());

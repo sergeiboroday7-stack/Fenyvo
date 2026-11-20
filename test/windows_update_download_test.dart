@@ -6,7 +6,7 @@ import '../lib/services/windows_update_core.dart';
 
 void main() {
   const expectedHash =
-      '17d4a85af3ad1fe00a630ca0b4304bcb53f0b7e4e3aba88d0f9593a956210ae5';
+      '24090dc82dd44984ab1327dcb0b5be9a9c272d2b331089945fda26ba82af54a2';
 
   final downloadUri = Uri.parse(
     'https://fenyvo.com/download/Fenyvo-1.8.2-windows-x64.zip',
@@ -15,21 +15,21 @@ void main() {
   Future<File> download(String hash, Directory temp) {
     return const WindowsUpdateCore().downloadAndVerify(
       uri: downloadUri,
-      build: 6294,
+      build: 6296,
       sha256Hex: hash,
-      sizeBytes: 31720491,
+      sizeBytes: 31172850,
       temporaryDirectory: temp,
     );
   }
 
-  test('downloads and verifies real Windows release 6294', () async {
+  test('downloads and verifies real Windows release 6296', () async {
     final temp = await Directory.systemTemp.createTemp('fenyvo-test-');
 
     try {
       final file = await download(expectedHash, temp);
 
       expect(await file.exists(), isTrue);
-      expect(await file.length(), 31720491);
+      expect(await file.length(), 31172850);
     } finally {
       await temp.delete(recursive: true);
     }
@@ -41,7 +41,13 @@ void main() {
     try {
       await expectLater(
         download('0' * 64, temp),
-        throwsA(isA<FormatException>()),
+        throwsA(
+          isA<FormatException>().having(
+            (error) => error.message,
+            'message',
+            'Update SHA-256 mismatch',
+          ),
+        ),
       );
 
       final updateDir = Directory(
@@ -49,11 +55,11 @@ void main() {
       );
 
       final partial = File(
-        '${updateDir.path}${Platform.pathSeparator}fenyvo-6294.zip.part',
+        '${updateDir.path}${Platform.pathSeparator}fenyvo-6296.zip.part',
       );
 
       final completed = File(
-        '${updateDir.path}${Platform.pathSeparator}fenyvo-6294.zip',
+        '${updateDir.path}${Platform.pathSeparator}fenyvo-6296.zip',
       );
 
       expect(await partial.exists(), isFalse);

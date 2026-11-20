@@ -10,6 +10,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { prepareLoginAccountIdentity, accountIdentityError } = require('./server_account_identity_login');
 const { loadServerConfig } = require('./server_config');
 const { AuthRateLimiter, getClientAddress } = require('./server_security');
 const { createWsFrameGuard } = require('./server_ws_frame_guard');
@@ -593,6 +594,7 @@ function isBlockedBy(owner, contact) {
   return trustDecisions[`${ownerName}::${contactName}`]?.blocked === true;
 }
 
+const recentE2eeOnlineDeliveries = new Map();
 const messageReactions =
   new Map();
 
@@ -2624,6 +2626,30 @@ function clearFenyvoAiHistory(username) {
 
 const registeredUsers =
   loadUsers();
+
+// DEVICE_TRANSFER_V2_FACTORY_BEGIN
+let deviceTransferV2 = null;
+function getDeviceTransferV2() {
+  if (process.env.FENYVO_DEVICE_TRANSFER_V2_ENABLED !== 'true' || process.env.FENYVO_ACCOUNT_ID_ENABLED !== 'true') throw Error('Transfer v2 disabled');
+  if (!deviceTransferV2) {
+    const { createDeviceTransferCoordinator } = require('./server_device_transfer_coordinator');
+    deviceTransferV2 = createDeviceTransferCoordinator({
+      file: path.resolve(path.dirname(USERS_FILE), 'device_transitions_v1.json'), singleWriter: true,
+      getOwner: s => wsSessionIdentity.getAuthenticatedUser(s), getActiveSocket: u => onlineUsers.get(u),
+      getAccountId: u => registeredUsers[u]?.accountId, getCurrentIdentity: u => e2eeBundles[u]?.identityKey,
+      getCredentialStamp: u => JSON.stringify([registeredUsers[u]?.salt, registeredUsers[u]?.passwordHash]),
+      canReadHistory: (viewer, subject) => viewer === subject || (!isBlockedBy(viewer,subject) && !isBlockedBy(subject,viewer) && getAcceptedCommunicationContacts(viewer).some(p => p.toLowerCase() === subject.toLowerCase()) && getAcceptedCommunicationContacts(subject).some(p => p.toLowerCase() === viewer.toLowerCase())),
+      send,
+    });
+  }
+  return deviceTransferV2;
+}
+// DEVICE_TRANSFER_V2_FACTORY_END
+
+
+// DEVICE_TRANSFER_PENDING_TRANSPORT_V1 (default off; relay is not trust).
+const {createDeviceTransferTransport}=require('./server_device_transfer_transport');
+const deviceTransferTransport=createDeviceTransferTransport({getOwner:s=>wsSessionIdentity.getAuthenticatedUser(s),getActiveSocket:u=>onlineUsers.get(u),getAccountId:u=>registeredUsers[u]?.accountId,getCredentialStamp:u=>JSON.stringify([registeredUsers[u]?.salt,registeredUsers[u]?.passwordHash]),send});
 
 const groups =
   loadGroups();
@@ -6334,6 +6360,18 @@ wss.on(
           // LOGIN
           // ====================================
 
+          if (type === 'device_transfer_proof' || type === 'device_transfer_cancel') {
+            if(process.env.FENYVO_DEVICE_TRANSFER_ENABLED!=='true'){send(ws,'device_transfer_error',{code:'disabled'});return;}
+            try {if(type==='device_transfer_proof')deviceTransferTransport.relay(ws,data);else {if(typeof data.nonce!=='string'||!/^[0-9a-f]{64}$/.test(data.nonce))throw Error('Invalid cancellation nonce');deviceTransferTransport.cancel(ws,data.nonce);}}catch(_){send(ws,'device_transfer_error',{code:'unavailable'});}
+            return;
+          }
+
+          // DEVICE_TRANSFER_V2_ROUTES_BEGIN
+          if (['device_transfer_proof_v2','device_transfer_commit_v2','device_transfer_get_status_v2','device_transfer_cancel_v2','device_transfer_get_certificates_v2'].includes(type)) {
+            try {getDeviceTransferV2().handle(ws,type,data);} catch (_) {send(ws,'device_transfer_error_v2',{code:'unavailable_or_disabled'});}
+            return;
+          }
+          // DEVICE_TRANSFER_V2_ROUTES_END
           if (
             type ===
             'login'
@@ -6431,9 +6469,37 @@ wss.on(
               return;
             }
 
+            if(data.mode != null && typeof data.mode !== 'string'){send(ws,'device_transfer_error_v2',{code:'unsupported_mode'});return;}
+            let transferActivation = null;
+            if (['device_transfer_prepare_v2','device_transfer_status_v2','device_transfer_activate_v2'].includes(data.mode)) {
+              if (boundUser || process.env.FENYVO_DEVICE_TRANSFER_V2_ENABLED !== 'true' || process.env.FENYVO_ACCOUNT_ID_ENABLED !== 'true') {send(ws,'device_transfer_error_v2',{code:'disabled_or_authenticated'});return;}
+              try {
+                const identity=prepareLoginAccountIdentity({enabled:true,users:registeredUsers,username,usersFile:USERS_FILE});
+                const context={username,accountId:identity.accountId,newIdentityKey:data.newIdentityKey,transferNonce:data.transferNonce};
+                if(data.mode==='device_transfer_prepare_v2'){getDeviceTransferV2().begin(ws,context);return;}
+                if(data.mode==='device_transfer_status_v2'){getDeviceTransferV2().statusLogin(ws,context);return;}
+                transferActivation=getDeviceTransferV2().authorizeActivation(ws,context);
+              } catch (_) {send(ws,'device_transfer_error_v2',{code:'unavailable'});return;}
+            }
+            if(typeof data.mode==='string' && data.mode.startsWith('device_transfer_') && data.mode!=='device_transfer_prepare' && !transferActivation){send(ws,'device_transfer_error_v2',{code:'unsupported_mode'});return;}
+            if(data.mode==='device_transfer_prepare'){
+              if(boundUser||process.env.FENYVO_DEVICE_TRANSFER_ENABLED!=='true'||process.env.FENYVO_ACCOUNT_ID_ENABLED!=='true'){send(ws,'device_transfer_error',{code:'disabled_or_authenticated'});return;}
+              try{
+                const identity=prepareLoginAccountIdentity({enabled:true,users:registeredUsers,username,usersFile:USERS_FILE});
+                deviceTransferTransport.begin(ws,{username,accountId:identity.accountId,newIdentityKey:data.newIdentityKey});
+              }catch(_){send(ws,'device_transfer_error',{code:'unavailable'});}
+              return;
+            }
+            deviceTransferTransport.cancel(ws);
+            if(deviceTransferV2)deviceTransferV2.release(ws);
+
+            let accountIdentityFields;
+            try { accountIdentityFields = prepareLoginAccountIdentity({enabled: process.env.FENYVO_ACCOUNT_ID_ENABLED === 'true', users: registeredUsers, username, usersFile: USERS_FILE}); } catch (_) { console.error('Account identity preparation failed'); send(ws, 'login_error', {reason: accountIdentityError(data.language || data.languageCode), reasonCode: 'account_identity_unavailable'}); return; }
             if (!boundUser) {
               wsSessionIdentity.bindAuthenticated(ws, username);
             }
+            if(transferActivation)ws.__fenyvoTransferV2=transferActivation;
+            else delete ws.__fenyvoTransferV2;
             const oldWs =
               onlineUsers.get(
                 username,
@@ -6492,6 +6558,8 @@ wss.on(
               'login_success',
               {
                 username,
+                ...accountIdentityFields,
+                ...(transferActivation?{deviceTransferActivated:true,deviceTransferEpoch:transferActivation.epoch}:{}),
                 mediaToken: ws.__mediaToken,
                 mediaPort: MEDIA_PORT,
                 maxMediaBytes: MAX_MEDIA_BYTES,
@@ -6580,7 +6648,11 @@ wss.on(
 
           // CONTACTS: accepted communication links only.
           if (type === 'get_contacts') {
-            if (!currentUser) {
+            if (
+              !currentUser ||
+              wsSessionIdentity.getAuthenticatedUser(ws) !== currentUser ||
+              onlineUsers.get(currentUser) !== ws
+            ) {
               send(ws, 'contacts', {
                 contacts: [],
                 reason: 'Требуется вход',
@@ -9065,6 +9137,42 @@ if (
             return;
           }
 
+          // FENYVO_RECORDING_ACTIVITY_915
+          // Ephemeral recording status: no files or content are sent.
+          // Existing typing, messages and E2EE remain unchanged.
+          if (type === 'chat_recording_activity') {
+            if (!currentUser) {
+              return;
+            }
+
+            const to =
+              typeof data.to === 'string' ? data.to.trim() : '';
+            const kind = data.kind;
+            const active = data.active;
+
+            if (
+              !to ||
+              to === currentUser ||
+              (kind !== 'voice' && kind !== 'video') ||
+              typeof active !== 'boolean' ||
+              !registeredUsers[to]
+            ) {
+              return;
+            }
+
+            const receiver = onlineUsers.get(to);
+
+            if (receiver) {
+              send(receiver, 'chat_recording_activity', {
+                from: currentUser,
+                to,
+                kind,
+                active,
+              });
+            }
+
+            return;
+          }
           // ====================================
           // SIGNAL E2EE PRE-KEY DIRECTORY
           // ====================================
@@ -9075,6 +9183,7 @@ if (
               return;
             }
 
+            if(ws.__fenyvoTransferV2){try{getDeviceTransferV2().checkPublication(ws,data.identityKey,ws.__fenyvoTransferV2);}catch(_){send(ws,'e2ee_bundle_published',{ok:false,reasonCode:'device_transfer_identity_mismatch'});return;}}
             const deviceId = positiveKeyId(data.deviceId);
             const registrationId = positiveKeyId(data.registrationId);
             const identityKey = data.identityKey;
@@ -9155,7 +9264,10 @@ if (
               consumedKyberPreKeyIds,
               updatedAt: new Date().toISOString(),
             };
-            saveE2eeBundles();
+            if(ws.__fenyvoTransferV2){
+              try{if(require('./server_recovery_storage').saveRecoveryJsonAtomic(E2EE_BUNDLES_FILE,e2eeBundles)!==true)throw Error('Bundle not persisted');}
+              catch(_){if(existing)e2eeBundles[currentUser]=existing;else delete e2eeBundles[currentUser];send(ws,'e2ee_bundle_published',{ok:false,reasonCode:'device_transfer_bundle_persistence_failed'});return;}
+            }else{saveE2eeBundles();}
             send(ws, 'e2ee_bundle_published', {
               ok: true,
               preKeyCount: Object.keys(preKeys).length,
@@ -9256,6 +9368,11 @@ if (
               return;
             }
             const username = data.username?.toString().trim() || '';
+            const requestId =
+              typeof data.requestId === 'string' &&
+              /^[A-Za-z0-9_-]{16,64}$/.test(data.requestId)
+                ? data.requestId
+                : null;
             const record = e2eeBundles[username];
             const preKeyId = record
               ? Object.keys(record.preKeys || {}).map(Number).sort((a, b) => a - b)[0]
@@ -9265,6 +9382,7 @@ if (
               : null;
             if (!username || !record || !preKeyId || !kyberPreKeyId) {
               send(ws, 'e2ee_prekey_bundle', {
+                ...(requestId ? { requestId } : {}),
                 username,
                 available: false,
                 reason: 'У контакта пока нет доступных E2EE-ключей',
@@ -9285,6 +9403,7 @@ if (
             ])].slice(-5000);
             saveE2eeBundles();
             send(ws, 'e2ee_prekey_bundle', {
+                ...(requestId ? { requestId } : {}),
               username,
               available: true,
               version: record.version,
@@ -9315,6 +9434,53 @@ if (
           // SIGNAL E2EE PRIVATE TEXT MESSAGE
           // ====================================
 
+          // Signal decryption failure: notification only.
+          // Never retire the queue or mark a message delivered here.
+          if (type === 'e2ee_decrypt_failed') {
+            if (!currentUser ||
+                wsSessionIdentity.getAuthenticatedUser(ws) !== currentUser) {
+              return;
+            }
+
+            const messageId = typeof data.messageId === 'string'
+              ? data.messageId.trim() : '';
+            const from = typeof data.from === 'string'
+              ? data.from.trim() : '';
+
+            if (!/^[A-Za-z0-9_-]{6,120}$/.test(messageId) ||
+                !from || from === currentUser) {
+              return;
+            }
+
+            const queue = offlineMessages[currentUser];
+            const owned = Array.isArray(queue) && queue.some(item =>
+              item &&
+              item.id === messageId &&
+              item.from === from &&
+              item.to === currentUser &&
+              item.e2ee === true
+            );
+
+            if (!owned) {
+              const onlineEvidence =
+                typeof recentE2eeOnlineDeliveries !== 'undefined'
+                  ? recentE2eeOnlineDeliveries.get(messageId)
+                  : null;
+              if (!onlineEvidence ||
+                  onlineEvidence.expiresAt <= Date.now() ||
+                  onlineEvidence.from !== from ||
+                  onlineEvidence.to !== currentUser) {
+                return;
+              }
+            }
+
+            sendOrQueueMessageStatus(from, 'e2ee_decrypt_failure', {
+              messageId,
+              from,
+              to: currentUser,
+            });
+            return;
+          }
           if (type === 'e2ee_message') {
             if (!currentUser) {
               send(ws, 'error', { reason: 'Сначала необходимо войти' });
@@ -9325,9 +9491,20 @@ if (
             const cipherType = Number(data.cipherType);
             const ciphertext = data.ciphertext?.toString().trim() || '';
             if (
+              registeredUsers[to] &&
+              (!e2eeBundles[currentUser] || !e2eeBundles[to])
+            ) {
+              send(ws, 'e2ee_message_error', {
+                id: requestedId,
+                to,
+                code: 'e2ee_keys_pending',
+                retryable: true,
+                reason: 'Ожидаем E2EE-ключ собеседника',
+              });
+              return;
+            }
+            if (
               !registeredUsers[to] ||
-              !e2eeBundles[currentUser] ||
-              !e2eeBundles[to] ||
               !/^[a-zA-Z0-9_-]{6,120}$/.test(requestedId) ||
               ![2, 3].includes(cipherType) ||
               !isBase64Value(ciphertext, 1024 * 1024)
@@ -9416,6 +9593,23 @@ if (
               users: new Set(),
             });
             const deliveryResult = messageDeliveryService.deliver(messageData, { senderSocket: ws });
+            if (deliveryResult.online) {
+              const now = Date.now();
+              for (const [key, value] of recentE2eeOnlineDeliveries) {
+                if (value.expiresAt <= now) {
+                  recentE2eeOnlineDeliveries.delete(key);
+                }
+              }
+              while (recentE2eeOnlineDeliveries.size >= 2048) {
+                const oldest = recentE2eeOnlineDeliveries.keys().next().value;
+                recentE2eeOnlineDeliveries.delete(oldest);
+              }
+              recentE2eeOnlineDeliveries.set(messageData.id, {
+                from: currentUser,
+                to,
+                expiresAt: now + 600000,
+              });
+            }
             if (!deliveryResult.online) {
               void sendFcmPush({
                 username: to,
@@ -11178,6 +11372,7 @@ offlineMessages[to] = nextQueued;
       'close',
       () => {
         releaseConnectionCount();
+        if(deviceTransferV2)deviceTransferV2.release(ws);
         publicPresence.disconnect(ws);
         wsSessionIdentity.revoke(ws);
         wsFrameGuard.revoke(ws);

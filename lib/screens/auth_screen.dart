@@ -1,4 +1,8 @@
+import '../services/new_device_transfer_v2_client.dart';
 import '../widgets/fenyvo_brand_mark.dart';
+import '../widgets/device_transfer_approval_host.dart';
+import '../widgets/device_transfer_pairing_screen.dart';
+import 'new_device_transfer_screen.dart';
 import 'account_recovery_screen.dart';
 
 import 'dart:async';
@@ -41,6 +45,82 @@ class _AuthScreenState extends State<AuthScreen> {
   Timer? _loginTimeout;
 
   bool _isNavigating = false;
+  bool _openingDeviceTransfer = false;
+  Future<void> _openDeviceTransfer() async {
+    if (_openingDeviceTransfer ||
+        _isLoading ||
+        _isNavigating ||
+        SocketService.instance.isAuthenticated)
+      return;
+    final language = AppLanguageService.instance.code.value,
+        username = _usernameController.text.trim(),
+        password = _passwordController.text;
+    if (username.isEmpty || password.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            transferText(
+              language,
+              'Сначала введи логин и пароль',
+              'Спочатку введи логін і пароль',
+              'Enter your username and password first',
+            ),
+          ),
+        ),
+      );
+      return;
+    }
+    setState(() {
+      _openingDeviceTransfer = true;
+      _isLoading = true;
+    });
+    _loginTimeout?.cancel();
+    try {
+      // Stop ordinary reconnect/login while the isolated pending channel is active.
+      await SocketService.instance
+          .disconnect(clearUser: false)
+          .timeout(const Duration(seconds: 5));
+      if (!mounted) return;
+      final transferred = await Navigator.of(context)
+          .push<TransferredDeviceConnection>(
+            MaterialPageRoute<TransferredDeviceConnection>(
+              builder: (_) => NewDeviceTransferScreen(
+                username: username,
+                password: password,
+                language: language,
+              ),
+            ),
+          );
+      if (transferred != null) {
+        if (!mounted) {
+          await transferred.abort();
+          return;
+        }
+        _openingDeviceTransfer = false;
+        await SocketService.instance.adoptTransferredConnection(
+          transferred,
+          password: password,
+        );
+      }
+    } catch (_) {
+      if (mounted)
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              transferText(
+                language,
+                'Не удалось открыть перенос. Повтори попытку.',
+                'Не вдалося відкрити перенесення. Повтори спробу.',
+                'Unable to open transfer. Please retry.',
+              ),
+            ),
+          ),
+        );
+    } finally {
+      _openingDeviceTransfer = false;
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
 
   @override
   void initState() {
@@ -104,7 +184,7 @@ class _AuthScreenState extends State<AuthScreen> {
   // ========================================
 
   void _handleMessage(Map<String, dynamic> message) {
-    if (!mounted || _isNavigating) {
+    if (!mounted || _isNavigating || _openingDeviceTransfer) {
       return;
     }
 
@@ -205,7 +285,7 @@ class _AuthScreenState extends State<AuthScreen> {
     _loginTimeout?.cancel();
 
     _loginTimeout = Timer(const Duration(seconds: 10), () {
-      if (!mounted || _isNavigating) {
+      if (!mounted || _isNavigating || _openingDeviceTransfer) {
         return;
       }
 
@@ -250,7 +330,10 @@ class _AuthScreenState extends State<AuthScreen> {
 
     Navigator.pushReplacement(
       context,
-      MaterialPageRoute(builder: (_) => const ChatListScreen()),
+      MaterialPageRoute(
+        builder: (_) =>
+            const DeviceTransferApprovalHost(child: ChatListScreen()),
+      ),
     );
   }
 
@@ -1121,6 +1204,25 @@ class _AuthScreenState extends State<AuthScreen> {
                             ),
                           ),
                         ),
+                        if (const bool.fromEnvironment(
+                          'FENYVO_DEVICE_TRANSFER_UI_ENABLED',
+                        ))
+                          TextButton(
+                            onPressed:
+                                _isLoading ||
+                                    _isRegisterMode ||
+                                    _openingDeviceTransfer
+                                ? null
+                                : _openDeviceTransfer,
+                            child: Text(
+                              transferText(
+                                AppLanguageService.instance.code.value,
+                                'Перенести со старого телефона',
+                                'Перенести зі старого телефона',
+                                'Transfer from old phone',
+                              ),
+                            ),
+                          ),
                         SizedBox(height: veryCompact ? 12 : 19),
                         Text(
                           AppLanguageService.instance.text(

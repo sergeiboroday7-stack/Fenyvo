@@ -6,7 +6,10 @@ void main() {
   test('post-decrypt PreKey maintenance catches asynchronous failure', () {
     final source = File('lib/services/crypto/signal_e2ee_service.dart')
         .readAsStringSync();
-    expect(source, contains('unawaited(_ensurePreKeys().catchError('));
+    expect(
+      source,
+      matches(RegExp(r'unawaited\s*\(\s*_ensurePreKeys\(\)\.catchError\s*\(')),
+    );
     expect(source, contains('Background PreKey refill failed'));
     // Initialisation and bundle publication must still await failures.
     expect(RegExp(r'await _ensurePreKeys\(\);').allMatches(source).length, 2);

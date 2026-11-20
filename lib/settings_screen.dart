@@ -1,3 +1,4 @@
+import 'widgets/device_transfer_settings_tile.dart';
 import 'screens/recovery_setup_screen.dart';
 import 'screens/presence_privacy_screen.dart';
 import 'theme/fenyvo_theme.dart';
@@ -1098,6 +1099,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 });
               },
             ),
+
+            if (const bool.fromEnvironment('FENYVO_DEVICE_TRANSFER_UI_ENABLED'))
+              const DeviceTransferSettingsTile(),
 
             _buildSection(t('settingsHelpFeedback'), [
               _buildSectionTile(

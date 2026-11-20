@@ -1,3 +1,8 @@
+import 'device_transfer_hint_dispatcher.dart';
+import 'device_transfer_ack.dart';
+import 'crypto/contact_continuity_router.dart';
+import 'new_device_transfer_v2_client.dart';
+
 import 'package:fenyvo/services/crypto/private_e2ee_edit_protocol.dart';
 
 import 'dart:math';
@@ -7,6 +12,8 @@ import 'package:fenyvo/services/crypto/private_e2ee_edit_delivery_policy.dart';
 import 'crypto/e2ee_inbound_policy.dart';
 import 'crypto/e2ee_delivery_policy.dart';
 import 'socket_login_continuation_guard.dart';
+import 'account_identity_state.dart';
+import 'crypto/device_transfer_request.dart';
 import 'socket_event_generation_guard.dart';
 import '../features/messages/domain/message_id_generator.dart';
 
@@ -57,6 +64,7 @@ class SocketService {
 
   WebSocketChannel? _channel;
   int _connectionGeneration = 0;
+  int get deviceTransferSessionGeneration => _connectionGeneration;
 
   final List<void Function(Map<String, dynamic>)> _messageHandlers = [];
 
@@ -66,6 +74,103 @@ class SocketService {
       <String, Map<String, dynamic>>{};
 
   String? currentUser;
+  final AccountIdentityState _accountIdentity = AccountIdentityState();
+  String? get currentAccountId =>
+      isAuthenticated ? _accountIdentity.accountIdFor(currentUser) : null;
+
+  final ValueNotifier<DeviceTransferRequest?> pendingDeviceTransfer =
+      ValueNotifier<DeviceTransferRequest?>(null);
+  int _deviceTransferGeneration = -1;
+  final DeviceTransferAck _transferAck = DeviceTransferAck();
+  Object? _transferAckScope;
+  final Map<
+    String,
+    ({String id, int epoch, Completer<Map<String, dynamic>> result})
+  >
+  _continuityRequests = {};
+  late final DeviceTransferHintDispatcher _continuityHintDispatcher =
+      DeviceTransferHintDispatcher(
+        readTrustedHead: (peer, current) => SignalE2eeService.instance
+            .contactContinuityHead(peer, isSessionCurrent: current),
+        refreshBundle: (peer) async {
+          await _requestE2eeBundle(peer);
+        },
+      );
+
+  bool _transferIsCurrent(DeviceTransferRequest request) =>
+      identical(pendingDeviceTransfer.value, request) &&
+      isAuthenticated &&
+      _deviceTransferGeneration == _connectionGeneration &&
+      currentUser == request.username &&
+      currentAccountId == request.accountId &&
+      request.validAt(DateTime.now().millisecondsSinceEpoch);
+
+  Future<bool> approveDeviceTransfer(
+    DeviceTransferRequest request, {
+    required bool userConfirmed,
+  }) async {
+    if (!userConfirmed || !_transferIsCurrent(request) || _transferAck.waiting)
+      return false;
+    final generation = _connectionGeneration, channel = _channel;
+    bool current() =>
+        _transferIsCurrent(request) &&
+        generation == _connectionGeneration &&
+        identical(channel, _channel);
+    try {
+      final proof = await SignalE2eeService.instance
+          .signConfirmedDeviceTransfer(
+            request,
+            userConfirmed: userConfirmed,
+            isSessionCurrent: current,
+          );
+      if (!current()) return false;
+      Future<bool>? acknowledgement;
+      if (request.fromEpoch != null) {
+        if (_transferAck.waiting) return false;
+        final scope = Object();
+        _transferAckScope = scope;
+        final remaining =
+            request.expiresAt - DateTime.now().millisecondsSinceEpoch;
+        acknowledgement = _transferAck.begin(
+          scope: scope,
+          nonce: request.nonce,
+          timeout: Duration(milliseconds: min(10000, remaining)),
+        );
+      }
+      final sent = _send(
+        request.fromEpoch == null
+            ? 'device_transfer_proof'
+            : 'device_transfer_proof_v2',
+        proof,
+      );
+      if (!sent) _transferAck.cancel();
+      final accepted =
+          sent && (acknowledgement == null || await acknowledgement);
+      final valid = accepted && current();
+      if (valid) pendingDeviceTransfer.value = null;
+      return valid;
+    } catch (_) {
+      _transferAck.cancel();
+      return false;
+    }
+  }
+
+  void rejectDeviceTransfer(DeviceTransferRequest request) {
+    if (!identical(pendingDeviceTransfer.value, request)) return;
+    _transferAck.cancel();
+    _transferAckScope = null;
+    if (isAuthenticated &&
+        _deviceTransferGeneration == _connectionGeneration &&
+        currentUser == request.username &&
+        currentAccountId == request.accountId) {
+      if (request.fromEpoch == null) {
+        _send('device_transfer_cancel', {'nonce': request.nonce});
+      } else {
+        _send('device_transfer_cancel_v2', {'transferNonce': request.nonce});
+      }
+    }
+    pendingDeviceTransfer.value = null;
+  }
 
   String? _activeChatUser;
   String? activeGroupId;
@@ -207,6 +312,61 @@ class SocketService {
   // ========================================
   // ПОДКЛЮЧЕНИЕ
   // ========================================
+
+  /// Adopts an already verified transfer socket without a second login/listener.
+  Future<void> adoptTransferredConnection(
+    TransferredDeviceConnection connection, {
+    required String password,
+  }) async {
+    if (_isConnected ||
+        _authenticated ||
+        _channel != null ||
+        currentUser != null && currentUser != connection.username) {
+      await connection.abort();
+      throw StateError('Ordinary connection must be stopped before handoff');
+    }
+    final channel = connection.channel;
+    final generation = ++_connectionGeneration;
+    _channel = channel;
+    _serverUrl = connection.server.toString();
+    currentUser = connection.username;
+    _lastPassword = password;
+    _manualDisconnect = false;
+    _isConnected = true;
+    _authenticated = false;
+    _isReconnecting = false;
+    _reconnectTimer?.cancel();
+    connectionPhase.value = FenyvoConnectionPhase.authenticating;
+    _heartbeatTimer?.cancel();
+    _heartbeatTimer = Timer.periodic(const Duration(seconds: 20), (_) {
+      if (generation == _connectionGeneration &&
+          identical(channel, _channel) &&
+          _isConnected)
+        _send('ping', const {});
+    });
+    unawaited(() async {
+      try {
+        await connection.drain((raw) async {
+          if (generation != _connectionGeneration ||
+              !identical(channel, _channel))
+            throw StateError('Transfer handoff superseded');
+          unawaited(_handleRawMessage(
+            raw,
+            generation: generation,
+            channel: channel,
+          ));
+        });
+      } catch (_) {
+        /* Same generation disconnect below handles recovery. */
+      } finally {
+        _handleDisconnect(
+          reason: 'Transfer connection closed',
+          generation: generation,
+          channel: channel,
+        );
+      }
+    }());
+  }
 
   Future<bool> connect(String url) async {
     _e2eeEnabled = await E2eeSettingsService.instance.isEnabled();
@@ -360,6 +520,71 @@ class SocketService {
       // УСПЕШНЫЙ ВХОД
       // ======================================
 
+      if (type == 'device_transfer_approved_v2') {
+        final pending = pendingDeviceTransfer.value, scope = _transferAckScope;
+        if (pending != null && scope != null && _transferIsCurrent(pending))
+          _transferAck.receive(data, scope: scope);
+        return;
+      }
+      if (type == 'device_transfer_check_v2') {
+        final owner = currentUser;
+        final eventGeneration = generation;
+        final eventChannel = channel;
+        unawaited(
+          _continuityHintDispatcher.handle(
+            username: data['username'],
+            owner: owner,
+            enabled:
+                const bool.fromEnvironment(
+                  'FENYVO_CONTACT_CONTINUITY_ENABLED',
+                ) &&
+                isAuthenticated,
+            isCurrent: () =>
+                isAuthenticated &&
+                currentUser == owner &&
+                eventGeneration == _connectionGeneration &&
+                identical(eventChannel, _channel),
+          ),
+        );
+        return;
+      }
+      if (type == 'device_transfer_certificates_v2') {
+        final peer = data['username'], pending = _continuityRequests[peer];
+        if (pending != null &&
+            isAuthenticated &&
+            data['requestId'] == pending.id &&
+            data['fromEpoch'] == pending.epoch) {
+          _continuityRequests.remove(peer);
+          final copy = Map<String, dynamic>.from(data)..remove('requestId');
+          if (!pending.result.isCompleted) pending.result.complete(copy);
+        }
+        return;
+      }
+      if (type == 'device_transfer_requested' ||
+          type == 'device_transfer_requested_v2') {
+        if (type == 'device_transfer_requested_v2' &&
+            !(const bool.fromEnvironment('FENYVO_DEVICE_TRANSFER_UI_ENABLED')))
+          return;
+        final accountId = currentAccountId, username = currentUser;
+        if (!isAuthenticated || accountId == null || username == null) return;
+        final parser = type == 'device_transfer_requested_v2'
+            ? DeviceTransferRequest.parseV2
+            : DeviceTransferRequest.parse;
+        final request = parser(
+          data,
+          accountId: accountId,
+          username: username,
+          nowMs: DateTime.now().millisecondsSinceEpoch,
+        );
+        if (request != null) {
+          _transferAck.cancel();
+          _transferAckScope = null;
+          _deviceTransferGeneration = _connectionGeneration;
+          pendingDeviceTransfer.value = request;
+        }
+        return;
+      }
+
       if (type == 'login_success') {
         _authenticated = true;
         recoveryConfigured = data['recoveryConfigured'] is bool
@@ -385,6 +610,10 @@ class SocketService {
           }
 
           if (!loginStillCurrent()) return;
+          _accountIdentity.bind(
+            username: username,
+            accountId: data['accountId'],
+          );
           _syncPresence();
 
           // Authentication is already complete. Let the UI continue before
@@ -627,10 +856,7 @@ class SocketService {
                   currentUser?.trim() != owner) {
                 return;
               }
-              _notifyHandlers({
-                'type': 'e2ee_recovery_ready',
-                'data': {'to': peer, 'failedMessageId': messageId},
-              });
+              // Bundle refresh alone does not prove E2EE recovery.
             } catch (_) {
               // The original failed message stays available for recovery.
             } finally {
@@ -678,10 +904,41 @@ class SocketService {
               request.complete(data);
             } else {
               try {
-                await SignalE2eeService.instance.processRemoteBundle(
-                  username,
-                  data,
-                );
+                var updated = false;
+                if (const bool.fromEnvironment(
+                  'FENYVO_CONTACT_CONTINUITY_ENABLED',
+                )) {
+                  final owner = currentUser;
+                  bool current() =>
+                      isAuthenticated &&
+                      currentUser == owner &&
+                      generation == _connectionGeneration &&
+                      identical(channel, _channel);
+                  final service = SignalE2eeService.instance;
+                  updated = await ContactContinuityRouter(
+                    readHead: (peer) => service.contactContinuityHead(
+                      peer,
+                      isSessionCurrent: current,
+                    ),
+                    fetchDirectory: _requestContinuityDirectory,
+                    applyVerified:
+                        (peer, bundle, account, certificates, check) =>
+                            service.acceptContinuityVerifiedRemoteBundle(
+                              peer,
+                              bundle,
+                              expectedAccountId: account,
+                              certificates: certificates,
+                              isSessionCurrent: check,
+                            ),
+                  ).applyIfChanged(username, data, isCurrent: current);
+                }
+                if (!updated) {
+                  if (!isAuthenticated || generation != _connectionGeneration || !identical(channel, _channel)) throw StateError('E2EE response connection changed');
+                  await SignalE2eeService.instance.processRemoteBundle(
+                    username,
+                    data,
+                  );
+                }
                 request.complete(data);
               } catch (error) {
                 request.completeError(error);
@@ -1529,9 +1786,19 @@ class SocketService {
       print('ℹ️ Игнорировано событие заменённого WebSocket');
       return;
     }
+    _transferAck.cancel();
+    _transferAckScope = null;
+    for (final request in _continuityRequests.values) {
+      if (!request.result.isCompleted)
+        request.result.completeError(
+          StateError('Continuity connection closed'),
+        );
+    }
+    _continuityRequests.clear();
     _heartbeatTimer?.cancel();
     _heartbeatTimer = null;
     _isConnected = false;
+    pendingDeviceTransfer.value = null;
     _authenticated = false;
     _e2eeSendingIds.clear();
     final publishRequest = _e2eePublishRequest;
@@ -1730,6 +1997,8 @@ class SocketService {
 
     _manualDisconnect = false;
 
+    pendingDeviceTransfer.value = null;
+    _accountIdentity.clear();
     currentUser = user;
 
     _lastPassword = password;
@@ -2227,6 +2496,8 @@ class SocketService {
     String? forwardedFrom,
     String? forwardComment,
     Map<String, dynamic>? sharedContact,
+    int autoDeleteAfterReadSeconds = 0,
+    int autoDeleteUnreadSeconds = 0,
   }) {
     final target = to.trim();
 
@@ -2242,6 +2513,8 @@ class SocketService {
       'to': target,
       'text': messageText,
       'time': DateTime.now().toIso8601String(),
+      'autoDeleteAfterReadSeconds': autoDeleteAfterReadSeconds,
+      'autoDeleteUnreadSeconds': autoDeleteUnreadSeconds,
     };
 
     if (replyTo != null) {
@@ -2491,6 +2764,40 @@ class SocketService {
     }
   }
 
+  Future<Map<String, dynamic>> _requestContinuityDirectory(
+    String peer,
+    int epoch,
+  ) async {
+    if (!isAuthenticated || _continuityRequests.containsKey(peer))
+      throw StateError('Continuity request unavailable');
+    final generation = _connectionGeneration,
+        channel = _channel,
+        owner = currentUser;
+    final id = List<int>.generate(
+      32,
+      (_) => Random.secure().nextInt(256),
+    ).map((n) => n.toRadixString(16).padLeft(2, '0')).join();
+    final result = Completer<Map<String, dynamic>>();
+    _continuityRequests[peer] = (id: id, epoch: epoch, result: result);
+    try {
+      if (!_send('device_transfer_get_certificates_v2', {
+        'username': peer,
+        'fromEpoch': epoch,
+        'requestId': id,
+      }))
+        throw StateError('Continuity request not sent');
+      final data = await result.future.timeout(const Duration(seconds: 10));
+      if (!isAuthenticated ||
+          currentUser != owner ||
+          generation != _connectionGeneration ||
+          !identical(channel, _channel))
+        throw StateError('Continuity response owner changed');
+      return data;
+    } finally {
+      if (_continuityRequests[peer]?.id == id) _continuityRequests.remove(peer);
+    }
+  }
+
   Future<Map<String, dynamic>> _requestE2eeBundle(String username) async {
     final existing = _e2eeBundleRequests[username];
     if (existing != null) {
@@ -2621,6 +2928,8 @@ class SocketService {
         'id': id,
         'to': target,
         'time': localMessage['time'],
+        'autoDeleteAfterReadSeconds': localMessage['autoDeleteAfterReadSeconds'] ?? 0,
+        'autoDeleteUnreadSeconds': localMessage['autoDeleteUnreadSeconds'] ?? 0,
         ...encrypted,
       };
       if (!_send('e2ee_message', envelope)) {
@@ -2683,6 +2992,8 @@ class SocketService {
     'to': message['to'],
     'text': message['text'],
     'time': message['time'],
+    'autoDeleteAfterReadSeconds': message['autoDeleteAfterReadSeconds'] ?? 0,
+    'autoDeleteUnreadSeconds': message['autoDeleteUnreadSeconds'] ?? 0,
     if (message['replyTo'] is Map) 'replyTo': message['replyTo'],
     if (message['forwardedFrom'] != null)
       'forwardedFrom': message['forwardedFrom'],
@@ -3438,11 +3749,23 @@ class SocketService {
   // ========================================
 
   Future<void> disconnect({bool clearUser = true}) async {
+    _transferAck.cancel();
+    _transferAckScope = null;
+    for (final request in _continuityRequests.values) {
+      if (!request.result.isCompleted)
+        request.result.completeError(
+          StateError('Continuity connection closed'),
+        );
+    }
+    _continuityRequests.clear();
     _manualDisconnect = true;
 
     // Invalidate callbacks from this socket before any asynchronous
     // account cleanup or channel shutdown can suspend this method.
     ++_connectionGeneration;
+    pendingDeviceTransfer.value = null;
+    _accountIdentity.clear();
+    pendingDeviceTransfer.value = null;
     _authenticated = false;
     _isConnected = false;
 

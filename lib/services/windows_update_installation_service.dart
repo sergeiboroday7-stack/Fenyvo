@@ -64,16 +64,12 @@ class WindowsUpdateInstallationService {
         staged.path,
       ]);
 
-      final startTicksResult = await _runChecked(
-        powershell,
-        [
-          '-NoProfile',
-          '-NonInteractive',
-          '-Command',
-          '(Get-Process -Id $pid).StartTime.ToUniversalTime().Ticks',
-        ],
-        environment: {'pid': '$pid'},
-      );
+      final startTicksResult = await _runChecked(powershell, [
+        '-NoProfile',
+        '-NonInteractive',
+        '-Command',
+        windowsAppProcessStartTimeCommand(pid),
+      ]);
 
       final startTicks = int.tryParse(startTicksResult.stdout.trim());
       if (startTicks == null || startTicks <= 0) {
@@ -152,4 +148,13 @@ class WindowsUpdateInstallationService {
     }
     return result;
   }
+}
+
+/// Uses the Dart application's PID, never PowerShell's automatic $PID variable.
+String windowsAppProcessStartTimeCommand(int appProcessId) {
+  if (appProcessId <= 0) {
+    throw ArgumentError.value(appProcessId, 'appProcessId', 'Must be positive');
+  }
+  return '(Get-Process -Id $appProcessId -ErrorAction Stop)'
+      '.StartTime.ToUniversalTime().Ticks';
 }

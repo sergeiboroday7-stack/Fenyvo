@@ -1,3 +1,7 @@
+import 'package:path_provider/path_provider.dart';
+
+import 'services/profile_writer_lease.dart';
+
 import 'dart:async';
 import 'dart:io';
 
@@ -48,8 +52,39 @@ final GlobalKey<NavigatorState> spartanNavigatorKey =
 final GlobalKey<ScaffoldMessengerState> spartanMessengerKey =
     GlobalKey<ScaffoldMessengerState>();
 
+late final ProfileWriterLease fenyvoProfileLease;
+
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  try {
+    fenyvoProfileLease = await ProfileWriterLease.acquire(
+      await getApplicationSupportDirectory(),
+    );
+  } catch (_) {
+    final language =
+        WidgetsBinding.instance.platformDispatcher.locale.languageCode;
+    final message = language == 'ru'
+        ? 'FENYVO уже открыт или профиль сейчас недоступен. Закрой другую копию и запусти снова.'
+        : language == 'uk'
+        ? 'FENYVO вже відкрито або профіль зараз недоступний. Закрий іншу копію та запусти знову.'
+        : 'FENYVO is already open or the profile is unavailable. Close the other copy and try again.';
+    runApp(
+      MaterialApp(
+        home: Scaffold(
+          body: SafeArea(
+            child: Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Text(message),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    return;
+  }
 
   await StorageService.init();
   await AppLanguageService.instance.initialize();
