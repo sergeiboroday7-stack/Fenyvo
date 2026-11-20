@@ -15,6 +15,7 @@ import '../services/socket_service.dart';
 import '../services/app_language_service.dart';
 import '../services/credential_storage_service.dart';
 import '../config/server_config.dart';
+import '../config/legal_config.dart';
 import 'chat_list_screen.dart';
 
 class AuthScreen extends StatefulWidget {
@@ -998,7 +999,7 @@ class _AuthScreenState extends State<AuthScreen> {
                     ? null
                     : () async {
                         await launchUrl(
-                          Uri.parse('https://fenyvo.com/terms.html'),
+                          LegalConfig.termsUri,
                           mode: LaunchMode.externalApplication,
                         );
                       },
@@ -1009,7 +1010,7 @@ class _AuthScreenState extends State<AuthScreen> {
                     ? null
                     : () async {
                         await launchUrl(
-                          Uri.parse('https://fenyvo.com/privacy.html'),
+                          LegalConfig.privacyUri,
                           mode: LaunchMode.externalApplication,
                         );
                       },
