@@ -5,6 +5,33 @@ import 'package:flutter/material.dart';
 import '../services/socket_service.dart';
 import 'chat_screen.dart';
 
+/// Interprets a server response only for the signed-in user's selected peer.
+/// Returns null for unrelated, malformed, or unsupported events.
+String? contactLinkResponseStatus({
+  required String username,
+  required String currentUser,
+  required Map<String, dynamic> data,
+}) {
+  final me = currentUser.trim().toLowerCase();
+  final selected = username.trim().toLowerCase();
+  final from = data['from']?.toString().trim().toLowerCase() ?? '';
+  final to = data['to']?.toString().trim().toLowerCase() ?? '';
+  if (me.isEmpty ||
+      selected.isEmpty ||
+      selected == me ||
+      from.isEmpty ||
+      to.isEmpty ||
+      from == to) {
+    return null;
+  }
+
+  final peer = from == me ? to : (to == me ? from : '');
+  if (peer != selected) return null;
+
+  final status = data['status']?.toString().trim().toLowerCase();
+  return status == 'accepted' || status == 'declined' ? status : null;
+}
+
 class ContactLinkScreen extends StatefulWidget {
   const ContactLinkScreen({super.key, required this.username});
 
@@ -97,6 +124,22 @@ class _ContactLinkScreenState extends State<ContactLinkScreen> {
         }
         _error = sent || accepted ? null : data['reason']?.toString().trim();
       });
+      return;
+    }
+
+    if (type == 'communication_request_response') {
+      final status = contactLinkResponseStatus(
+        username: _username,
+        currentUser: SocketService.instance.currentUser ?? '',
+        data: data,
+      );
+      if (status == null) return;
+      setState(() {
+        _sending = false;
+        _communicationStatus = status;
+        _error = null;
+      });
+      return;
     }
   }
 
