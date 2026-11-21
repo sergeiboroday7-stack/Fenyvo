@@ -46,6 +46,12 @@ class _AuthScreenState extends State<AuthScreen> {
   Timer? _loginTimeout;
 
   bool _isNavigating = false;
+  bool _legalPromptOpen = false;
+  int _legalPromptGeneration = 0;
+  bool _legalAcceptancePending = false;
+  String? _legalAcceptanceError;
+  Timer? _legalAcceptanceTimeout;
+  StateSetter? _legalDialogSetState;
   bool _openingDeviceTransfer = false;
   Future<void> _openDeviceTransfer() async {
     if (_openingDeviceTransfer ||
@@ -136,6 +142,8 @@ class _AuthScreenState extends State<AuthScreen> {
   @override
   void dispose() {
     _loginTimeout?.cancel();
+    _legalAcceptanceTimeout?.cancel();
+    _legalDialogSetState = null;
 
     SocketService.instance.removeMessageHandler(_handleMessage);
     AppLanguageService.instance.code.removeListener(_onLanguageChanged);
@@ -206,9 +214,9 @@ class _AuthScreenState extends State<AuthScreen> {
     }
 
     if (type == 'login_success') {
+      // A duplicate login event must never bypass an open legal prompt.
+      if (_legalPromptOpen) return;
       _loginTimeout?.cancel();
-
-      _isNavigating = true;
 
       setState(() {
         _isLoading = false;
@@ -216,8 +224,44 @@ class _AuthScreenState extends State<AuthScreen> {
         _error = '';
       });
 
-      _saveUserAndOpenChat();
+      // Existing accounts must explicitly accept current legal terms before
+      // entering chats. Do not bypass the server's legalRequired flag.
+      if (data['legalRequired'] == true) {
+        unawaited(_showLegalMigrationPrompt());
+      } else {
+        _isNavigating = true;
+        unawaited(_saveUserAndOpenChat());
+      }
 
+      return;
+    }
+
+    if (type == 'legal_acceptance_success') {
+      // Ignore unsolicited, late or disconnected-session acknowledgements.
+      if (!_legalPromptOpen ||
+          !_legalAcceptancePending ||
+          !SocketService.instance.isAuthenticated)
+        return;
+      _legalAcceptanceTimeout?.cancel();
+      _legalAcceptancePending = false;
+      _legalPromptOpen = false;
+      _legalDialogSetState = null;
+      Navigator.of(context, rootNavigator: true).pop();
+      _isNavigating = true;
+      unawaited(_saveUserAndOpenChat());
+      return;
+    }
+
+    if (type == 'legal_acceptance_error') {
+      if (!_legalPromptOpen || !_legalAcceptancePending) return;
+      _legalAcceptanceTimeout?.cancel();
+      final reason =
+          data['reason']?.toString() ??
+          'Не удалось сохранить подтверждение документов';
+      _legalDialogSetState?.call(() {
+        _legalAcceptancePending = false;
+        _legalAcceptanceError = reason;
+      });
       return;
     }
 
@@ -249,6 +293,14 @@ class _AuthScreenState extends State<AuthScreen> {
         type == 'error' ||
         type == 'disconnected') {
       _loginTimeout?.cancel();
+      if (_legalPromptOpen && type == 'disconnected') {
+        // A stale acceptance response must not navigate after disconnect.
+        _legalAcceptanceTimeout?.cancel();
+        _legalAcceptancePending = false;
+        _legalPromptOpen = false;
+        _legalDialogSetState = null;
+        Navigator.of(context, rootNavigator: true).pop();
+      }
 
       final reason = data['reason']?.toString() ?? _getErrorText(type);
 
@@ -276,6 +328,164 @@ class _AuthScreenState extends State<AuthScreen> {
       default:
         return AppLanguageService.instance.text('authGeneralError');
     }
+  }
+
+  Future<void> _showLegalMigrationPrompt() async {
+    if (!mounted || _legalPromptOpen) return;
+    _legalPromptOpen = true;
+    final promptGeneration = ++_legalPromptGeneration;
+    _legalAcceptancePending = false;
+    _legalAcceptanceError = null;
+    var acceptedDocuments = false;
+    var confirmedAge = false;
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          _legalDialogSetState = setDialogState;
+          final canAccept =
+              acceptedDocuments && confirmedAge && !_legalAcceptancePending;
+          return PopScope(
+            canPop: false,
+            child: AlertDialog(
+              title: const Text('Обновлены условия FENYVO'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Text(
+                      'Чтобы продолжить, ознакомьтесь с актуальными документами.',
+                    ),
+                    CheckboxListTile(
+                      value: acceptedDocuments,
+                      contentPadding: EdgeInsets.zero,
+                      controlAffinity: ListTileControlAffinity.leading,
+                      title: const Text(
+                        'Я принимаю Условия использования и ознакомился с Политикой конфиденциальности',
+                      ),
+                      onChanged: _legalAcceptancePending
+                          ? null
+                          : (value) => setDialogState(
+                              () => acceptedDocuments = value ?? false,
+                            ),
+                    ),
+                    Wrap(
+                      alignment: WrapAlignment.center,
+                      children: [
+                        TextButton(
+                          onPressed: () => launchUrl(
+                            LegalConfig.termsUri,
+                            mode: LaunchMode.externalApplication,
+                          ),
+                          child: const Text('Условия'),
+                        ),
+                        TextButton(
+                          onPressed: () => launchUrl(
+                            LegalConfig.privacyUri,
+                            mode: LaunchMode.externalApplication,
+                          ),
+                          child: const Text('Конфиденциальность'),
+                        ),
+                      ],
+                    ),
+                    CheckboxListTile(
+                      value: confirmedAge,
+                      contentPadding: EdgeInsets.zero,
+                      controlAffinity: ListTileControlAffinity.leading,
+                      title: Text(
+                        'Мне исполнилось ${LegalConfig.minimumAge} лет',
+                      ),
+                      onChanged: _legalAcceptancePending
+                          ? null
+                          : (value) => setDialogState(
+                              () => confirmedAge = value ?? false,
+                            ),
+                    ),
+                    if (_legalAcceptanceError != null)
+                      Text(
+                        _legalAcceptanceError!,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.error,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () async {
+                    _legalAcceptanceTimeout?.cancel();
+                    _legalAcceptancePending = false;
+                    _legalPromptOpen = false;
+                    _legalDialogSetState = null;
+                    Navigator.of(dialogContext).pop();
+                    await SocketService.instance.disconnect();
+                    if (mounted) {
+                      setState(() {
+                        _isLoading = false;
+                        _isAutoLogin = false;
+                        _error = 'Для продолжения необходимо принять актуальные условия';
+                      });
+                    }
+                  },
+                  child: const Text('Выйти'),
+                ),
+                FilledButton(
+                  onPressed: canAccept
+                      ? () {
+                          setDialogState(() {
+                            _legalAcceptancePending = true;
+                            _legalAcceptanceError = null;
+                          });
+                          final sent = SocketService.instance.acceptLegal(
+                            termsAccepted: acceptedDocuments,
+                            ageConfirmed: confirmedAge,
+                            termsVersion: LegalConfig.termsVersion,
+                            privacyVersion: LegalConfig.privacyVersion,
+                          );
+                          if (!sent) {
+                            setDialogState(() {
+                              _legalAcceptancePending = false;
+                              _legalAcceptanceError = 'Нет соединения с сервером. Повторите попытку.';
+                            });
+                            return;
+                          }
+                          _legalAcceptanceTimeout?.cancel();
+                          _legalAcceptanceTimeout = Timer(
+                            const Duration(seconds: 15),
+                            () {
+                              if (!mounted ||
+                                  !_legalPromptOpen ||
+                                  !_legalAcceptancePending)
+                                return;
+                              _legalDialogSetState?.call(() {
+                                _legalAcceptancePending = false;
+                                _legalAcceptanceError = 'Сервер не подтвердил согласие. Повторите попытку.';
+                              });
+                            },
+                          );
+                        }
+                      : null,
+                  child: Text(
+                    _legalAcceptancePending
+                        ? 'Ожидание подтверждения...'
+                        : 'Принять и продолжить',
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+    // An older dismissed dialog must not clear a newly opened prompt.
+    if (promptGeneration != _legalPromptGeneration) return;
+    _legalAcceptanceTimeout?.cancel();
+    _legalDialogSetState = null;
+    _legalAcceptancePending = false;
+    _legalPromptOpen = false;
   }
 
   // ========================================

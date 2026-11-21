@@ -2008,6 +2008,22 @@ class SocketService {
     _send('login', {'username': user, 'password': password});
   }
 
+  // Explicit consent for accounts registered under older legal versions.
+  bool acceptLegal({
+    required bool termsAccepted,
+    required bool ageConfirmed,
+    required String termsVersion,
+    required String privacyVersion,
+  }) {
+    if (!isAuthenticated) return false;
+    return _send('accept_legal', {
+      'termsAccepted': termsAccepted,
+      'ageConfirmed': ageConfirmed,
+      'termsVersion': termsVersion,
+      'privacyVersion': privacyVersion,
+    });
+  }
+
   // ========================================
   // ПОЛЬЗОВАТЕЛИ
   // ========================================
