@@ -12,6 +12,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'services/storage_service.dart';
 import 'services/contact_link_service.dart';
+import 'services/incoming_share_service.dart';
 import 'services/app_language_service.dart';
 import 'services/notification_service.dart';
 import 'services/firebase_messaging_service.dart';
@@ -91,6 +92,7 @@ Future<void> main(List<String> args) async {
 
   if (!Platform.isWindows) {
     await ContactLinkService.instance.initialize();
+    await IncomingShareService.instance.initialize();
   }
 
   AppVisibility.instance.initialize();

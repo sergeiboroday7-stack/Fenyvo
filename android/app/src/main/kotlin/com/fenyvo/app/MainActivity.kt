@@ -4,6 +4,7 @@ import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
 import android.os.Build
+import android.content.Intent
 import android.view.WindowManager
 import com.hiennv.flutter_callkit_incoming.getDataActiveCalls
 import com.hiennv.flutter_callkit_incoming.CallkitIncomingBroadcastReceiver
@@ -18,9 +19,11 @@ class MainActivity: FlutterActivity() {
     private var visibleCallId: String? = null
     private var proximityChannel: MethodChannel? = null
     private var proximityController: ProximityCallController? = null
+    private var incomingShareBridge: IncomingShareBridge? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        incomingShareBridge = IncomingShareBridge(this, flutterEngine)
         HexVideoAudioLevels.register(flutterEngine.dartExecutor.binaryMessenger, applicationContext)
         callWindowChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger,
             "spartan_chat/call_window").also { channel ->
@@ -137,7 +140,15 @@ class MainActivity: FlutterActivity() {
         }
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        incomingShareBridge?.notifyNewIntent(intent)
+    }
+
     override fun cleanUpFlutterEngine(flutterEngine: FlutterEngine) {
+        incomingShareBridge?.close()
+        incomingShareBridge = null
         callWindowChannel?.setMethodCallHandler(null)
         callWindowChannel = null
         alertChannel?.setMethodCallHandler(null)

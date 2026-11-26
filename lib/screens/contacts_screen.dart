@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../services/socket_service.dart';
 import '../theme/fenyvo_theme.dart';
 import 'contact_link_screen.dart';
+import 'temporary_contact_screen.dart';
 import '../services/app_language_service.dart';
 
 class ContactsScreen extends StatefulWidget {
@@ -232,6 +233,21 @@ class _ContactsScreenState extends State<ContactsScreen> {
     );
   }
 
+  void _openTemporaryContact() {
+    final socket = SocketService.instance;
+    if (!socket.isAuthenticated || socket.currentAccountId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Войдите в аккаунт, чтобы открыть временный контакт'),
+        ),
+      );
+      return;
+    }
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(builder: (_) => const TemporaryContactScreen()),
+    );
+  }
+
   final Set<String> _favorites = <String>{};
   String get _favoritesKey {
     final user = SocketService.instance.currentUser?.trim().toLowerCase() ?? '';
@@ -382,6 +398,11 @@ class _ContactsScreenState extends State<ContactsScreen> {
       appBar: AppBar(
         title: Text(AppLanguageService.instance.text('contactsPageTitle')),
         actions: [
+          IconButton(
+            tooltip: 'Временный контакт · Signal E2EE',
+            onPressed: _openTemporaryContact,
+            icon: const Icon(Icons.hourglass_top_rounded),
+          ),
           IconButton(
             tooltip: AppLanguageService.instance.text('contactsRefresh'),
             onPressed: _refreshContacts,

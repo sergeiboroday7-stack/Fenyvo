@@ -33,6 +33,8 @@ import 'system_call_service.dart';
 import 'turn_credential_service.dart';
 import 'e2ee_settings_service.dart';
 import 'crypto/signal_e2ee_service.dart';
+import 'crypto/temporary_signal_e2ee_service.dart' as temp_e2ee;
+import 'temporary_e2ee_scope_guard.dart';
 
 enum FenyvoConnectionPhase {
   disconnected,
@@ -40,6 +42,13 @@ enum FenyvoConnectionPhase {
   authenticating,
   connected,
 }
+
+typedef _TemporaryScope = ({
+  int generation,
+  WebSocketChannel channel,
+  String owner,
+  String accountId,
+});
 
 class SocketService {
   // null means the server did not provide recovery status.
@@ -205,6 +214,78 @@ class SocketService {
   final Map<String, DateTime> _e2eeRecoveryAttempts = <String, DateTime>{};
   Completer<bool>? _e2eePublishRequest;
 
+  // Temporary contact state is connection-local. No Signal keys are deleted.
+  final Map<String, String> _temporaryRoles = <String, String>{};
+  // A legacy server must never bypass required owner consent. This proof is
+  // bound to the authenticated WebSocket generation/account, not stored.
+  _TemporaryScope? _temporaryApprovalVerifiedScope;
+  final Map<String, temp_e2ee.TemporarySignalE2eeService>
+  _temporaryE2eeServices = {};
+  final Map<String, Completer<bool>> _temporaryPublishRequests = {};
+  final Map<String, Completer<Map<String, dynamic>>> _temporaryBundleRequests =
+      {};
+  // The server does not echo request IDs for temporary key operations.
+  // After a timeout, a late reply could match a retry on the same socket.
+  // Fail closed until a fresh authenticated connection.
+  final Set<String> _temporaryUncertainSessions = <String>{};
+
+  _TemporaryScope? _temporaryScope() {
+    final owner = currentUser?.trim() ?? '';
+    final accountId = currentAccountId?.trim() ?? '';
+    final channel = _channel;
+    if (!isAuthenticated ||
+        owner.isEmpty ||
+        accountId.isEmpty ||
+        channel == null) {
+      return null;
+    }
+    return (
+      generation: _connectionGeneration,
+      channel: channel,
+      owner: owner,
+      accountId: accountId,
+    );
+  }
+
+  bool _temporaryCurrent(_TemporaryScope scope) =>
+      TemporaryE2eeScopeGuard.isCurrent(
+        eventGeneration: scope.generation,
+        currentGeneration: _connectionGeneration,
+        eventChannel: scope.channel,
+        currentChannel: _channel,
+        isAuthenticated: isAuthenticated,
+        expectedOwner: scope.owner,
+        activeOwner: currentUser,
+        expectedAccountId: scope.accountId,
+        activeAccountId: currentAccountId,
+      );
+
+  temp_e2ee.TemporarySignalE2eeService _temporaryService(
+    String sessionId,
+    String role,
+    _TemporaryScope scope,
+  ) => _temporaryE2eeServices.putIfAbsent(
+    '${scope.accountId}:$sessionId:$role',
+    () => temp_e2ee.TemporarySignalE2eeService(accountId: scope.accountId),
+  );
+
+  void _clearTemporaryRuntime() {
+    _temporaryApprovalVerifiedScope = null;
+    _temporaryRoles.clear();
+    _temporaryE2eeServices.clear();
+    _temporaryUncertainSessions.clear();
+    for (final request in _temporaryPublishRequests.values) {
+      if (!request.isCompleted) request.complete(false);
+    }
+    _temporaryPublishRequests.clear();
+    for (final request in _temporaryBundleRequests.values) {
+      if (!request.isCompleted) {
+        request.completeError(StateError('Temporary E2EE connection closed'));
+      }
+    }
+    _temporaryBundleRequests.clear();
+  }
+
   bool get e2eeEnabled => _e2eeEnabled;
 
   bool isE2eeActiveWith(String username) =>
@@ -350,11 +431,9 @@ class SocketService {
           if (generation != _connectionGeneration ||
               !identical(channel, _channel))
             throw StateError('Transfer handoff superseded');
-          unawaited(_handleRawMessage(
-            raw,
-            generation: generation,
-            channel: channel,
-          ));
+          unawaited(
+            _handleRawMessage(raw, generation: generation, channel: channel),
+          );
         });
       } catch (_) {
         /* Same generation disconnect below handles recovery. */
@@ -586,6 +665,7 @@ class SocketService {
       }
 
       if (type == 'login_success') {
+        _clearTemporaryRuntime();
         _authenticated = true;
         recoveryConfigured = data['recoveryConfigured'] is bool
             ? data['recoveryConfigured'] as bool
@@ -933,7 +1013,10 @@ class SocketService {
                   ).applyIfChanged(username, data, isCurrent: current);
                 }
                 if (!updated) {
-                  if (!isAuthenticated || generation != _connectionGeneration || !identical(channel, _channel)) throw StateError('E2EE response connection changed');
+                  if (!isAuthenticated ||
+                      generation != _connectionGeneration ||
+                      !identical(channel, _channel))
+                    throw StateError('E2EE response connection changed');
                   await SignalE2eeService.instance.processRemoteBundle(
                     username,
                     data,
@@ -985,6 +1068,142 @@ class SocketService {
             );
           }
         }
+      }
+
+      // Temporary messages are never forwarded to UI as raw ciphertext or
+      // plaintext. Only successfully decrypted, session-bound payloads pass.
+      if (type == 'temporary_contact_ended') {
+        if (_temporaryScope() == null) return;
+        final id = data['sessionId']?.toString().trim().toLowerCase() ?? '';
+        if (!RegExp(r'^[a-f0-9]{48}$').hasMatch(id)) return;
+        // Server authenticates the recipient and authorizes this revocation.
+        // A restored guest may already have lost the in-memory role, so
+        // suppressing the event here would leave their chat screen open.
+        _temporaryRoles.remove(id);
+        _temporaryE2eeServices.remove(id);
+        _notifyHandlers(message);
+        return;
+      }
+
+      if (type == 'temporary_contact_joined') {
+        final scope = _temporaryScope();
+        if (scope == null) return;
+        if (data['success'] == false) {
+          _notifyHandlers(message);
+          return;
+        }
+        final sessionId =
+            data['sessionId']?.toString().trim().toLowerCase() ?? '';
+        final role = data['role']?.toString().trim().toLowerCase() ?? '';
+        try {
+          temp_e2ee.TemporarySignalE2eeService.identityForSession(
+            sessionId,
+            role,
+          );
+        } catch (_) {
+          return;
+        }
+        _temporaryRoles[sessionId] = role;
+        _notifyHandlers(message);
+        unawaited(_prepareTemporaryE2ee(sessionId, role));
+        return;
+      }
+
+      if (type == 'temporary_e2ee_bundle_published') {
+        final scope = _temporaryScope();
+        if (scope == null) return;
+        final sessionId =
+            data['sessionId']?.toString().trim().toLowerCase() ?? '';
+        final request = _temporaryPublishRequests.remove(sessionId);
+        if (request != null && !request.isCompleted) {
+          request.complete(data['ok'] == true);
+        }
+        return;
+      }
+
+      if (type == 'temporary_e2ee_prekey_bundle') {
+        final scope = _temporaryScope();
+        if (scope == null) return;
+        final sessionId =
+            data['sessionId']?.toString().trim().toLowerCase() ?? '';
+        final request = _temporaryBundleRequests.remove(sessionId);
+        if (request != null && !request.isCompleted) {
+          if (data['available'] == true &&
+              data['version'] == 2 &&
+              data['protocol'] == 'signal-pqxdh-double-ratchet') {
+            request.complete(Map<String, dynamic>.from(data));
+          } else {
+            request.completeError(
+              StateError('Temporary E2EE keys unavailable'),
+            );
+          }
+        }
+        return;
+      }
+
+      if (type == 'temporary_message') {
+        final scope = _temporaryScope();
+        if (scope == null) return;
+        final sessionId =
+            data['sessionId']?.toString().trim().toLowerCase() ?? '';
+        final role = data['role']?.toString().trim().toLowerCase() ?? '';
+        final messageId = data['messageId']?.toString().trim() ?? '';
+        final outerTime = data['time']?.toString() ?? '';
+        if (messageId.isEmpty ||
+            outerTime.isEmpty ||
+            _temporaryRoles[sessionId] != role ||
+            data['e2ee'] != true ||
+            data['e2eeVersion'] != 2 ||
+            data['e2eeProtocol'] != 'signal')
+          return;
+        try {
+          final localId = temp_e2ee
+              .TemporarySignalE2eeService.identityForSession(sessionId, role);
+          final peerId =
+              temp_e2ee.TemporarySignalE2eeService.peerIdentityForSession(
+                sessionId,
+                role,
+              );
+          final service = _temporaryService(sessionId, role, scope);
+          await service.initializeForIdentity(localId);
+          if (!_temporaryCurrent(scope)) return;
+          final decrypted = await service.decrypt(peerId, data);
+          if (!_temporaryCurrent(scope)) return;
+          if (decrypted['sessionId']?.toString() != sessionId ||
+              decrypted['messageId']?.toString() != messageId ||
+              decrypted['time']?.toString() != outerTime ||
+              (decrypted['text']?.toString() ?? '').isEmpty) {
+            throw const FormatException('Temporary E2EE envelope mismatch');
+          }
+          _notifyHandlers({
+            'type': 'temporary_message',
+            'data': <String, dynamic>{
+              'sessionId': sessionId,
+              'role': role,
+              'messageId': messageId,
+              'time': outerTime,
+              'text': decrypted['text'],
+              'e2ee': true,
+              'e2eeVersion': 2,
+              'e2eeProtocol': 'signal',
+            },
+          });
+          if (data['cipherType'] == 3) {
+            unawaited(_prepareTemporaryE2ee(sessionId, role));
+          }
+        } catch (_) {
+          if (_temporaryCurrent(scope)) {
+            _notifyHandlers({
+              'type': 'temporary_message_error',
+              'data': <String, dynamic>{
+                'sessionId': sessionId,
+                'messageId': messageId,
+                'reason': 'Не удалось расшифровать временное сообщение',
+              },
+            });
+          }
+        }
+        return;
       }
 
       if (type == 'e2ee_message_error') {
@@ -1800,6 +2019,7 @@ class SocketService {
     _isConnected = false;
     pendingDeviceTransfer.value = null;
     _authenticated = false;
+    _clearTemporaryRuntime();
     _e2eeSendingIds.clear();
     final publishRequest = _e2eePublishRequest;
     _e2eePublishRequest = null;
@@ -1998,6 +2218,7 @@ class SocketService {
     _manualDisconnect = false;
 
     pendingDeviceTransfer.value = null;
+    _clearTemporaryRuntime();
     _accountIdentity.clear();
     currentUser = user;
 
@@ -2594,6 +2815,457 @@ class SocketService {
     return messageData['id'].toString();
   }
 
+  /// Require protocol-v1 response on this exact account/socket before Trust
+  /// creates or joins a link. Older public servers ignore this event.
+  Future<bool> supportsTemporaryOwnerApproval() async {
+    final scope = _temporaryScope();
+    if (scope == null) return false;
+    final random = Random.secure();
+    final requestId = List<int>.generate(16, (_) => random.nextInt(256))
+        .map((part) => part.toRadixString(16).padLeft(2, '0'))
+        .join();
+    final answer = Completer<bool>();
+    void handler(Map<String, dynamic> message) {
+      if (!_temporaryCurrent(scope) ||
+          message['type'] != 'temporary_contact_capabilities') return;
+      final raw = message['data'];
+      if (raw is! Map) return;
+      final data = Map<String, dynamic>.from(raw);
+      if (data['requestId']?.toString() != requestId) return;
+      if (!answer.isCompleted) {
+        answer.complete(data['approvalVersion'] == 1 &&
+            data['ownerApprovalRequired'] == true);
+      }
+    }
+    addMessageHandler(handler);
+    try {
+      if (!_send('temporary_contact_capabilities_get',
+          <String, dynamic>{'requestId': requestId})) return false;
+      final supported = await answer.future.timeout(const Duration(seconds: 4));
+      if (supported && _temporaryCurrent(scope)) {
+        _temporaryApprovalVerifiedScope = scope;
+        return true;
+      }
+      return false;
+    } catch (_) {
+      return false;
+    } finally {
+      removeMessageHandler(handler);
+    }
+  }
+
+  Future<Map<String, dynamic>?> createTemporaryContact({
+    int durationMinutes = 60,
+    bool allowMessages = true,
+    bool allowCalls = false,
+    bool allowFiles = false,
+  }) async {
+    final scope = _temporaryScope();
+    if (scope == null) return null;
+    if (!await supportsTemporaryOwnerApproval() || !_temporaryCurrent(scope)) {
+      return <String, dynamic>{
+        'success': false,
+        'reason': 'Сервер ещё не поддерживает подтверждение входа',
+      };
+    }
+    final requestId =
+        '${DateTime.now().microsecondsSinceEpoch}-${Random.secure().nextInt(1 << 32)}';
+    final response = Completer<Map<String, dynamic>>();
+    void handler(Map<String, dynamic> message) {
+      if (!_temporaryCurrent(scope) ||
+          message['type'] != 'temporary_contact_created')
+        return;
+      final raw = message['data'];
+      if (raw is! Map) return;
+      final data = Map<String, dynamic>.from(raw);
+      if (data['requestId']?.toString() != requestId) return;
+      if (!response.isCompleted) response.complete(data);
+    }
+
+    addMessageHandler(handler);
+    try {
+      if (!_send('temporary_contact_create', <String, dynamic>{
+        'requestId': requestId,
+        'approvalVersion': 1,
+        'durationMinutes': durationMinutes,
+        'allowMessages': allowMessages,
+        'allowCalls': allowCalls,
+        'allowFiles': allowFiles,
+      }))
+        return null;
+      final result = await response.future.timeout(const Duration(seconds: 10));
+      if (!_temporaryCurrent(scope)) return null;
+      if (result['success'] == true &&
+          (result['approvalVersion'] != 1 ||
+              result['ownerApprovalRequired'] != true)) {
+        return <String, dynamic>{
+          'success': false,
+          'reason': 'Сервер не подтвердил безопасный протокол ссылки',
+        };
+      }
+      return result;
+    } catch (_) {
+      return null;
+    } finally {
+      removeMessageHandler(handler);
+    }
+  }
+
+  /// Trust 662E: a legacy production server does not support this endpoint.
+  /// A timeout or malformed response MUST NOT revive a locally saved chat.
+  /// No sessions are registered here; caller must cross-check secure metadata.
+  Future<List<Map<String, dynamic>>?> fetchConfirmedTemporarySessions() async {
+    final scope = _temporaryScope();
+    if (scope == null || !await supportsTemporaryOwnerApproval() ||
+        !_temporaryCurrent(scope)) return null;
+    final random = Random.secure();
+    final requestId = List<int>.generate(16, (_) => random.nextInt(256))
+        .map((v) => v.toRadixString(16).padLeft(2, '0')).join();
+    final response = Completer<List<Map<String, dynamic>>?>();
+    void handler(Map<String, dynamic> event) {
+      if (!_temporaryCurrent(scope) ||
+          event['type'] != 'temporary_contact_sessions_list') return;
+      final raw = event['data'];
+      if (raw is! Map || raw['requestId'] != requestId) return;
+      if (raw['success'] != true || raw['sessions'] is! List ||
+          (raw['sessions'] as List).length > 100) {
+        if (!response.isCompleted) response.complete(null);
+        return;
+      }
+      final result = <Map<String, dynamic>>[];
+      final seen = <String>{};
+      for (final entry in raw['sessions'] as List) {
+        if (entry is! Map) {
+          if (!response.isCompleted) response.complete(null);
+          return;
+        }
+        final session = Map<String, dynamic>.from(entry);
+        final id = session['sessionId']?.toString() ?? '';
+        final role = session['role']?.toString() ?? '';
+        final expiry = DateTime.tryParse(session['expiresAt']?.toString() ?? '');
+        if (!RegExp(r'^[a-f0-9]{48}$').hasMatch(id) ||
+            (role != 'owner' && role != 'guest') ||
+            expiry == null || !expiry.isAfter(DateTime.now()) ||
+            !seen.add(id)) {
+          if (!response.isCompleted) response.complete(null);
+          return;
+        }
+        result.add(session);
+      }
+      if (!response.isCompleted) response.complete(result);
+    }
+    addMessageHandler(handler);
+    try {
+      if (!_send('temporary_contact_sessions_get', {'requestId': requestId})) {
+        return null;
+      }
+      final result = await response.future.timeout(const Duration(seconds: 6));
+      return _temporaryCurrent(scope) ? result : null;
+    } catch (_) {
+      return null;
+    } finally {
+      removeMessageHandler(handler);
+    }
+  }
+
+  /// Called only for sessions matched against encrypted local account metadata
+  /// AND a fresh authenticated server listing. Restore scoped Signal identity
+  /// and publish the bundle before exposing it to the in-memory chat list.
+  /// Publishing a bundle does not prove a peer ratchet is ready to send.
+  Future<bool> activateConfirmedTemporaryOwner(String sessionId) async {
+    final scope = _temporaryScope();
+    final id = sessionId.trim().toLowerCase();
+    if (scope == null || !RegExp(r'^[a-f0-9]{48}$').hasMatch(id) ||
+        _temporaryUncertainSessions.contains(id)) return false;
+    // Verify fresh server authority in this method too: never accept a
+    // caller-supplied local record or a stale UI list by itself.
+    final sessions = await fetchConfirmedTemporarySessions();
+    if (sessions == null || !_temporaryCurrent(scope) ||
+        !sessions.any((s) => s['sessionId'] == id && s['role'] == 'owner')) {
+      return false;
+    }
+    if (_temporaryRoles.containsKey(id) && _temporaryRoles[id] != 'owner') {
+      return false;
+    }
+    // Never generate a replacement Signal identity during owner recovery.
+    // Check persisted local identity and peer ratchet before _prepareTemporaryE2ee,
+    // which otherwise calls ensureIdentity() and can create new key material.
+    try {
+      final recoveryService = _temporaryService(id, 'owner', scope);
+      final persisted = await recoveryService.hasExistingRecoveryState(id, 'owner');
+      if (!persisted || !_temporaryCurrent(scope)) return false;
+    } catch (_) {
+      return false;
+    }
+    _temporaryRoles[id] = 'owner';
+    final published = await _prepareTemporaryE2ee(id, 'owner');
+    if (!published || !_temporaryCurrent(scope)) {
+      if (_temporaryCurrent(scope)) _temporaryRoles.remove(id);
+      return false;
+    }
+    return true;
+  }
+
+  /// Read-only check: never create a new Signal identity while restoring a
+  /// previously approved guest on a fresh authenticated connection.
+  Future<bool> hasPersistedTemporaryGuestRecoveryState(String sessionId) async {
+    final scope = _temporaryScope();
+    final id = sessionId.trim().toLowerCase();
+    if (scope == null || !RegExp(r'^[a-f0-9]{48}$').hasMatch(id) ||
+        _temporaryUncertainSessions.contains(id)) return false;
+    try {
+      final service = _temporaryService(id, 'guest', scope);
+      final hasState = await service.hasExistingRecoveryState(id, 'guest');
+      return hasState && _temporaryCurrent(scope);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// Trust 662E: only an affirmative server result means the session ended.
+  /// A local UI must never call this 'ended' on timeout or on an old server.
+  Future<bool> endConfirmedTemporarySession(String sessionId) async {
+    final scope = _temporaryScope();
+    final id = sessionId.trim().toLowerCase();
+    if (scope == null || !RegExp(r'^[a-f0-9]{48}$').hasMatch(id) ||
+        !await supportsTemporaryOwnerApproval() || !_temporaryCurrent(scope)) {
+      return false;
+    }
+    final random = Random.secure();
+    final requestId = List<int>.generate(16, (_) => random.nextInt(256))
+        .map((v) => v.toRadixString(16).padLeft(2, '0')).join();
+    final response = Completer<bool>();
+    void handler(Map<String, dynamic> event) {
+      if (!_temporaryCurrent(scope) ||
+          event['type'] != 'temporary_contact_end_result') return;
+      final raw = event['data'];
+      if (raw is! Map || raw['requestId'] != requestId ||
+          raw['sessionId'] != id) return;
+      if (!response.isCompleted) response.complete(raw['success'] == true);
+    }
+    addMessageHandler(handler);
+    try {
+      if (!_send('temporary_contact_end', {
+        'requestId': requestId, 'sessionId': id,
+      })) return false;
+      final ended = await response.future.timeout(const Duration(seconds: 8));
+      if (!_temporaryCurrent(scope) || !ended) return false;
+      _temporaryRoles.remove(id);
+      _temporaryE2eeServices.remove(id);
+      return true;
+    } catch (_) {
+      return false;
+    } finally {
+      removeMessageHandler(handler);
+    }
+  }
+
+  /// Re-fetch approvals missed while the temporary invitation screen was closed.
+  /// The server binds results to this authenticated owner socket.
+  bool requestPendingTemporaryJoins() {
+    if (_temporaryScope() == null) return false;
+    return _send('temporary_contact_pending_get', <String, dynamic>{});
+  }
+
+  bool decideTemporaryContactJoin(String requestId, bool approved) {
+    if (_temporaryScope() == null) return false;
+    final id = requestId.trim().toLowerCase();
+    if (!RegExp(r'^[a-f0-9]{32}$').hasMatch(id)) return false;
+    return _send('temporary_contact_join_decision', <String, dynamic>{
+      'requestId': id,
+      'approved': approved,
+    });
+  }
+
+  Future<bool> joinTemporaryContactSecurely(String token) async {
+    final scope = _temporaryScope();
+    if (scope == null) return false;
+    if (!await supportsTemporaryOwnerApproval() || !_temporaryCurrent(scope)) {
+      return false;
+    }
+    return joinTemporaryContact(token);
+  }
+
+  // Retained for callers that explicitly probed this same live socket.
+  // Never send an unchecked join to a legacy auto-accepting server.
+  bool joinTemporaryContact(String token) {
+    final scope = _temporaryScope();
+    if (scope == null || _temporaryApprovalVerifiedScope != scope ||
+        !_temporaryCurrent(scope)) return false;
+    final value = token.trim().toLowerCase();
+    if (!RegExp(r'^[a-f0-9]{64}$').hasMatch(value)) return false;
+    return _send('temporary_contact_join', {
+      'token': value, 'approvalVersion': 1,
+    });
+  }
+
+  Future<bool> sendTemporaryEncryptedMessage({
+    required String sessionId,
+    required String role,
+    required String text,
+    String? messageId,
+  }) async {
+    final scope = _temporaryScope();
+    if (scope == null) return false;
+    final id = sessionId.trim().toLowerCase();
+    final normalizedRole = role.trim().toLowerCase();
+    final messageText = text.trim();
+    if (messageText.isEmpty || _temporaryRoles[id] != normalizedRole)
+      return false;
+    try {
+      final localId = temp_e2ee.TemporarySignalE2eeService.identityForSession(
+        id,
+        normalizedRole,
+      );
+      final peerId =
+          temp_e2ee.TemporarySignalE2eeService.peerIdentityForSession(
+            id,
+            normalizedRole,
+          );
+      final service = _temporaryService(id, normalizedRole, scope);
+      await service.initializeForIdentity(localId);
+      if (!_temporaryCurrent(scope)) return false;
+      final outgoingMessageId = messageId?.trim().isNotEmpty == true
+          ? messageId!.trim()
+          : DateTime.now().microsecondsSinceEpoch.toString();
+      final sentAt = DateTime.now().toUtc().toIso8601String();
+      final payload = <String, dynamic>{
+        'sessionId': id,
+        'messageId': outgoingMessageId,
+        'time': sentAt,
+        'text': messageText,
+      };
+      Map<String, dynamic> encrypted;
+      try {
+        encrypted = await service.encrypt(peerId, payload);
+      } on temp_e2ee.E2eeSessionMissing {
+        if (!await _prepareTemporaryE2ee(id, normalizedRole) ||
+            !_temporaryCurrent(scope))
+          return false;
+        await _requestTemporaryE2eeBundle(id, normalizedRole);
+        if (!_temporaryCurrent(scope)) return false;
+        encrypted = await service.encrypt(peerId, payload);
+      }
+      if (!_temporaryCurrent(scope)) return false;
+      return _send('temporary_message', <String, dynamic>{
+        'sessionId': id,
+        'messageId': outgoingMessageId,
+        'time': sentAt,
+        ...encrypted,
+      });
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> _prepareTemporaryE2ee(String sessionId, String role) async {
+    final scope = _temporaryScope();
+    if (scope == null ||
+        _temporaryRoles[sessionId] != role ||
+        _temporaryUncertainSessions.contains(sessionId))
+      return false;
+    final existing = _temporaryPublishRequests[sessionId];
+    if (existing != null) {
+      try {
+        return await existing.future.timeout(const Duration(seconds: 11)) &&
+            _temporaryCurrent(scope);
+      } catch (_) {
+        return false;
+      }
+    }
+    final request = Completer<bool>();
+    _temporaryPublishRequests[sessionId] = request;
+    try {
+      final localId = temp_e2ee.TemporarySignalE2eeService.identityForSession(
+        sessionId,
+        role,
+      );
+      final service = _temporaryService(sessionId, role, scope);
+      await service.initializeForIdentity(localId);
+      if (!_temporaryCurrent(scope)) return false;
+      final bundle = await service.createPublicBundle();
+      if (!_temporaryCurrent(scope)) return false;
+      if (!_send('temporary_e2ee_bundle_publish', <String, dynamic>{
+        'sessionId': sessionId,
+        ...bundle,
+      }))
+        return false;
+      final accepted = await request.future.timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          if (_temporaryCurrent(scope)) {
+            _temporaryUncertainSessions.add(sessionId);
+          }
+          return false;
+        },
+      );
+      return accepted && _temporaryCurrent(scope);
+    } catch (_) {
+      return false;
+    } finally {
+      if (!request.isCompleted) request.complete(false);
+      if (identical(_temporaryPublishRequests[sessionId], request)) {
+        _temporaryPublishRequests.remove(sessionId);
+      }
+    }
+  }
+
+  Future<void> _requestTemporaryE2eeBundle(
+    String sessionId,
+    String role,
+  ) async {
+    final scope = _temporaryScope();
+    if (scope == null ||
+        _temporaryRoles[sessionId] != role ||
+        _temporaryUncertainSessions.contains(sessionId)) {
+      throw StateError('Temporary E2EE connection is unavailable');
+    }
+    final existing = _temporaryBundleRequests[sessionId];
+    if (existing != null) {
+      await existing.future;
+      if (!_temporaryCurrent(scope))
+        throw StateError('Temporary E2EE connection changed');
+      return;
+    }
+    final localId = temp_e2ee.TemporarySignalE2eeService.identityForSession(
+      sessionId,
+      role,
+    );
+    final peerId = temp_e2ee.TemporarySignalE2eeService.peerIdentityForSession(
+      sessionId,
+      role,
+    );
+    final service = _temporaryService(sessionId, role, scope);
+    await service.initializeForIdentity(localId);
+    if (!_temporaryCurrent(scope))
+      throw StateError('Temporary E2EE connection changed');
+    final request = Completer<Map<String, dynamic>>();
+    _temporaryBundleRequests[sessionId] = request;
+    try {
+      if (!_send('temporary_e2ee_bundle_get', {'sessionId': sessionId})) {
+        throw StateError('Temporary E2EE server unavailable');
+      }
+      final bundle = await request.future.timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          if (_temporaryCurrent(scope)) {
+            _temporaryUncertainSessions.add(sessionId);
+          }
+          throw TimeoutException('Temporary E2EE bundle request timed out');
+        },
+      );
+      if (!_temporaryCurrent(scope))
+        throw StateError('Temporary E2EE connection changed');
+      await service.processRemoteBundle(peerId, bundle);
+      if (!_temporaryCurrent(scope))
+        throw StateError('Temporary E2EE connection changed');
+    } finally {
+      if (identical(_temporaryBundleRequests[sessionId], request)) {
+        _temporaryBundleRequests.remove(sessionId);
+      }
+    }
+  }
+
   Future<bool> setE2eeEnabled(bool enabled) async {
     // The old UI cannot disable mandatory private E2EE.
     if (!enabled) return false;
@@ -2944,7 +3616,8 @@ class SocketService {
         'id': id,
         'to': target,
         'time': localMessage['time'],
-        'autoDeleteAfterReadSeconds': localMessage['autoDeleteAfterReadSeconds'] ?? 0,
+        'autoDeleteAfterReadSeconds':
+            localMessage['autoDeleteAfterReadSeconds'] ?? 0,
         'autoDeleteUnreadSeconds': localMessage['autoDeleteUnreadSeconds'] ?? 0,
         ...encrypted,
       };
@@ -3779,6 +4452,7 @@ class SocketService {
     // Invalidate callbacks from this socket before any asynchronous
     // account cleanup or channel shutdown can suspend this method.
     ++_connectionGeneration;
+    _clearTemporaryRuntime();
     pendingDeviceTransfer.value = null;
     _accountIdentity.clear();
     pendingDeviceTransfer.value = null;

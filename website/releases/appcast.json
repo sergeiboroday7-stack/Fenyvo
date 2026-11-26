@@ -1,50 +1,62 @@
 {
   "schemaVersion": 1,
-  "publishedAt": "2026-11-11T09:41:16.459Z",
+  "publishedAt": "2026-11-26T12:31:09Z",
   "platforms": {
     "android": {
       "version": "1.8.2",
-      "build": 6296,
+      "build": 16329,
       "minimumSupportedBuild": 0,
-      "downloadUrl": "https://fenyvo.com/download/Fenyvo-1.8.2-arm64.apk",
-      "sha256": "44b16a7ae0e64b2ac93a3ab14af09eff03bdc7cf4f8bf80935b0e0aad0e11994",
-      "sizeBytes": 79305296,
-      "publishedAt": "2026-11-10T17:02:55.312417Z",
+      "downloadUrl": "https://fenyvo.com/download/FENYVO-Android-1.8.2-16329-ENIGMA-arm64.apk",
+      "sha256": "fe8fe6fee12ef60c911bdcf557f958b1dab74dddd0dd96d8395b13ea094eb715",
+      "sizeBytes": 63354461,
+      "publishedAt": "2026-11-25T15:50:04Z",
       "notes": {
         "ru": [
-          "Обновлена обработка записи голосовых сообщений при отображении HEX VIDEO.",
-          "Улучшена координация аудиозаписи и воспроизведения видеосообщений.",
-          "Обновлена Android-сборка FENYVO до версии 6296."
-        ],
-        "en": [
-          "Updated voice recording handling while HEX VIDEO messages are visible.",
-          "Improved coordination between audio recording and video playback.",
-          "Updated the FENYVO Android build to 6296."
+          "Добавлено пространство FENYVO ENIGMA с обновлённым оформлением временных чатов.",
+          "Обновлены создание приглашения и выбор срока действия.",
+          "Улучшена отправка ссылок-приглашений через FENYVO.",
+          "Восстановлен автоматический возврат в ENIGMA после отправки приглашения."
         ],
         "uk": [
-          "Оновлено обробку запису голосових повідомлень під час відображення HEX VIDEO.",
-          "Покращено узгодження аудіозапису та відтворення відеоповідомлень.",
-          "Оновлено Android-збірку FENYVO до версії 6296."
+          "Додано простір FENYVO ENIGMA з оновленим оформленням тимчасових чатів.",
+          "Оновлено створення запрошень та вибір терміну дії.",
+          "Покращено надсилання посилань-запрошень через FENYVO.",
+          "Відновлено автоматичне повернення до ENIGMA після надсилання запрошення."
+        ],
+        "en": [
+          "Added FENYVO ENIGMA space with a refreshed temporary-chat interface.",
+          "Updated invitation creation and expiration selection.",
+          "Improved invitation-link sharing through FENYVO.",
+          "Restored automatic return to ENIGMA after sending an invitation."
         ]
       }
     },
     "windows": {
       "version": "1.8.2",
-      "build": 6296,
+      "build": 16329,
       "minimumSupportedBuild": 0,
-      "downloadUrl": "https://fenyvo.com/download/Fenyvo-1.8.2-windows-x64.zip",
-      "sha256": "24090dc82dd44984ab1327dcb0b5be9a9c272d2b331089945fda26ba82af54a2",
-      "sizeBytes": 31172850,
-      "publishedAt": "2026-11-11T09:41:16.459Z",
+      "downloadUrl": "https://fenyvo.com/download/FENYVO-Windows-1.8.2-16329-ENIGMA.zip",
+      "sha256": "23a6dcbb0eef67c0c68920b6d6b3e70967d6723fafcc2ea563879cc77ab459cd",
+      "sizeBytes": 32125013,
+      "publishedAt": "2026-11-26T12:31:09Z",
       "notes": {
         "ru": [
-          "Обновлена Windows-сборка FENYVO до 6296. Сквозное шифрование личных сообщений работает автоматически."
+          "Добавлена ENIGMA для Windows с временными зашифрованными чатами.",
+          "Добавлена возможность отправить приглашение контакту FENYVO из ENIGMA.",
+          "Улучшено окно FENYVO COMMAND для Windows.",
+          "Улучшена работа с клавиатурой: Enter отправляет сообщение, Shift + Enter переносит строку."
         ],
         "uk": [
-          "Оновлено Windows-збірку FENYVO до 6296. Наскрізне шифрування особистих повідомлень працює автоматично."
+          "Додано ENIGMA для Windows із тимчасовими зашифрованими чатами.",
+          "Додано можливість надіслати запрошення контакту FENYVO з ENIGMA.",
+          "Покращено вікно FENYVO COMMAND для Windows.",
+          "Покращено роботу з клавіатурою: Enter надсилає повідомлення, Shift + Enter переносить рядок."
         ],
         "en": [
-          "Updated FENYVO for Windows to build 6296. End-to-end encryption of private messages works automatically."
+          "Added ENIGMA for Windows with temporary encrypted chats.",
+          "Added sending ENIGMA invitation links to FENYVO contacts.",
+          "Improved the FENYVO COMMAND window for Windows.",
+          "Improved keyboard input: Enter sends a message and Shift + Enter inserts a new line."
         ]
       }
     }

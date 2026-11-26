@@ -3,6 +3,102 @@ part of '../screens/chat_screen.dart';
 /// Private chat bubble presentation.
 /// State mutations remain owned by ChatScreen.
 extension _PrivateMessageBubble on _ChatScreenState {
+  String _messageLinkLabel(PrivateChatMessageLink link) {
+    final language = AppLanguageService.instance.code.value;
+    if (link.kind == PrivateChatMessageLinkKind.temporaryInvite) {
+      return language == 'uk'
+          ? 'Відкрити запрошення'
+          : language == 'en'
+              ? 'Open invitation'
+              : 'Открыть приглашение';
+    }
+    if (link.kind == PrivateChatMessageLinkKind.contact) {
+      return language == 'uk'
+          ? 'Відкрити контакт'
+          : language == 'en'
+              ? 'Open contact'
+              : 'Открыть контакт';
+    }
+    return language == 'uk'
+        ? 'Відкрити посилання'
+        : language == 'en'
+            ? 'Open link'
+            : 'Открыть ссылку';
+  }
+
+  Widget _buildPrivateMessageTextWithLinks(String text) {
+    final links = PrivateChatMessageLink.extract(text);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          text,
+          style: const TextStyle(
+            color: FenyvoPalette.ink,
+            fontSize: 16,
+          ),
+        ),
+        for (final link in links)
+          TextButton.icon(
+            style: TextButton.styleFrom(
+              foregroundColor: _ChatScreenState._gold,
+              padding: const EdgeInsets.symmetric(horizontal: 2),
+              alignment: Alignment.centerLeft,
+            ),
+            onPressed: () => unawaited(_openPrivateMessageLink(link)),
+            icon: const Icon(Icons.open_in_new_rounded, size: 16),
+            label: Text(_messageLinkLabel(link)),
+          ),
+      ],
+    );
+  }
+
+  Future<void> _openPrivateMessageLink(PrivateChatMessageLink link) async {
+    if (!mounted) return;
+    if (link.kind == PrivateChatMessageLinkKind.temporaryInvite) {
+      final token = link.temporaryToken;
+      if (token == null ||
+          !SocketService.instance.isAuthenticated ||
+          SocketService.instance.currentAccountId == null) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => TemporaryContactScreen(initialToken: token),
+        ),
+      );
+      return;
+    }
+    if (link.kind == PrivateChatMessageLinkKind.contact) {
+      final username = link.contactUsername;
+      if (username == null ||
+          !SocketService.instance.isAuthenticated ||
+          SocketService.instance.currentAccountId == null) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(
+          builder: (_) => ContactLinkScreen(username: username),
+        ),
+      );
+      return;
+    }
+    try {
+      final launched = await launchUrl(
+        link.uri,
+        mode: LaunchMode.externalApplication,
+      );
+      if (!launched && mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Не удалось открыть ссылку')),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Не удалось открыть ссылку')),
+        );
+      }
+    }
+  }
+
   Widget _buildMessageBubble(Map<String, dynamic> message) {
     if (message['localCallEntry'] == true) {
       return _buildCallHistoryBubble(message);
@@ -380,13 +476,7 @@ extension _PrivateMessageBubble on _ChatScreenState {
                       else if (isPrivateMediaMessage)
                         _buildPrivateMediaBody(message, isMe: isMe)
                       else
-                        Text(
-                          text,
-                          style: TextStyle(
-                            color: isMe ? FenyvoPalette.ink : FenyvoPalette.ink,
-                            fontSize: 16,
-                          ),
-                        ),
+                        _buildPrivateMessageTextWithLinks(text),
 
                       if (forwardComment.isNotEmpty) ...[
                         Padding(

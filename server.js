@@ -424,6 +424,8 @@ const temporaryContacts = loadJsonObjectFile(
 );
 
 const temporaryContactSessions = new Map();
+const { TemporaryJoinApproval } = require('./server_temporary_join_approval');
+const temporaryJoinApprovals = new TemporaryJoinApproval();
 const temporaryE2eeBundles = new Map();
 function getTemporaryContactSessionForUser(sessionId, username) {
   const id = sessionId?.toString().trim() || '';
@@ -492,6 +494,26 @@ function getTemporaryContactSessionForUser(sessionId, username) {
   if (!session) {
     return null;
   }
+
+  // Never authorize from a cached session without checking its live invite.
+  // A revoked/changed invitation must immediately stop messages and E2EE
+  // bundle access, including sessions already present in this Map.
+  const liveRecord = temporaryContacts[session.token];
+  const liveOwner = liveRecord?.owner?.toString().trim().toLowerCase() || '';
+  const liveGuest = liveRecord?.guest?.toString().trim().toLowerCase() || '';
+  const sessionOwner = session.owner?.toString().trim().toLowerCase() || '';
+  const sessionGuest = session.guest?.toString().trim().toLowerCase() || '';
+  if (!liveRecord || liveRecord.revoked === true ||
+      liveRecord.sessionId !== id ||
+      liveOwner !== sessionOwner || liveGuest !== sessionGuest) {
+    temporaryContactSessions.delete(id);
+    return null;
+  }
+  // Honor server-side expiry and message permissions even for cached sessions.
+  session.expiresAt = liveRecord.expiresAt;
+  session.allowMessages = liveRecord.allowMessages !== false;
+  session.allowCalls = liveRecord.allowCalls === true;
+  session.allowFiles = liveRecord.allowFiles === true;
 
   const expiresAtMs = Date.parse(session.expiresAt || '');
 
@@ -5220,6 +5242,19 @@ wss.on(
           // TEMPORARY CONTACTS
           // ====================================
 
+          // FENYVO Trust owner-consent protocol v1. A nonce-bound probe lets
+          // updated clients fail closed when connected to an older server.
+          if (type === 'temporary_contact_capabilities_get') {
+            const requestId = data.requestId?.toString().trim() || '';
+            if (currentUser && /^[a-f0-9]{32}$/.test(requestId)) {
+              send(ws, 'temporary_contact_capabilities', {
+                requestId,
+                approvalVersion: 1,
+                ownerApprovalRequired: true,
+              });
+            }
+            return;
+          }
           if (type === 'temporary_contact_create') {
             if (!currentUser) {
               send(ws, 'temporary_contact_created', {
@@ -5230,6 +5265,19 @@ wss.on(
             }
 
             const requestId = data.requestId?.toString().trim() || '';
+            // An unversioned client might be 12317 OR the unpublished 12318.
+            // Never create an unprotected invitation with ambiguous semantics.
+            // Existing approved sessions continue to work; old clients must
+            // update before creating new temporary Trust invitations.
+            if (data.approvalVersion !== 1) {
+              send(ws, 'temporary_contact_created', {
+                success: false,
+                requestId,
+                code: 'client_upgrade_required',
+                reason: 'Обновите FENYVO для создания защищённой ссылки',
+              });
+              return;
+            }
             const requestedMinutes = Number(
               data.durationMinutes ?? data.expiresInMinutes,
             );
@@ -5248,6 +5296,7 @@ wss.on(
 
             temporaryContacts[token] = {
               owner: currentUser,
+              approvalVersion: 1,
               createdAt: createdAt.toISOString(),
               expiresAt: expiresAt.toISOString(),
               allowMessages: data.allowMessages !== false,
@@ -5267,6 +5316,8 @@ wss.on(
               requestId,
               token,
               link: 'https://fenyvo.com/t/' + token,
+              approvalVersion: 1,
+              ownerApprovalRequired: true,
               expiresAt: expiresAt.toISOString(),
               allowMessages: temporaryContacts[token].allowMessages,
               allowCalls: temporaryContacts[token].allowCalls,
@@ -5337,6 +5388,127 @@ wss.on(
 
             return;
           }
+          if (type === 'temporary_contact_pending_get') {
+            if (!currentUser) {
+              send(ws, 'temporary_contact_pending_list', { requests: [] });
+              return;
+            }
+            // Requests are visible only to the original authenticated owner
+            // WebSocket; a different account or replacement socket gets none.
+            const requests = temporaryJoinApprovals.pendingForOwner({
+              owner: currentUser, ownerSocket: ws,
+            });
+            send(ws, 'temporary_contact_pending_list', { requests });
+            return;
+          }
+          if (type === 'temporary_contact_join_decision') {
+            if (!currentUser || typeof data.approved !== 'boolean') {
+              send(ws, 'temporary_contact_join_decision_result', {
+                success: false, reason: 'Требуется вход и явное решение',
+              });
+              return;
+            }
+            const requestId = data.requestId?.toString().trim() || '';
+            const outcome = temporaryJoinApprovals.takeDecision({
+              requestId, owner: currentUser, ownerSocket: ws,
+            });
+            if (!outcome.ok) {
+              send(ws, 'temporary_contact_join_decision_result', {
+                success: false, requestId, reason: outcome.reason,
+              });
+              return;
+            }
+            const pending = outcome.request;
+            const notifyGuestFailure = (reason) => {
+              if (pending.guestSocket?.readyState === WebSocket.OPEN) {
+                send(pending.guestSocket, 'temporary_contact_joined', {
+                  success: false, reason,
+                });
+              }
+            };
+            if (data.approved === false) {
+              notifyGuestFailure('Владелец отклонил подключение');
+              send(ws, 'temporary_contact_join_decision_result', {
+                success: true, approved: false, requestId,
+              });
+              return;
+            }
+            const record = temporaryContacts[pending.token];
+            const owner = record?.owner?.toString().trim() || '';
+            const existingGuest = record?.guest?.toString().trim() || '';
+            const exp = Date.parse(record?.expiresAt || '');
+            const guestSocket = onlineUsers.get(pending.guest);
+            if (!record || record.revoked === true ||
+                !Number.isFinite(exp) || exp <= Date.now() ||
+                owner.toLowerCase() !== currentUser.toLowerCase() ||
+                existingGuest ||
+                guestSocket !== pending.guestSocket ||
+                guestSocket?.readyState !== WebSocket.OPEN) {
+              notifyGuestFailure('Приглашение изменилось или срок запроса истёк');
+              send(ws, 'temporary_contact_join_decision_result', {
+                success: false, requestId,
+                reason: 'Нельзя подтвердить устаревший запрос',
+              });
+              return;
+            }
+            const sessionId = crypto.randomBytes(24).toString('hex');
+            const previous = {
+              guest: record.guest, sessionId: record.sessionId,
+              joinedAt: record.joinedAt,
+            };
+            record.guest = pending.guest;
+            record.sessionId = sessionId;
+            record.joinedAt = new Date().toISOString();
+            try {
+              saveJsonObjectFile(
+                TEMPORARY_CONTACTS_FILE, temporaryContacts, 'временных контактов',
+              );
+            } catch (error) {
+              // The invite must remain unjoined when durable persistence fails.
+              if (previous.guest === undefined) delete record.guest;
+              else record.guest = previous.guest;
+              if (previous.sessionId === undefined) delete record.sessionId;
+              else record.sessionId = previous.sessionId;
+              if (previous.joinedAt === undefined) delete record.joinedAt;
+              else record.joinedAt = previous.joinedAt;
+              notifyGuestFailure('Не удалось подтвердить подключение');
+              send(ws, 'temporary_contact_join_decision_result', {
+                success: false, requestId, reason: 'Не удалось сохранить подтверждение',
+              });
+              return;
+            }
+            const session = {
+              id: sessionId,
+              token: pending.token,
+              owner,
+              guest: pending.guest,
+              createdAt: record.joinedAt,
+              expiresAt: record.expiresAt,
+              allowMessages: record.allowMessages !== false,
+              allowCalls: record.allowCalls === true,
+              allowFiles: record.allowFiles === true,
+            };
+            temporaryContactSessions.set(sessionId, session);
+            send(guestSocket, 'temporary_contact_joined', {
+              success: true, sessionId, role: 'guest',
+              expiresAt: session.expiresAt,
+              allowMessages: session.allowMessages,
+              allowCalls: session.allowCalls,
+              allowFiles: session.allowFiles,
+            });
+            send(ws, 'temporary_contact_join_decision_result', {
+              success: true, approved: true, requestId,
+            });
+            send(ws, 'temporary_contact_joined', {
+              success: true, sessionId, role: 'owner',
+              requestId,
+              expiresAt: session.expiresAt,
+              allowMessages: session.allowMessages,
+              allowCalls: session.allowCalls,
+              allowFiles: session.allowFiles,
+            });
+            return;
+          }
           if (type === 'temporary_contact_join') {
             if (!currentUser) {
               send(ws, 'temporary_contact_joined', {
@@ -5401,6 +5573,70 @@ wss.on(
                 success: false,
                 reason: 'Временный контакт уже используется',
               });
+              return;
+            }
+
+            // Already accepted guests may reconnect across app upgrades.
+            // For NEW joins, never silently downgrade a modern invitation.
+            if (!existingGuest) {
+              if (record.approvalVersion === 1) {
+                if (data.approvalVersion !== 1) {
+                  send(ws, 'temporary_contact_joined', {
+                    success: false,
+                    code: 'client_upgrade_required',
+                    reason: 'Обновите FENYVO для подключения по этой ссылке',
+                  });
+                  return;
+                }
+              } else {
+                // Untagged invitations came from the previous server, and
+                // may live for at most 24h. New clients refuse these links;
+                // legacy peers retain the behavior promised at creation.
+                const createdAtMs = Date.parse(record.createdAt || '');
+                if (record.approvalVersion !== undefined ||
+                    !Number.isFinite(createdAtMs) ||
+                    createdAtMs > Date.now() ||
+                    data.approvalVersion === 1) {
+                  send(ws, 'temporary_contact_joined', {
+                    success: false,
+                    code: 'legacy_invite_unsupported',
+                    reason: 'Создайте новую ссылку в обновлённом FENYVO',
+                  });
+                  return;
+                }
+              }
+            }
+
+            // A NEW protocol-v1 guest requires explicit owner consent.
+            if (!existingGuest && record.approvalVersion === 1) {
+              const ownerSocket = onlineUsers.get(owner);
+              if (ownerSocket?.readyState !== WebSocket.OPEN) {
+                send(ws, 'temporary_contact_joined', {
+                  success: false,
+                  reason: 'Владелец сейчас не в сети',
+                });
+                return;
+              }
+              const pending = temporaryJoinApprovals.request({
+                token, owner, guest: currentUser,
+                guestSocket: ws, ownerSocket,
+              });
+              if (!pending.ok) {
+                send(ws, 'temporary_contact_joined', {
+                  success: false, reason: pending.reason,
+                });
+                return;
+              }
+              send(ws, 'temporary_contact_join_pending', {
+                success: true, token, requestId: pending.requestId,
+                expiresAt: new Date(pending.expiresAt).toISOString(),
+              });
+              if (!pending.repeated) {
+                send(ownerSocket, 'temporary_contact_join_request', {
+                  token, requestId: pending.requestId,
+                  expiresAt: new Date(pending.expiresAt).toISOString(),
+                });
+              }
               return;
             }
 

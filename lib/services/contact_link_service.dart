@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:app_links/app_links.dart';
 import 'package:flutter/foundation.dart';
 
+import 'temporary_invite_link.dart';
+
 class ContactLinkService extends ChangeNotifier {
   ContactLinkService._();
 
@@ -11,9 +13,11 @@ class ContactLinkService extends ChangeNotifier {
   final AppLinks _appLinks = AppLinks();
   StreamSubscription<Uri>? _subscription;
   String? _pendingUsername;
+  String? _pendingTemporaryToken;
   bool _initialized = false;
 
   String? get pendingUsername => _pendingUsername;
+  String? get pendingTemporaryToken => _pendingTemporaryToken;
 
   static String? usernameFromUri(Uri uri) {
     if (uri.scheme.toLowerCase() != 'https' ||
@@ -49,10 +53,22 @@ class ContactLinkService extends ChangeNotifier {
   }
 
   void _handleUri(Uri uri) {
+    final inviteToken = TemporaryInviteLink.tokenFromUri(uri);
+    if (inviteToken != null) {
+      _pendingTemporaryToken = inviteToken;
+      notifyListeners();
+      return;
+    }
     final username = usernameFromUri(uri);
     if (username == null) return;
     _pendingUsername = username;
     notifyListeners();
+  }
+
+  String? takePendingTemporaryToken() {
+    final token = _pendingTemporaryToken;
+    _pendingTemporaryToken = null;
+    return token;
   }
 
   String? takePendingUsername() {

@@ -39,6 +39,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:video_player/video_player.dart';
 
 import '../features/messages/data/private_video_note_speed_settings.dart';
@@ -56,6 +57,10 @@ import '../services/legacy_media_regrant_result.dart';
 import '../services/legacy_media_regrant_client.dart';
 import '../widgets/legacy_media_regrant_dialog.dart';
 import '../services/socket_service.dart';
+import 'contact_link_screen.dart';
+import 'temporary_contact_screen.dart';
+import '../services/incoming_share_service.dart';
+import '../services/private_chat_message_links.dart';
 import '../services/call_service.dart';
 import '../services/call_history_service.dart';
 import '../services/pulse_service.dart';
@@ -97,8 +102,12 @@ String _chatText(String key, [Map<String, Object> values = const {}]) {
 
 class ChatScreen extends StatefulWidget {
   final String targetUser;
+  final IncomingSharePayload? initialShare;
+  /// Only for a temporary invitation shared to another FENYVO chat.
+  final bool returnToTrustAfterShare;
 
-  const ChatScreen({super.key, required this.targetUser});
+  const ChatScreen({super.key, required this.targetUser, this.initialShare,
+      this.returnToTrustAfterShare = false});
 
   @override
   State<ChatScreen> createState() => _ChatScreenState();
@@ -109,6 +118,8 @@ class _ChatScreenState extends State<ChatScreen>
   static final Map<String, String> _drafts = {};
   late final String _draftKey;
   final TextEditingController _messageController = TextEditingController();
+  bool _trustInviteInserted = false;
+
 
   final FocusNode _messageFocusNode = FocusNode();
   bool _emojiVisible = false;
@@ -540,6 +551,11 @@ class _ChatScreenState extends State<ChatScreen>
     _messageController.selection = TextSelection.collapsed(
       offset: _messageController.text.length,
     );
+    if (widget.initialShare != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) unawaited(_confirmIncomingShare(widget.initialShare!));
+      });
+    }
 
     SocketService.instance.setActiveChatUser(widget.targetUser);
     _e2eeActive = SocketService.instance.isE2eeActiveWith(widget.targetUser);
@@ -2239,6 +2255,7 @@ class _ChatScreenState extends State<ChatScreen>
                 _messageController.selection = TextSelection.collapsed(
                   offset: suggestion.length,
                 );
+                if (mounted) setState(() {});
               },
             ),
           ),
@@ -3350,6 +3367,90 @@ class _ChatScreenState extends State<ChatScreen>
         );
       },
     );
+  }
+
+  Future<void> _confirmIncomingShare(IncomingSharePayload share) async {
+    if (!mounted) return;
+    final accept = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: Text('Отправить для ${widget.targetUser}?'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              if (share.images.isNotEmpty) ...[
+                Text('Изображений: ${share.images.length}'),
+                const SizedBox(height: 8),
+                Image.file(
+                  File(share.images.first.path),
+                  height: 160,
+                  errorBuilder: (_, __, ___) => const Text('Предпросмотр недоступен'),
+                ),
+                const SizedBox(height: 8),
+              ],
+              if (share.text.isNotEmpty) ...[
+                const Text('Текст:'),
+                SelectableText(share.text, maxLines: 5),
+              ],
+              const SizedBox(height: 8),
+              Text(share.images.isNotEmpty
+                  ? 'После подтверждения фотографии отправятся через E2EE. '
+                    'Текст, если есть, появится в поле ввода.'
+                  : 'Текст появится в поле ввода. Отправку подтвердите кнопкой сообщения.'),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Отмена'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: Text(share.images.isNotEmpty
+                ? 'Отправить изображения'
+                : 'Вставить в чат'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted || accept != true) return;
+    if (_contactBlocked) {
+      _privateMediaSnack(_chatText('unblockFirst'));
+      return;
+    }
+    if (share.images.isNotEmpty &&
+        !SocketService.instance.isE2eeActiveWith(widget.targetUser)) {
+      _privateMediaSnack('Защищённая сессия ещё не готова. Отправка отменена.');
+      return;
+    }
+    if (share.images.isNotEmpty && _sendingPrivateMedia) return;
+    for (final image in share.images) {
+      if (!mounted || !SocketService.instance.isAuthenticated ||
+          !SocketService.instance.isE2eeActiveWith(widget.targetUser)) return;
+      await _sendPrivateMediaFile(
+        messageType: 'image',
+        path: image.path,
+        fileName: image.fileName,
+        mimeType: image.mimeType,
+        text: '📷 ${_chatText('photo')}',
+        maxBytes: 20 * 1024 * 1024,
+      );
+    }
+    if (!mounted || share.text.isEmpty) return;
+    if (widget.returnToTrustAfterShare) _trustInviteInserted = true;
+    final existing = _messageController.text;
+    _messageController.text = existing.isEmpty
+        ? share.text
+        : '$existing\n${share.text}';
+    _messageController.selection = TextSelection.collapsed(
+      offset: _messageController.text.length,
+    );
+    // Setting controller.text in code does not call TextField.onChanged.
+    // Refresh the composer so the Send action replaces the voice recorder.
+    if (mounted) setState(() {});
   }
 
   Future<void> _pickPrivateImage() async {
@@ -4865,6 +4966,17 @@ class _ChatScreenState extends State<ChatScreen>
           .showSnackBar(SnackBar(content: Text(_chatText('messageQueued'))));
     }
 
+    // Returning to Trust is a navigation decision, not proof that the
+    // recipient has received or decrypted the message. sendMessage() already
+    // handles secure transport / offline queuing; do not require an active
+    // socket or E2EE state here, or the return silently fails.
+    final returnToTrust = widget.returnToTrustAfterShare &&
+        _trustInviteInserted &&
+        widget.initialShare != null &&
+        widget.initialShare!.images.isEmpty &&
+        widget.initialShare!.text.trim().isNotEmpty &&
+        text.contains(widget.initialShare!.text.trim());
+    if (returnToTrust) _trustInviteInserted = false;
     _messageController.clear();
 
     if (mounted) {
@@ -4873,9 +4985,18 @@ class _ChatScreenState extends State<ChatScreen>
       });
     }
 
-    _focusMessageComposer();
+    if (returnToTrust) {
+      // sendMessage has queued the outgoing text locally, not confirmed remote
+      // delivery. Return to Trust without claiming delivery was successful.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) Navigator.of(context).pop(true);
+      });
+    } else {
+      _focusMessageComposer();
+    }
   }
 
+  // ========================================
   // ========================================
   // \u041E\u0422\u0412\u0415\u0422 \u041D\u0410 \u0421\u041E\u041E\u0411\u0429\u0415\u041D\u0418\u0415
   // ========================================

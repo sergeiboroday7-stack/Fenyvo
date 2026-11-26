@@ -18,7 +18,10 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../services/socket_service.dart';
+import '../services/temporary_chat_hub.dart';
+import '../services/temporary_trust_l10n.dart';
 import '../services/contact_link_service.dart';
+import '../services/incoming_share_service.dart';
 import '../services/notification_service.dart';
 import '../services/firebase_messaging_service.dart';
 import '../services/storage_service.dart';
@@ -31,15 +34,20 @@ import 'group_chat_screen.dart';
 import 'group_create_screen.dart';
 import 'contact_link_screen.dart';
 import 'contacts_screen.dart';
+import 'temporary_contact_screen.dart';
 
 class ChatListScreen extends StatefulWidget {
-  const ChatListScreen({super.key});
+  const ChatListScreen({super.key, this.enigmaEnded = false, this.enigmaPeerEnded = false});
+
+  final bool enigmaEnded;
+  final bool enigmaPeerEnded;
 
   @override
   State<ChatListScreen> createState() => _ChatListScreenState();
 }
 
 class _ChatListScreenState extends State<ChatListScreen> {
+  bool _showEnigmaEndNotice = true;
   // RECOVERY_MIGRATION_PROMPT_V1
   static final Set<String> _recoveryPromptedUsers = <String>{};
 
@@ -141,8 +149,138 @@ class _ChatListScreenState extends State<ChatListScreen> {
   StreamSubscription<String>? _notificationTapSubscription;
 
   StreamSubscription<String>? _firebaseNotificationTapSubscription;
+  bool _incomingSharePickerOpen = false;
+
+  void _handleIncomingShare() {
+    if (!mounted || _incomingSharePickerOpen ||
+        !SocketService.instance.isAuthenticated ||
+        SocketService.instance.currentAccountId == null) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || _incomingSharePickerOpen) return;
+      unawaited(_chooseIncomingShareRecipient());
+    });
+  }
+
+  Future<void> _chooseIncomingShareRecipient() async {
+    if (_incomingSharePickerOpen || !mounted ||
+        !SocketService.instance.isAuthenticated) return;
+    final error = IncomingShareService.instance.takeError();
+    if (error != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(error)));
+    }
+    final share = IncomingShareService.instance.takePending();
+    if (share == null) return;
+    _incomingSharePickerOpen = true;
+    final accountId = SocketService.instance.currentAccountId;
+    final owner = SocketService.instance.currentUser;
+    try {
+      final users = StorageService.getChatUsers(owner ?? '')
+          .where((user) => user.isNotEmpty && user != owner &&
+              !user.startsWith('group::'))
+          .toSet()
+          .toList()..sort();
+      if (!mounted) return;
+      final target = await showModalBottomSheet<String>(
+        context: context,
+        isScrollControlled: true,
+        builder: (sheetContext) => SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const Text('Отправить через FENYVO',
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                Text(share.images.isNotEmpty
+                    ? 'Изображений: ${share.images.length}. Выберите контакт.'
+                    : 'Выберите контакт для отправки текста.'),
+                const SizedBox(height: 8),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxHeight: 360),
+                  child: users.isEmpty
+                      ? const Padding(
+                          padding: EdgeInsets.all(16),
+                          child: Text('Нет доступных личных чатов. Сначала добавьте контакт.'),
+                        )
+                      : ListView.builder(
+                          shrinkWrap: true,
+                          itemCount: users.length,
+                          itemBuilder: (_, index) => ListTile(
+                            leading: const Icon(Icons.person_outline),
+                            title: Text(users[index]),
+                            onTap: () => Navigator.of(sheetContext).pop(users[index]),
+                          ),
+                        ),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.of(sheetContext).pop(),
+                  child: const Text('Отмена'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      if (!mounted || target == null ||
+          !SocketService.instance.isAuthenticated ||
+          SocketService.instance.currentAccountId != accountId ||
+          SocketService.instance.currentUser != owner) return;
+      // Return only for a canonical-looking Trust invitation. The actual
+      // invitation validity is always checked by the Trust protocol itself.
+      final isTrustLink = share.images.isEmpty && RegExp(
+        r'https://fenyvo\.com/t/[a-f0-9]{64}(?![a-f0-9])',
+      ).hasMatch(share.text);
+      final returnToTrust = await Navigator.of(context).push<bool>(
+        MaterialPageRoute<bool>(
+          builder: (_) => ChatScreen(
+            targetUser: target,
+            initialShare: share,
+            returnToTrustAfterShare: isTrustLink,
+          ),
+        ),
+      );
+      if (returnToTrust == true && mounted &&
+          SocketService.instance.isAuthenticated &&
+          SocketService.instance.currentAccountId == accountId &&
+          SocketService.instance.currentUser == owner) {
+        await Navigator.of(context).push<void>(
+          MaterialPageRoute<void>(
+            builder: (_) => const TemporaryContactScreen(),
+          ),
+        );
+      }
+    } finally {
+      _incomingSharePickerOpen = false;
+      if (mounted && IncomingShareService.instance.pending != null) {
+        _handleIncomingShare();
+      }
+    }
+  }
 
   void _handlePendingContactLink() {
+    if (!mounted ||
+        !SocketService.instance.isAuthenticated ||
+        SocketService.instance.currentAccountId == null)
+      return;
+    final temporaryToken = ContactLinkService.instance
+        .takePendingTemporaryToken();
+    if (temporaryToken != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted ||
+            !SocketService.instance.isAuthenticated ||
+            SocketService.instance.currentAccountId == null)
+          return;
+        Navigator.of(context).push(
+          MaterialPageRoute<void>(
+            builder: (_) =>
+                TemporaryContactScreen(initialToken: temporaryToken),
+          ),
+        );
+      });
+      return;
+    }
     final username = ContactLinkService.instance.takePendingUsername()?.trim();
     if (!mounted || username == null || username.isEmpty) return;
 
@@ -160,12 +298,17 @@ class _ChatListScreenState extends State<ChatListScreen> {
   void initState() {
     super.initState();
     _presence = PresenceTracker()..addListener(_handlePresenceChanged);
+    TemporaryChatHub.instance.attach();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _offerRecoverySetup();
     });
     unawaited(_restoreContactsWidth());
 
     ContactLinkService.instance.addListener(_handlePendingContactLink);
+    IncomingShareService.instance.addListener(_handleIncomingShare);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _handleIncomingShare();
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _handlePendingContactLink();
     });
@@ -210,6 +353,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
   @override
   void dispose() {
     ContactLinkService.instance.removeListener(_handlePendingContactLink);
+    IncomingShareService.instance.removeListener(_handleIncomingShare);
     SocketService.instance.removeMessageHandler(_handleMessage);
     _presence
       ..removeListener(_handlePresenceChanged)
@@ -926,13 +1070,17 @@ class _ChatListScreenState extends State<ChatListScreen> {
               id.isNotEmpty &&
               incoming['e2ee'] == true &&
               SocketService.instance.currentUser?.trim() == currentUser) {
-            final persistedForAck = StorageService
-                .getMessagesVisibleForOwner(currentUser, from)
-                .any((stored) =>
-                    stored['id']?.toString().trim() == id &&
-                    stored['from']?.toString().trim() == from &&
-                    stored['to']?.toString().trim() == currentUser &&
-                    stored['e2ee'] == true);
+            final persistedForAck =
+                StorageService.getMessagesVisibleForOwner(
+                  currentUser,
+                  from,
+                ).any(
+                  (stored) =>
+                      stored['id']?.toString().trim() == id &&
+                      stored['from']?.toString().trim() == from &&
+                      stored['to']?.toString().trim() == currentUser &&
+                      stored['e2ee'] == true,
+                );
             if (persistedForAck) {
               SocketService.instance.sendMessageDelivered(
                 messageId: id,
@@ -2130,6 +2278,70 @@ class _ChatListScreenState extends State<ChatListScreen> {
         bottom: false,
         child: Column(
           children: [
+            if (widget.enigmaEnded && _showEnigmaEndNotice)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(14, 12, 14, 4),
+                child: Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF111F32),
+                    borderRadius: BorderRadius.circular(18),
+                    border: Border.all(color: FenyvoPalette.gold, width: 1.4),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Row(
+                        children: [
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(13),
+                            child: Image.asset(
+                              'assets/images/fenyvo_enigma_hood.png',
+                              height: 52,
+                              width: 52,
+                              fit: BoxFit.cover,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('ENIGMA', style: TextStyle(color: FenyvoPalette.gold, fontSize: 12, letterSpacing: 1.5, fontWeight: FontWeight.w700)),
+                                const SizedBox(height: 4),
+                                Text(
+                                  widget.enigmaPeerEnded ? 'Собеседник завершил анонимный чат' : 'Анонимный чат завершён',
+                                  style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold),
+                                ),
+                              ],
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: 'Скрыть уведомление',
+                            onPressed: () => setState(() => _showEnigmaEndNotice = false),
+                            icon: const Icon(Icons.close_rounded, color: FenyvoPalette.gold),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      const Text('Сеанс закрыт для обоих участников. Старая ссылка больше не действует.', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                      const SizedBox(height: 10),
+                      FilledButton.icon(
+                        onPressed: () => Navigator.of(context).push(
+                          MaterialPageRoute<void>(builder: (_) => const TemporaryContactScreen()),
+                        ),
+                        style: FilledButton.styleFrom(
+                          backgroundColor: FenyvoPalette.gold,
+                          foregroundColor: const Color(0xFF0D1929),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(13)),
+                        ),
+                        icon: const Icon(Icons.add_comment_rounded),
+                        label: const Text('Новый анонимный чат'),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 14, 12, 12),
               child: Row(
@@ -2599,10 +2811,8 @@ class _ChatListScreenState extends State<ChatListScreen> {
   );
 
   Future<void> _showCommandActions() async {
-    final action = await showModalBottomSheet<String>(
-      context: context,
-      showDragHandle: true,
-      builder: (context) => SafeArea(
+    // Share one set of actions between the mobile sheet and desktop dialog.
+    Widget commandMenu(BuildContext context) => SafeArea(
         child: Padding(
           padding: const EdgeInsets.fromLTRB(12, 2, 12, 16),
           child: Column(
@@ -2636,6 +2846,129 @@ class _ChatListScreenState extends State<ChatListScreen> {
                 subtitle: Text(_tr('newGroupChat')),
                 onTap: () => Navigator.pop(context, 'group'),
               ),
+              Container(
+                margin: const EdgeInsets.symmetric(vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF112239),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: FenyvoPalette.gold, width: 1.6),
+                  boxShadow: [
+                    BoxShadow(
+                      color: FenyvoPalette.gold.withValues(alpha: 0.24),
+                      blurRadius: 18,
+                      spreadRadius: 1,
+                    ),
+                  ],
+                ),
+                child: Material(
+                  color: Colors.transparent,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(20),
+                    onTap: () => Navigator.pop(context, 'temporary'),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 12, 12, 10),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.center,
+                            children: [
+                              Image.asset(
+                                'assets/images/fenyvo_enigma_hood.png',
+                                width: 68,
+                                height: 68,
+                                fit: BoxFit.contain,
+                                errorBuilder: (_, __, ___) => const Icon(
+                                  Icons.privacy_tip_outlined,
+                                  color: FenyvoPalette.gold,
+                                  size: 48,
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              const Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'ENIGMA',
+                                      style: TextStyle(
+                                        color: FenyvoPalette.gold,
+                                        fontWeight: FontWeight.w900,
+                                        fontSize: 19,
+                                        letterSpacing: 1.4,
+                                      ),
+                                    ),
+                                    SizedBox(height: 4),
+                                    Text(
+                                      'Временные и скрытые чаты',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF0D1929),
+                                  border: Border.all(color: FenyvoPalette.gold),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: const Text(
+                                  'НОВОЕ',
+                                  style: TextStyle(color: FenyvoPalette.gold, fontSize: 9, fontWeight: FontWeight.w700),
+                                ),
+                              ),
+                              const Icon(
+                                Icons.chevron_right_rounded,
+                                color: FenyvoPalette.gold,
+                                size: 32,
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 7),
+                          const Divider(color: FenyvoPalette.gold, height: 1),
+                          const SizedBox(height: 9),
+                          const Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Icon(Icons.shield_outlined, color: FenyvoPalette.gold, size: 16),
+                              Text('Анонимно', style: TextStyle(fontSize: 10)),
+                              Icon(Icons.timer_outlined, color: FenyvoPalette.gold, size: 16),
+                              Text('Ограничено по времени', style: TextStyle(fontSize: 10)),
+                              Icon(Icons.lock_outline, color: FenyvoPalette.gold, size: 16),
+                              Text('E2EE', style: TextStyle(fontSize: 10)),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: AnimatedBuilder(
+                              animation: TemporaryChatHub.instance,
+                              builder: (context, _) {
+                                final count = TemporaryChatHub.instance.activeCount;
+                                final unread = TemporaryChatHub.instance.unreadCount;
+                                final pending = TemporaryChatHub.instance.pendingCount;
+                                return TemporaryTrustText(
+                                  pending > 0
+                                      ? '$count · $pending ждут'
+                                      : (unread > 0 ? '$count · $unread новых' : '$count активных'),
+                                  style: const TextStyle(
+                                    color: FenyvoPalette.gold,
+                                    fontSize: 11,
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
               ListTile(
                 leading: const Icon(Icons.sync_rounded),
                 title: Text(_tr('refreshConnection')),
@@ -2651,9 +2984,71 @@ class _ChatListScreenState extends State<ChatListScreen> {
             ],
           ),
         ),
-      ),
-    );
+      );
+
+    final desktopCommandMenu =
+        Theme.of(context).platform == TargetPlatform.windows &&
+        MediaQuery.sizeOf(context).width >= 900;
+    final action = desktopCommandMenu
+        ? await showDialog<String>(
+            context: context,
+            builder: (dialogContext) => Dialog(
+              backgroundColor: const Color(0xFF1B304A),
+              insetPadding: const EdgeInsets.all(24),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: 600,
+                  maxHeight: MediaQuery.sizeOf(dialogContext).height * 0.82,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: IconButton(
+                        tooltip: 'Close',
+                        onPressed: () => Navigator.of(dialogContext).pop(),
+                        icon: const Icon(
+                          Icons.close_rounded,
+                          color: FenyvoPalette.gold,
+                        ),
+                      ),
+                    ),
+                    Flexible(
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                        child: commandMenu(dialogContext),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          )
+        : await showModalBottomSheet<String>(
+            context: context,
+            showDragHandle: true,
+            builder: commandMenu,
+          );
     if (!mounted || action == null) return;
+    if (action == 'temporary') {
+      final socket = SocketService.instance;
+      if (!socket.isAuthenticated || socket.currentAccountId == null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: TemporaryTrustText('Войдите в аккаунт, чтобы открыть временный контакт'),
+          ),
+        );
+        return;
+      }
+      await Navigator.of(context).push(
+        MaterialPageRoute<void>(builder: (_) => const TemporaryContactScreen()),
+      );
+      return;
+    }
     if (action == 'pulse') await _showPulseRequests();
     if (action == 'group') await _openCreateGroup();
     if (action == 'refresh') await _refreshChats();
@@ -3100,6 +3495,34 @@ class _ChatListScreenState extends State<ChatListScreen> {
                       const SizedBox(height: 22),
                       const FenyvoBrand(compact: true),
                       const SizedBox(height: 34),
+                      // FENYVO COMMAND is available on desktop as well as mobile.
+                      Tooltip(
+                        message: 'FENYVO COMMAND · ENIGMA',
+                        child: InkWell(
+                          key: const ValueKey('fenyvo-desktop-command-button'),
+                          onTap: _showCommandActions,
+                          borderRadius: BorderRadius.circular(14),
+                          child: Container(
+                            width: 50,
+                            height: 50,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: FenyvoPalette.gold,
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(
+                                color: const Color(0xFFE3C87C),
+                                width: 1.5,
+                              ),
+                            ),
+                            child: const Icon(
+                              Icons.shield_outlined,
+                              size: 28,
+                              color: FenyvoPalette.onGold,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
                       _railButton(
                         0,
                         Icons.chat_bubble_outline_rounded,

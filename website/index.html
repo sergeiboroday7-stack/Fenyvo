@@ -31,10 +31,10 @@
     "name": "Fenyvo",
     "applicationCategory": "CommunicationApplication",
     "operatingSystem": "Android, Windows",
-    "softwareVersion": "1.8.2 (Android 6296, Windows 6296)",
+    "softwareVersion": "1.8.2 (Android 16329, Windows 16329)",
     "description": "Мессенджер для личных и групповых чатов, звонков, групповых эфиров, файлов и медиа.",
     "url": "https://fenyvo.com/",
-    "downloadUrl": "https://fenyvo.com/download/Fenyvo-1.8.2-arm64.apk",
+    "downloadUrl": "https://fenyvo.com/download/FENYVO-Android-1.8.2-16329-ENIGMA-arm64.apk",
     "image": "https://fenyvo.com/assets/fenyvo-promo-4249.png",
     "offers": {
       "@type": "Offer",
@@ -72,6 +72,16 @@
 
     /* FENYVO real screenshots gallery — original client images */
     .real-gallery{padding-top:60px;padding-bottom:85px}.real-gallery-controls{display:flex;gap:10px;margin:0 0 22px}.real-gallery-tab{cursor:pointer;padding:12px 20px;border:1px solid var(--line);border-radius:14px;background:#0b1d2d;color:var(--muted);font-weight:800}.real-gallery-tab.is-active{color:#10120d;background:var(--gold);border-color:var(--gold)}.real-gallery-tab span{opacity:.7;font-size:12px;margin-left:8px}.real-gallery-track{display:flex;gap:18px;overflow-x:auto;scroll-snap-type:x mandatory;padding:4px 4px 22px;scrollbar-color:var(--gold2) var(--panel)}.real-gallery-track[hidden]{display:none}.real-shot{flex:0 0 235px;position:relative;display:flex;flex-direction:column;text-decoration:none;scroll-snap-align:start;overflow:hidden;border:1px solid rgba(231,186,85,.3);border-radius:22px;background:#0c2031;box-shadow:0 15px 36px rgba(0,0,0,.22);transition:transform .2s,border-color .2s}.real-shot:hover,.real-shot:focus-visible{transform:translateY(-3px);border-color:var(--gold)}.real-shot img{display:block;width:100%;height:415px;object-fit:contain;background:linear-gradient(145deg,#142b40,#091623)}.real-shot span[data-gallery-key]{display:block;padding:12px 15px;color:#e4d1a5;font-size:13px;font-weight:700}.real-shot-open{position:absolute;right:11px;top:10px;width:29px;height:29px;display:grid;place-items:center;border-radius:9px;background:rgba(6,17,28,.9);color:var(--gold)}.real-shot--windows{flex-basis:425px}.real-shot--windows img{height:270px}.real-gallery-footnote{font-size:13px;color:var(--muted);margin:10px 0 0}@media(max-width:600px){.real-gallery{padding-top:36px}.real-shot{flex-basis:200px}.real-shot img{height:350px}.real-shot--windows{flex-basis:min(85vw,370px)}.real-shot--windows img{height:225px}}@media(prefers-reduced-motion:reduce){.real-shot{transition:none}}
+    /* FENYVO temporary invite landing: only active on /t/<64 hex> */
+    .temporary-invite{max-width:840px;margin:clamp(28px,5vw,70px) auto 88px;padding:clamp(24px,5vw,48px);box-shadow:0 30px 90px rgba(0,0,0,.24)}
+    .temporary-invite .kicker{display:block;margin-bottom:15px}
+    .temporary-invite h2{font-size:clamp(27px,4.5vw,39px);line-height:1.15;margin-bottom:14px}
+    .temporary-invite .actions{justify-content:center;gap:12px;margin:18px 0 18px}
+    .temporary-invite .invite-hint{font-size:14px;max-width:610px;margin:14px auto 0}
+    .temporary-invite .invite-error{color:var(--danger)}
+    .temporary-invite [hidden]{display:none!important}
+    body.is-temporary-invite main > :not(#temporary-invite){display:none!important}
+    body.is-temporary-invite .navlinks a[href^="#"]{display:none!important}
   </style>
 </head>
 <body>
@@ -80,17 +90,27 @@
     <nav class="navlinks" aria-label="Основная навигация"><a href="#features">Возможности</a><a href="#interface">Интерфейс</a><a href="#security">Безопасность</a><label class="language-control" for="language-select"><span class="language-icon" aria-hidden="true">🌐</span><span class="language-caption">Язык:</span><select id="language-select" aria-label="Язык сайта"><option value="auto">Как на устройстве</option><option value="ru">Русский</option><option value="uk">Українська</option><option value="en">English</option></select></label><a class="button secondary" href="#download">Скачать</a></nav>
   </header>
   <main id="top">
+      <section class="wrap contact-invite temporary-invite" id="temporary-invite" hidden aria-labelledby="temporary-invite-title">
+        <span class="kicker" id="temporary-invite-kicker">Временный защищённый контакт</span>
+        <h2 id="temporary-invite-title">Вас пригласили в FENYVO</h2>
+        <p id="temporary-invite-description">Откройте приглашение в приложении. Подключение к временному чату произойдёт только после вашего подтверждения.</p>
+        <div class="actions" id="temporary-invite-actions">
+          <a class="button primary" id="temporary-invite-open" href="#">Открыть в FENYVO</a>
+          <button class="button secondary" id="temporary-invite-download" type="button" data-download-platform="android" data-download-url="/download/FENYVO-Android-1.8.2-16329-ENIGMA-arm64.apk">Скачать FENYVO для Android</button>
+        </div>
+        <p class="invite-hint" id="temporary-invite-help">Если приложения ещё нет: установите FENYVO, вернитесь в Telegram к этому приглашению и нажмите ссылку снова. Копировать код не требуется.</p>
+      </section>
     <section class="wrap contact-invite" id="contact-invite" hidden>
       <h2>Вам поделились контактом <span class="gold" id="contact-name"></span></h2>
       <p>Если Fenyvo уже установлен, откройте карточку пользователя. Если приложения нет — установите его, вернитесь на эту страницу и нажмите «Открыть контакт» ещё раз.</p>
-      <div class="actions"><a class="button primary" id="contact-open" href="#">Открыть контакт в Fenyvo</a><button class="button secondary" type="button" data-download-platform="android" data-download-url="/download/Fenyvo-1.8.2-arm64.apk">Скачать для Android</button></div>
+      <div class="actions"><a class="button primary" id="contact-open" href="#">Открыть контакт в Fenyvo</a><button class="button secondary" type="button" data-download-platform="android" data-download-url="/download/FENYVO-Android-1.8.2-16329-ENIGMA-arm64.apk">Скачать для Android</button></div>
     </section>
     <div class="wrap hero">
       <div>
-        <div class="eyebrow"><span class="dot"></span>Тестовая версия 1.8.2 · Android 6296 · Windows 6296</div>
+        <div class="eyebrow"><span class="dot"></span>Тестовая версия 1.8.2 · Android 16329 · Windows 16329</div>
         <h1>Общение без <span class="gold">лишнего шума</span></h1>
         <p class="lead">Личные и групповые чаты, файлы, голосовые сообщения, аудио- и видеозвонки — в одном приложении Fenyvo.</p>
-        <div class="actions"><button class="button primary" type="button" data-download-platform="android" data-download-url="/download/Fenyvo-1.8.2-arm64.apk">↓ Скачать для Android</button><button class="button secondary" type="button" data-download-platform="windows" data-download-url="/download/Fenyvo-1.8.2-windows-x64.zip">↓ Скачать для Windows</button><button class="button secondary" id="share-fenyvo" type="button">↗ Поделиться Fenyvo</button><a class="button secondary" href="#features">Посмотреть возможности</a></div>
+        <div class="actions"><button class="button primary" type="button" data-download-platform="android" data-download-url="/download/FENYVO-Android-1.8.2-16329-ENIGMA-arm64.apk">↓ Скачать для Android</button><button class="button secondary" type="button" data-download-platform="windows" data-download-url="/download/FENYVO-Windows-1.8.2-16329-ENIGMA.zip">↓ Скачать для Windows</button><button class="button secondary" id="share-fenyvo" type="button">↗ Поделиться Fenyvo</button><a class="button secondary" href="#features">Посмотреть возможности</a></div>
         <div class="mini-meta"><span><b class="check">✓</b> Android ARM64</span><span><b class="check">✓</b> Windows x64</span><span><b class="check">✓</b> SHA-256 опубликованы</span></div>
       </div>
       <div class="phone-wrap" aria-label="Пример интерфейса Fenyvo">
@@ -146,11 +166,11 @@
       </div>
     </section>
     <section id="security"><div class="wrap privacy"><div class="section-head"><div class="kicker">Безопасность</div><h2>Проверяемая сборка</h2><p>Для опубликованного APK доступна контрольная сумма SHA‑256. Она позволяет убедиться, что файл не был изменён после публикации.</p></div><div class="privacy-list"><div class="privacy-item"><span class="shield">✓</span><div><b>Без привязки к номеру телефона</b><span>Для общения используется учётная запись Fenyvo.</span></div></div><div class="privacy-item"><span class="shield">✓</span><div><b>Контрольная сумма APK</b><span>Хеш опубликован на странице и отдельным текстовым файлом.</span></div></div><div class="privacy-item"><span class="shield">✓</span><div><b>Защищённое соединение</b><span>Публичный клиент подключается к серверу через WSS/HTTPS.</span></div></div></div></div></section>
-    <section id="download"><div class="wrap"><div class="download-stats" aria-live="polite"><div class="download-stats-head"><div><div class="kicker">Fenyvo в цифрах</div><h2>Скачивания приложения</h2><p>Отдельный открытый счётчик для каждой платформы.</p></div><div class="download-stats-note">Считаются начатые скачивания с момента запуска счётчика.</div></div><div class="download-stat-grid"><div class="download-stat"><div class="download-stat-icon">A</div><div><b id="download-count-android">—</b><span>Android · скачиваний начато</span></div></div><div class="download-stat"><div class="download-stat-icon">W</div><div><b id="download-count-windows">—</b><span>Windows · скачиваний начато</span></div></div><div class="download-stat ios"><div class="download-stat-icon">i</div><div><b id="download-count-ios">—</b><span>iPhone · версия готовится</span></div></div></div></div><div class="download-panel"><div><div class="kicker">Android и Windows</div><h2>Установите Fenyvo</h2><p>Для Android доступен подписанный APK ARM64, для Windows — полный x64-комплект в ZIP-архиве.</p><div class="actions"><button class="button primary" type="button" data-download-platform="android" data-download-url="/download/Fenyvo-1.8.2-arm64.apk">↓ Android APK · 74,2 МБ</button><button class="button secondary" type="button" data-download-platform="windows" data-download-url="/download/Fenyvo-1.8.2-windows-x64.zip">↓ Windows ZIP · 29,7 МБ</button></div><div class="steps"><div class="step">Скачивайте приложение только с fenyvo.com.</div><div class="step">На Android разрешите браузеру установку APK из этого источника.</div><div class="step">На Windows распакуйте ZIP полностью и запустите <b>Install-Fenyvo.cmd</b>.</div></div></div><div class="release"><div class="release-row"><span>Версия</span><b>1.8.2 · тестовая</b></div><div class="release-row"><span>Android</span><b>build 6296 · ARM64</b></div><div class="release-row"><span>Windows</span><b>build 6296 · x64</b></div><div class="hash-box"><div class="hash-label"><span>Android SHA‑256</span><button class="copy" type="button" data-copy-target="sha-android">Копировать</button></div><code class="hash" id="sha-android">44B16A7AE0E64B2AC93A3AB14AF09EFF03BDC7CF4F8BF80935B0E0AAD0E11994</code><a class="hash-link" href="/download/Fenyvo-1.8.2-arm64.sha256.txt" download>Скачать SHA‑256 Android</a></div><div class="hash-box"><div class="hash-label"><span>Windows SHA‑256</span><button class="copy" type="button" data-copy-target="sha-windows">Копировать</button></div><code class="hash" id="sha-windows">24090dc82dd44984ab1327dcb0b5be9a9c272d2b331089945fda26ba82af54a2</code><a class="hash-link" href="/download/Fenyvo-1.8.2-windows-x64.sha256.txt" download>Скачать SHA‑256 Windows</a></div></div></div></div></section>
+    <section id="download"><div class="wrap"><div class="download-stats" aria-live="polite"><div class="download-stats-head"><div><div class="kicker">Fenyvo в цифрах</div><h2>Скачивания приложения</h2><p>Отдельный открытый счётчик для каждой платформы.</p></div><div class="download-stats-note">Считаются начатые скачивания с момента запуска счётчика.</div></div><div class="download-stat-grid"><div class="download-stat"><div class="download-stat-icon">A</div><div><b id="download-count-android">—</b><span>Android · скачиваний начато</span></div></div><div class="download-stat"><div class="download-stat-icon">W</div><div><b id="download-count-windows">—</b><span>Windows · скачиваний начато</span></div></div><div class="download-stat ios"><div class="download-stat-icon">i</div><div><b id="download-count-ios">—</b><span>iPhone · версия готовится</span></div></div></div></div><div class="download-panel"><div><div class="kicker">Android и Windows</div><h2>Установите Fenyvo</h2><p>Для Android доступен подписанный APK ARM64, для Windows — полный x64-комплект в ZIP-архиве.</p><div class="actions"><button class="button primary" type="button" data-download-platform="android" data-download-url="/download/FENYVO-Android-1.8.2-16329-ENIGMA-arm64.apk">↓ Android APK · 60,4 МБ</button><button class="button secondary" type="button" data-download-platform="windows" data-download-url="/download/FENYVO-Windows-1.8.2-16329-ENIGMA.zip">↓ Windows ZIP · 30,6 МБ</button></div><div class="steps"><div class="step">Скачивайте приложение только с fenyvo.com.</div><div class="step">На Android разрешите браузеру установку APK из этого источника.</div><div class="step">На Windows распакуйте ZIP полностью и запустите <b>Install-Fenyvo.cmd</b>.</div></div></div><div class="release"><div class="release-row"><span>Версия</span><b>1.8.2 · тестовая</b></div><div class="release-row"><span>Android</span><b>build 16329 · ARM64</b></div><div class="release-row"><span>Windows</span><b>build 16329 · x64</b></div><div class="hash-box"><div class="hash-label"><span>Android SHA‑256</span><button class="copy" type="button" data-copy-target="sha-android">Копировать</button></div><code class="hash" id="sha-android">FE8FE6FEE12EF60C911BDCF557F958B1DAB74DDDD0DD96D8395B13EA094EB715</code><a class="hash-link" href="/download/FENYVO-Android-1.8.2-16329-ENIGMA-arm64.apk.sha256.txt" download>Скачать SHA‑256 Android</a></div><div class="hash-box"><div class="hash-label"><span>Windows SHA‑256</span><button class="copy" type="button" data-copy-target="sha-windows">Копировать</button></div><code class="hash" id="sha-windows">23A6DCBB0EEF67C0C68920B6D6B3E70967D6723FAFCC2EA563879CC77AB459CD</code><a class="hash-link" href="/download/FENYVO-Windows-1.8.2-16329-ENIGMA.zip.sha256.txt" download>Скачать SHA‑256 Windows</a></div></div></div></div></section>
   </main>
   <footer><div class="wrap footer-row"><div class="footer-brand notranslate" translate="no">Fenyvo</div><div class="footer-links"><a href="/privacy.html">Конфиденциальность</a><a href="/terms.html">Условия</a><a href="/acceptable-use.html">Правила</a><a href="/support.html">Поддержка</a></div><div>© 2026 <span class="notranslate" translate="no">Fenyvo</span></div></div></footer>
   <dialog class="download-dialog" id="download-dialog" aria-labelledby="download-title"><div class="dialog-body"><h2 id="download-title">Перед загрузкой Fenyvo</h2><p>Приложение предназначено для пользователей от 16 лет. Вы отвечаете за отправляемый контент и обязуетесь использовать Fenyvo законно.</p><label class="consent"><input id="legal-terms" type="checkbox"><span>Я принимаю <a href="/terms.html" target="_blank" rel="noopener">Условия использования</a> и подтверждаю ознакомление с <a href="/privacy.html" target="_blank" rel="noopener">Политикой конфиденциальности</a>.</span></label><label class="consent"><input id="legal-age" type="checkbox"><span>Мне исполнилось 16 лет.</span></label><div class="dialog-actions"><button class="button secondary" type="button" id="legal-cancel">Отмена</button><button class="button primary" type="button" id="legal-download" disabled>Принять и скачать</button></div></div></dialog>
-  <script src="/assets/fenyvo-i18n.js?v=6296"></script>
+  <script src="/assets/fenyvo-i18n.js?v=16329w124"></script>
   <script src="/assets/download-counters.js?v=20261011"></script>
   <script>
     document.querySelectorAll('[data-copy-target]').forEach(function(button){button.addEventListener('click',async function(){const value=document.getElementById(this.dataset.copyTarget).textContent.trim();try{await navigator.clipboard.writeText(value);this.textContent=window.fenyvoI18n.t('copied');setTimeout(()=>this.textContent=window.fenyvoI18n.t('copy'),1800)}catch(e){window.prompt(window.fenyvoI18n.t('copyPrompt'),value)}})});
@@ -161,6 +181,73 @@
     confirmDownload.addEventListener('click',async()=>{if(confirmDownload.disabled||!pendingDownload)return;dialog.close();if(window.fenyvoDownloads){try{Promise.resolve(window.fenyvoDownloads.register(pendingPlatform)).catch(()=>{});}catch(_){}}const link=document.createElement('a');link.href=pendingDownload;link.download=pendingDownload.split('/').pop();document.body.appendChild(link);link.click();link.remove()});
     const shareButton=document.getElementById('share-fenyvo');
     shareButton.addEventListener('click',async()=>{const title='Fenyvo';const text=window.fenyvoI18n.t('shareText');const url='https://fenyvo.com/';if(navigator.share){try{await navigator.share({title:title,text:text,url:url});return}catch(error){if(error&&error.name==='AbortError')return}}const value=text+'\n'+url;try{await navigator.clipboard.writeText(value);shareButton.textContent=window.fenyvoI18n.t('shareCopied');setTimeout(()=>shareButton.textContent=window.fenyvoI18n.t('shareFenyvo'),1800)}catch(error){window.prompt(window.fenyvoI18n.t('sharePrompt'),value)}});
+    // This route must mirror TemporaryInviteLink.tokenFromUri in the Android app:
+    // exactly https://fenyvo.com/t/<64 hexadecimal characters>, no query/fragment.
+    (function(){
+      const pathname=window.location.pathname;
+      if(!pathname.startsWith('/t/'))return;
+      const panel=document.getElementById('temporary-invite');
+      const open=document.getElementById('temporary-invite-open');
+      const actions=document.getElementById('temporary-invite-actions');
+      const parsed=/^\/t\/([a-fA-F0-9]{64})$/.exec(pathname);
+      const valid=Boolean(parsed)&&!window.location.search&&!window.location.hash;
+      document.body.classList.add('is-temporary-invite');
+      panel.hidden=false;
+      if(valid){
+        const token=parsed[1].toLowerCase();
+        const inviteUrl='https://fenyvo.com/t/'+token;
+        // Chrome/Android requires the real host here (not intent://t/...).
+        // This is a user-clicked button; never force redirects or auto-join.
+        open.href='intent://fenyvo.com/t/'+token+'#Intent;scheme=https;package=com.fenyvo.app;action=android.intent.action.VIEW;category=android.intent.category.BROWSABLE;S.browser_fallback_url='+encodeURIComponent(inviteUrl)+';end';
+      }else{
+        actions.hidden=true;
+      }
+      const strings={
+        ru:{
+          kicker:'Временный защищённый контакт',title:'Вас пригласили в FENYVO',
+          description:'Откройте приглашение в приложении. Подключение к временному чату произойдёт только после вашего подтверждения.',
+          open:'Открыть в FENYVO',download:'Скачать FENYVO для Android',
+          help:'Если приложения ещё нет: установите FENYVO, вернитесь в Telegram к этому приглашению и нажмите ссылку снова. Копировать код не требуется.',
+          invalidTitle:'Неверная ссылка приглашения',invalidDescription:'Проверьте адрес или запросите у отправителя новую ссылку.',
+          pageTitle:'Приглашение в FENYVO'
+        },
+        uk:{
+          kicker:'Тимчасовий захищений контакт',title:'Вас запросили до FENYVO',
+          description:'Відкрийте запрошення в застосунку. Підключення до тимчасового чату відбудеться лише після вашого підтвердження.',
+          open:'Відкрити у FENYVO',download:'Завантажити FENYVO для Android',
+          help:'Якщо застосунок ще не встановлено: встановіть FENYVO, поверніться в Telegram до цього запрошення та натисніть посилання ще раз. Копіювати код не потрібно.',
+          invalidTitle:'Недійсне посилання запрошення',invalidDescription:'Перевірте адресу або попросіть відправника надіслати нове посилання.',
+          pageTitle:'Запрошення до FENYVO'
+        },
+        en:{
+          kicker:'Temporary secure contact',title:'You have been invited to FENYVO',
+          description:'Open the invitation in the app. You will only join the temporary chat after confirming.',
+          open:'Open in FENYVO',download:'Download FENYVO for Android',
+          help:'If FENYVO is not installed: install it, return to this invitation in Telegram, and tap the link again. You do not need to copy a code.',
+          invalidTitle:'Invalid invitation link',invalidDescription:'Check the address or ask the sender for a new invitation.',
+          pageTitle:'FENYVO invitation'
+        }
+      };
+      function updateTemporaryInviteLanguage(){
+        const selector=document.getElementById('language-select');
+        const selected=selector&&selector.value!=='auto'?selector.value:null;
+        const preferred=(selected||document.documentElement.lang||navigator.language||'ru').toLowerCase().split('-')[0];
+        const t=strings[preferred]||strings.ru;
+        document.getElementById('temporary-invite-kicker').textContent=t.kicker;
+        document.getElementById('temporary-invite-title').textContent=valid?t.title:t.invalidTitle;
+        document.getElementById('temporary-invite-description').textContent=valid?t.description:t.invalidDescription;
+        document.getElementById('temporary-invite-description').classList.toggle('invite-error',!valid);
+        open.textContent=t.open;
+        document.getElementById('temporary-invite-download').textContent=t.download;
+        const help=document.getElementById('temporary-invite-help');
+        help.textContent=valid?t.help:'';
+        help.hidden=!valid;
+        document.title=t.pageTitle+' — FENYVO';
+      }
+      window.addEventListener('fenyvo:languagechange',updateTemporaryInviteLanguage);
+      document.getElementById('language-select').addEventListener('change',updateTemporaryInviteLanguage);
+      updateTemporaryInviteLanguage();
+    })();
     (function(){
       const match=window.location.pathname.match(/^\/u\/([^/]+)\/?$/);
       if(!match)return;
@@ -170,7 +257,7 @@
       const invite=document.getElementById('contact-invite');
       document.getElementById('contact-name').textContent='@'+username;
       const fallback='https://fenyvo.com/u/'+encodeURIComponent(username);
-      document.getElementById('contact-open').href='intent://u/'+encodeURIComponent(username)+'#Intent;scheme=https;package=com.fenyvo.app;S.browser_fallback_url='+encodeURIComponent(fallback)+';end';
+      document.getElementById('contact-open').href='intent://fenyvo.com/u/'+encodeURIComponent(username)+'#Intent;scheme=https;package=com.fenyvo.app;S.browser_fallback_url='+encodeURIComponent(fallback)+';end';
       invite.hidden=false;
       document.title=window.fenyvoI18n.contactTitle(username);
     })();
